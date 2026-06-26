@@ -1,0 +1,44 @@
+{
+    "waypoints": [
+        {
+            "x": 0.5,
+            "y": 0.5,
+            "yaw": 0.0,
+            "name": "A",
+            "description": "Starting point"
+        },
+        {
+            "x": 1.5,
+            "y": 0.5,
+            "yaw": 0.0,
+            "name": "B"
+        },
+        {
+            "x": 2.5,
+            "y": 1.5,
+            "yaw": 1.57,
+            "name": "C"
+        },
+        {
+            "x": 1.0,
+            "y": 2.0,
+            "yaw": 3.14,
+            "name": "D"
+        },
+        {
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "name": "HOME",
+            "description": "Return to start"
+        }
+    ],
+    "settings": {
+        "target_distance": 0.4,
+        "wait_at_waypoint_seconds": 2.0,
+        "wait_after_person_seconds": 10.0,
+        "intercept_enabled": true,
+        "intercept_min_range_m": 0.3,
+        "intercept_max_range_m": 5.0
+    }
+}

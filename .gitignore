@@ -1,0 +1,39 @@
+# ROS2 workspace exclusions
+build/
+install/
+log/
+
+# Python artifacts
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# VSCode/IDE settings
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Large files and models
+*.pt
+*.engine
+*.onnx
+*.bin
+*.gguf
+*.pb
+*.tflite
+*.weights
+*.bag
+
+# ROS2 specific
+*.db3
+*.mcap
