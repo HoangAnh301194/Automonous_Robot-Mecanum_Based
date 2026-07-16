@@ -21,7 +21,6 @@ def generate_launch_description():
     esp_baudrate = LaunchConfiguration('esp_baudrate')
     lidar_baudrate = LaunchConfiguration('lidar_baudrate')
     rf2o_freq = LaunchConfiguration('rf2o_freq')
-    esp_wheel_odom_mode = LaunchConfiguration('esp_wheel_odom_mode')
 
     use_esp = IfCondition(PythonExpression(["'", odom_source, "' == 'esp'"]))
     use_rf2o = IfCondition(PythonExpression(["'", odom_source, "' == 'rf2o'"]))
@@ -36,7 +35,6 @@ def generate_launch_description():
             'lidar_baudrate': lidar_baudrate,
             'esp_publish_tf': 'true',
             'esp_odom_topic': '/odom',
-            'esp_wheel_odom_mode': esp_wheel_odom_mode,
         }.items(),
         condition=use_esp,
     )
@@ -51,7 +49,6 @@ def generate_launch_description():
             'lidar_baudrate': lidar_baudrate,
             'esp_publish_tf': 'false',
             'esp_odom_topic': '/odom_esp_raw',
-            'esp_wheel_odom_mode': esp_wheel_odom_mode,
         }.items(),
         condition=use_rf2o,
     )
@@ -109,12 +106,8 @@ def generate_launch_description():
             default_value='20.0',
             description='RF2O update frequency in Hz.'
         ),
-        DeclareLaunchArgument(
-            'esp_wheel_odom_mode',
-            default_value='all_4',
-            description="ESP odom wheel mode: 'all_4' or 'wheels_1_4'."
-        ),
         hw_with_esp_odom,
         hw_with_rf2o_odom,
         rf2o_node,
     ])
+

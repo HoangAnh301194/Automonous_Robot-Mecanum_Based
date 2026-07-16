@@ -19,17 +19,28 @@ def _list_serial_ports():
     return sorted(glob.glob('/dev/ttyUSB*')) + sorted(glob.glob('/dev/ttyACM*'))
 
 
-def _is_esp32_port(port, baudrate=115200, timeout=1.0):
+def _is_esp32_port(port, baudrate=115200):
     if serial is None:
         return False
     try:
-        ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
-        time.sleep(1.0)
+        ser = serial.Serial(port, baudrate=baudrate, timeout=0.1)
         ser.reset_input_buffer()
-        ser.reset_output_buffer()
-        line = ser.readline().decode('utf-8', errors='ignore').strip()
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
+            line = ser.readline().decode('utf-8', errors='ignore').strip()
+            if not line:
+                continue
+            if line.startswith('V:') and 'EL:' in line:
+                ser.close()
+                return True
+            if line.startswith('E,'):
+                ser.close()
+                return True
+            if "ets Jun" in line or "rst:0x" in line or "boot:" in line:
+                ser.close()
+                return True
         ser.close()
-        return line.startswith('E,')
+        return False
     except Exception:
         return False
 
@@ -89,7 +100,6 @@ def generate_launch_description():
     lidar_baudrate = LaunchConfiguration('lidar_baudrate')
     esp_publish_tf = LaunchConfiguration('esp_publish_tf')
     esp_odom_topic = LaunchConfiguration('esp_odom_topic')
-    esp_wheel_odom_mode = LaunchConfiguration('esp_wheel_odom_mode')
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -126,11 +136,6 @@ def generate_launch_description():
             'esp_odom_topic',
             default_value='/odom',
             description='Output odom topic of ESP odom node.'
-        ),
-        DeclareLaunchArgument(
-            'esp_wheel_odom_mode',
-            default_value='all_4',
-            description="ESP odom wheel mode: 'all_4' or 'wheels_1_4'."
         ),
 
         Node(
@@ -174,7 +179,6 @@ def generate_launch_description():
                 'publish_tf': ParameterValue(esp_publish_tf, value_type=bool),
                 'esp_port': esp_port,
                 'esp_baudrate': ParameterValue(esp_baudrate, value_type=int),
-                'wheel_odom_mode': esp_wheel_odom_mode,
             }],
             remappings=[
                 ('/odom', esp_odom_topic),

@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot name="my_mecanum_robot">
+<robot name="my_diff_drive_robot">
 
   <!-- ========================= -->
   <!-- Materials -->
@@ -30,7 +30,6 @@
 
   <!-- ========================= -->
   <!-- Base Footprint -->
-  <!-- Giữ footprint nhưng làm link tối thiểu hợp lệ cho Gazebo -->
   <!-- ========================= -->
   <link name="base_footprint">
     <inertial>
@@ -45,7 +44,7 @@
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <origin xyz="0 0 0.08255" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -109,7 +108,7 @@
   </joint>
 
   <!-- ========================= -->
-  <!-- Laser -->
+  <!-- Laser (lùi 12cm v? sau) -->
   <!-- ========================= -->
   <link name="laser_link">
     <visual>
@@ -137,7 +136,7 @@
   <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser_link"/>
-    <origin xyz="0 0 0.08" rpy="0 0 0"/>
+    <origin xyz="-0.12 0 0.15" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -204,7 +203,7 @@
     <origin xyz="0 0 0.265" rpy="0 -0.0873 0"/>
   </joint>
 
-  <!-- Optical frame: giữ để dùng với camera pipeline -->
+  <!-- Optical frame -->
   <link name="camera_color_optical_frame">
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -222,144 +221,164 @@
   </joint>
 
   <!-- ========================= -->
-  <!-- Wheels -->
+  <!-- Wheels (Diff Drive 2 bánh) -->
   <!-- ========================= -->
-
-  <link name="wheel_fl_link">
+  <link name="wheel_left_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <cylinder radius="0.08255" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
-
     <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <cylinder radius="0.08255" length="0.05"/>
       </geometry>
     </collision>
-
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.30"/>
-      <inertia ixx="5e-4" ixy="0.0" ixz="0.0"
-               iyy="5e-4" iyz="0.0"
-               izz="3e-4"/>
+      <mass value="0.50"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
+               iyy="0.001" iyz="0.0"
+               izz="0.0005"/>
     </inertial>
   </link>
 
-  <joint name="wheel_fl_joint" type="continuous">
+  <joint name="wheel_left_joint" type="continuous">
     <parent link="base_link"/>
-    <child link="wheel_fl_link"/>
-    <origin xyz="0.12 0.13 -0.02" rpy="-1.5708 0 0"/>
+    <child link="wheel_left_link"/>
+    <origin xyz="0 0.29 -0.02" rpy="-1.5708 0 0"/>
     <axis xyz="0 0 1"/>
   </joint>
 
-  <link name="wheel_fr_link">
+  <link name="wheel_right_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <cylinder radius="0.08255" length="0.05"/>
       </geometry>
       <material name="black"/>
     </visual>
-
     <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <cylinder radius="0.08255" length="0.05"/>
       </geometry>
     </collision>
-
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.30"/>
-      <inertia ixx="5e-4" ixy="0.0" ixz="0.0"
-               iyy="5e-4" iyz="0.0"
-               izz="3e-4"/>
+      <mass value="0.50"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
+               iyy="0.001" iyz="0.0"
+               izz="0.0005"/>
     </inertial>
   </link>
 
-  <joint name="wheel_fr_joint" type="continuous">
+  <joint name="wheel_right_joint" type="continuous">
     <parent link="base_link"/>
-    <child link="wheel_fr_link"/>
-    <origin xyz="0.12 -0.13 -0.02" rpy="-1.5708 0 0"/>
+    <child link="wheel_right_link"/>
+    <origin xyz="0 -0.29 -0.02" rpy="-1.5708 0 0"/>
     <axis xyz="0 0 1"/>
   </joint>
 
-  <link name="wheel_rl_link">
+  <!-- ========================= -->
+  <!-- HC-SR04 Sonar Sensors     -->
+  <!-- ========================= -->
+  <!-- Sonar Center -->
+  <link name="sonar_center_link">
     <visual>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <box size="0.02 0.04 0.02"/>
       </geometry>
-      <material name="black"/>
+      <material name="blue"/>
     </visual>
-
     <collision>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <box size="0.02 0.04 0.02"/>
       </geometry>
     </collision>
-
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.30"/>
-      <inertia ixx="5e-4" ixy="0.0" ixz="0.0"
-               iyy="5e-4" iyz="0.0"
-               izz="3e-4"/>
+      <mass value="0.01"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>
   </link>
 
-  <joint name="wheel_rl_joint" type="continuous">
+  <joint name="sonar_center_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="wheel_rl_link"/>
-    <origin xyz="-0.12 0.13 -0.02" rpy="-1.5708 0 0"/>
-    <axis xyz="0 0 1"/>
+    <child link="sonar_center_link"/>
+    <origin xyz="0.30 0.0 0.05" rpy="0 0 0"/>
   </joint>
 
-  <link name="wheel_rr_link">
+  <!-- Sonar Left -->
+  <link name="sonar_left_link">
     <visual>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <box size="0.02 0.04 0.02"/>
       </geometry>
-      <material name="black"/>
+      <material name="blue"/>
     </visual>
-
     <collision>
       <geometry>
-        <cylinder radius="0.05" length="0.04"/>
+        <box size="0.02 0.04 0.02"/>
       </geometry>
     </collision>
-
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.30"/>
-      <inertia ixx="5e-4" ixy="0.0" ixz="0.0"
-               iyy="5e-4" iyz="0.0"
-               izz="3e-4"/>
+      <mass value="0.01"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
     </inertial>
   </link>
 
-  <joint name="wheel_rr_joint" type="continuous">
+  <joint name="sonar_left_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="wheel_rr_link"/>
-    <origin xyz="-0.12 -0.13 -0.02" rpy="-1.5708 0 0"/>
-    <axis xyz="0 0 1"/>
+    <child link="sonar_left_link"/>
+    <origin xyz="0.30 0.20 0.05" rpy="0 0 0.785398"/>
+  </joint>
+
+  <!-- Sonar Right -->
+  <link name="sonar_right_link">
+    <visual>
+      <geometry>
+        <box size="0.02 0.04 0.02"/>
+      </geometry>
+      <material name="blue"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.02 0.04 0.02"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+
+  <joint name="sonar_right_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="sonar_right_link"/>
+    <origin xyz="0.30 -0.20 0.05" rpy="0 0 -0.785398"/>
   </joint>
 
   <!-- ========================= -->
   <!-- Gazebo Simulation Plugins -->
   <!-- ========================= -->
-
-  <!-- Omnidirectional motion from /cmd_vel (x, y, yaw) + /odom + TF -->
   <gazebo>
-    <plugin name="gazebo_ros_planar_move" filename="libgazebo_ros_planar_move.so">
+    <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
       <ros>
-        <remapping>cmd_vel:=cmd_vel</remapping>
-        <remapping>odom:=odom</remapping>
+        <namespace>/</namespace>
       </ros>
       <update_rate>100.0</update_rate>
-      <publish_rate>30.0</publish_rate>
+      <left_joint>wheel_left_joint</left_joint>
+      <right_joint>wheel_right_joint</right_joint>
+      <wheel_separation>0.58</wheel_separation>
+      <wheel_diameter>0.1651</wheel_diameter>
+      <max_wheel_torque>20.0</max_wheel_torque>
+      <max_wheel_acceleration>1.0</max_wheel_acceleration>
       <publish_odom>true</publish_odom>
       <publish_odom_tf>true</publish_odom_tf>
+      <publish_wheel_tf>true</publish_wheel_tf>
       <odometry_frame>odom</odometry_frame>
       <robot_base_frame>base_footprint</robot_base_frame>
       <covariance_x>0.0005</covariance_x>
@@ -464,7 +483,7 @@
     </sensor>
   </gazebo>
 
-  <!-- RGB camera aligned with RealSense-like topic naming -->
+  <!-- RGB camera -->
   <gazebo reference="camera_link">
     <sensor name="rgb_camera_sensor" type="camera">
       <always_on>true</always_on>
@@ -491,7 +510,7 @@
       </plugin>
     </sensor>
 
-    <!-- Depth camera on same optical center -->
+    <!-- Depth camera -->
     <sensor name="depth_camera_sensor" type="depth">
       <always_on>true</always_on>
       <visualize>false</visualize>
@@ -522,4 +541,98 @@
     </sensor>
   </gazebo>
 
+  <!-- Sonar Center Gazebo -->
+  <gazebo reference="sonar_center_link">
+    <sensor type="ray" name="sonar_center_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.1309</min_angle>
+            <max_angle>0.1309</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.02</min>
+          <max>4.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="sonar_center_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <remapping>~/out:=sonar_center</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <frame_name>sonar_center_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- Sonar Left Gazebo -->
+  <gazebo reference="sonar_left_link">
+    <sensor type="ray" name="sonar_left_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.1309</min_angle>
+            <max_angle>0.1309</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.02</min>
+          <max>4.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="sonar_left_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <remapping>~/out:=sonar_left</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <frame_name>sonar_left_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
+  <!-- Sonar Right Gazebo -->
+  <gazebo reference="sonar_right_link">
+    <sensor type="ray" name="sonar_right_sensor">
+      <always_on>true</always_on>
+      <update_rate>10</update_rate>
+      <visualize>true</visualize>
+      <ray>
+        <scan>
+          <horizontal>
+            <samples>5</samples>
+            <resolution>1</resolution>
+            <min_angle>-0.1309</min_angle>
+            <max_angle>0.1309</max_angle>
+          </horizontal>
+        </scan>
+        <range>
+          <min>0.02</min>
+          <max>4.0</max>
+          <resolution>0.01</resolution>
+        </range>
+      </ray>
+      <plugin name="sonar_right_plugin" filename="libgazebo_ros_ray_sensor.so">
+        <ros>
+          <remapping>~/out:=sonar_right</remapping>
+        </ros>
+        <output_type>sensor_msgs/Range</output_type>
+        <frame_name>sonar_right_link</frame_name>
+      </plugin>
+    </sensor>
+  </gazebo>
+
 </robot>
+

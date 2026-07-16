@@ -39,7 +39,8 @@ from PyQt5.QtWidgets import (
 )
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import PoseStamped, Twist
+from action_msgs.srv import CancelGoal
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
@@ -52,6 +53,8 @@ from std_msgs.msg import Int32MultiArray, String
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+from map_editor import MapEditorDialog
 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -110,28 +113,37 @@ def _list_serial_ports():
     return dedup
 
 
-def _is_esp32_port(port, baudrate=115200, timeout=1.0):
+def _is_esp32_port(port, baudrate=115200):
     if serial is None:
         return False
-    ser = None
     try:
-        ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
-        time.sleep(1.0)
+        # Mở cổng với timeout ngắn để không bị treo (block) lâu
+        ser = serial.Serial(port, baudrate=baudrate, timeout=0.1)
         ser.reset_input_buffer()
-        ser.reset_output_buffer()
-        for _ in range(3):
+        
+        # Quét liên tục trong tối đa 3 giây
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
             line = ser.readline().decode("utf-8", errors="ignore").strip()
-            if line.startswith("E,"):
+            if not line:
+                continue
+            
+            # Các dấu hiệu nhận biết chắc chắn 100% là ESP32
+            if line.startswith("V:") and "EL:" in line:
+                ser.close()
                 return True
+            if line.startswith("E,"):
+                ser.close()
+                return True
+            # Dấu hiệu bootloader của mạch ESP32 khi vừa mở Serial
+            if "ets Jun" in line or "rst:0x" in line or "boot:" in line:
+                ser.close()
+                return True
+                
+        ser.close()
+        return False
     except Exception:
         return False
-    finally:
-        if ser is not None:
-            try:
-                ser.close()
-            except Exception:
-                pass
-    return False
 
 
 def _detect_esp_lidar_ports():
@@ -268,6 +280,11 @@ class RosInterface(Node):
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        
+        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel", 10)
+        self.cancel_nav2_client = self.create_client(CancelGoal, "navigate_to_pose/_action/cancel")
+        self.cancel_nav_through_client = self.create_client(CancelGoal, "navigate_through_poses/_action/cancel")
+        
         self.pose_timer = self.create_timer(0.05, self.publish_pose_from_tf)
 
     def log(self, msg):
@@ -414,6 +431,16 @@ class RosInterface(Node):
         self.log(
             f"G?i batch waypoint cho nhiemvuboss: {len(waypoints)} ?i?m lên /nhiemvuboss/waypoints_json"
         )
+
+    def cancel_nav2_goals(self):
+        req = CancelGoal.Request()
+        if self.cancel_nav2_client.wait_for_service(timeout_sec=0.1):
+            self.cancel_nav2_client.call_async(req)
+        if self.cancel_nav_through_client.wait_for_service(timeout_sec=0.1):
+            self.cancel_nav_through_client.call_async(req)
+        twist = Twist()
+        self.cmd_vel_pub.publish(twist)
+        self.log("Đã phát tín hiệu HỦY chạy Nav2 và dừng khẩn cấp!")
 
 
 class MapViewer(QLabel):
@@ -709,6 +736,7 @@ class MainWindow(QWidget):
     SLAM_LOCALIZATION = "slam_localization"
     AMCL = "amcl"
     NAV2 = "nav2"
+    NHIEMVUBOSS = "nhiemvuboss"
 
     def __init__(self):
         super().__init__()
@@ -758,11 +786,7 @@ class MainWindow(QWidget):
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
         self.cmb_esp_wheel_mode = QComboBox()
-        self.cmb_esp_wheel_mode.addItem("All wheels (1,2,3,4)", "all_4")
-        self.cmb_esp_wheel_mode.addItem("Only wheels 1 + 4", "wheels_1_4")
-        default_wheel_mode_idx = self.cmb_esp_wheel_mode.findData("wheels_1_4")
-        if default_wheel_mode_idx >= 0:
-            self.cmb_esp_wheel_mode.setCurrentIndex(default_wheel_mode_idx)
+        self.cmb_esp_wheel_mode.addItem("Vi sai 2 bánh (Hoverboard)", "diff_2")
         self.cmb_esp_wheel_mode.currentIndexChanged.connect(self.on_odom_source_changed)
 
         self.cmb_operation_mode = QComboBox()
@@ -796,10 +820,12 @@ class MainWindow(QWidget):
         self.cmb_map_files = QComboBox()
         self.cmb_map_files.currentIndexChanged.connect(self.on_selected_map_changed)
 
-        self.btn_choose_map_folder = QPushButton("Ch?n folder map")
+        self.btn_choose_map_folder = QPushButton("Chọn folder map")
         self.btn_refresh_maps = QPushButton("Refresh map list")
-        self.btn_choose_map_file = QPushButton("Ch?n map YAML th? công")
+        self.btn_choose_map_file = QPushButton("Chọn map YAML thủ công")
+        self.btn_open_map_editor = QPushButton("Mở Map Editor (Sửa lỗi dính cửa)")
         self.btn_choose_map_folder.clicked.connect(self.choose_map_folder)
+        self.btn_open_map_editor.clicked.connect(self.open_map_editor)
         self.btn_refresh_maps.clicked.connect(self.refresh_map_list)
         self.btn_choose_map_file.clicked.connect(self.choose_map_file)
 
@@ -825,16 +851,17 @@ class MainWindow(QWidget):
         map_layout.addWidget(self.btn_choose_map_folder, 1, 0)
         map_layout.addWidget(self.btn_refresh_maps, 1, 1)
         map_layout.addWidget(self.btn_choose_map_file, 1, 2)
-        map_layout.addWidget(self.cmb_map_files, 2, 0, 1, 3)
-        map_layout.addWidget(self.lbl_selected_map, 3, 0, 1, 3)
-        map_layout.addWidget(QLabel("Tên file save (không c?n .yaml):"), 4, 0, 1, 3)
-        map_layout.addWidget(self.edt_save_map_name, 5, 0, 1, 2)
-        map_layout.addWidget(self.btn_save_map, 5, 2)
-        map_layout.addWidget(self.btn_batch_mode, 6, 0)
-        map_layout.addWidget(self.btn_batch_undo, 6, 1)
-        map_layout.addWidget(self.btn_batch_clear, 6, 2)
-        map_layout.addWidget(self.btn_batch_send, 7, 0, 1, 3)
-        map_layout.addWidget(self.lbl_batch_info, 8, 0, 1, 3)
+        map_layout.addWidget(self.btn_open_map_editor, 2, 0, 1, 3)
+        map_layout.addWidget(self.cmb_map_files, 3, 0, 1, 3)
+        map_layout.addWidget(self.lbl_selected_map, 4, 0, 1, 3)
+        map_layout.addWidget(QLabel("Tên file save (không cần .yaml):"), 5, 0, 1, 3)
+        map_layout.addWidget(self.edt_save_map_name, 6, 0, 1, 2)
+        map_layout.addWidget(self.btn_save_map, 6, 2)
+        map_layout.addWidget(self.btn_batch_mode, 7, 0)
+        map_layout.addWidget(self.btn_batch_undo, 7, 1)
+        map_layout.addWidget(self.btn_batch_clear, 7, 2)
+        map_layout.addWidget(self.btn_batch_send, 8, 0, 1, 3)
+        map_layout.addWidget(self.lbl_batch_info, 9, 0, 1, 3)
         map_group.setLayout(map_layout)
 
         self.btn_start_platform = QPushButton("Start Layer 1 (Odom)")
@@ -846,6 +873,8 @@ class MainWindow(QWidget):
         self.btn_stop_nav2 = QPushButton("Stop Nav2")
         self.btn_start_all = QPushButton("Start All")
         self.btn_stop_all = QPushButton("Stop All")
+        self.btn_start_nhiemvuboss = QPushButton("Start NhiemVuBoss")
+        self.btn_stop_nhiemvuboss = QPushButton("Stop NhiemVuBoss")
         self.edt_kill_node = QLineEdit("rviz2")
         self.btn_kill_node = QPushButton("Kill Node")
 
@@ -858,15 +887,22 @@ class MainWindow(QWidget):
         self.btn_stop_nav2.clicked.connect(self.stop_nav2)
         self.btn_start_all.clicked.connect(self.start_all)
         self.btn_stop_all.clicked.connect(self.stop_all)
+        self.btn_start_nhiemvuboss.clicked.connect(self.start_nhiemvuboss)
+        self.btn_stop_nhiemvuboss.clicked.connect(self.stop_nhiemvuboss)
         self.btn_kill_node.clicked.connect(self.kill_node)
+
+        self.btn_estop = QPushButton("HỦY CHẠY / E-STOP")
+        self.btn_estop.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 14px; padding: 5px;")
+        self.btn_estop.clicked.connect(self.estop_clicked)
 
         self.lbl_platform_status = QLabel("Layer1 Odom: OFF")
         self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
         self.lbl_nav2_status = QLabel("Nav2: OFF")
+        self.lbl_nhiemvuboss_status = QLabel("NhiemVuBoss: OFF")
         self.lbl_odom_status = QLabel("Odom source: esp -> /odom")
         self.lbl_dataenc = QLabel("Encoder /dataenc: -")
 
-        control_group = QGroupBox("?i?u khi?n")
+        control_group = QGroupBox("Điều khiển")
         control_layout = QGridLayout()
         control_layout.addWidget(self.btn_start_platform, 0, 0)
         control_layout.addWidget(self.btn_stop_platform, 0, 1)
@@ -877,14 +913,18 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.btn_stop_nav2, 3, 1)
         control_layout.addWidget(self.btn_start_all, 4, 0)
         control_layout.addWidget(self.btn_stop_all, 4, 1)
-        control_layout.addWidget(QLabel("Node/pattern to kill:"), 5, 0)
-        control_layout.addWidget(self.edt_kill_node, 5, 1)
-        control_layout.addWidget(self.btn_kill_node, 6, 0, 1, 2)
-        control_layout.addWidget(self.lbl_platform_status, 7, 0, 1, 2)
-        control_layout.addWidget(self.lbl_mode_status, 8, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nav2_status, 9, 0, 1, 2)
-        control_layout.addWidget(self.lbl_odom_status, 10, 0, 1, 2)
-        control_layout.addWidget(self.lbl_dataenc, 11, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_nhiemvuboss, 5, 0)
+        control_layout.addWidget(self.btn_stop_nhiemvuboss, 5, 1)
+        control_layout.addWidget(QLabel("Node/pattern to kill:"), 6, 0)
+        control_layout.addWidget(self.edt_kill_node, 6, 1)
+        control_layout.addWidget(self.btn_kill_node, 7, 0, 1, 2)
+        control_layout.addWidget(self.btn_estop, 8, 0, 1, 2)
+        control_layout.addWidget(self.lbl_platform_status, 9, 0, 1, 2)
+        control_layout.addWidget(self.lbl_mode_status, 10, 0, 1, 2)
+        control_layout.addWidget(self.lbl_nav2_status, 11, 0, 1, 2)
+        control_layout.addWidget(self.lbl_nhiemvuboss_status, 12, 0, 1, 2)
+        control_layout.addWidget(self.lbl_odom_status, 13, 0, 1, 2)
+        control_layout.addWidget(self.lbl_dataenc, 14, 0, 1, 2)
         control_group.setLayout(control_layout)
 
         self.log_box = QTextEdit()
@@ -925,6 +965,12 @@ class MainWindow(QWidget):
 
         self.on_robot_mode_changed()
         self.refresh_batch_waypoint_views()
+
+    def estop_clicked(self):
+        node = self.get_ros_node()
+        if node is not None:
+            node.cancel_nav2_goals()
+        self.append_log(">>> USER BẤM E-STOP (HỦY NAV2) <<<")
 
     def init_ros(self):
         if not rclpy.ok():
@@ -1017,6 +1063,11 @@ class MainWindow(QWidget):
         group = idx // len(alphabet)
         pos = idx % len(alphabet)
         return f"{alphabet[pos]}{group}"
+
+    def open_map_editor(self):
+        dialog = MapEditorDialog(self, initial_map_yaml=self.selected_map_file)
+        dialog.exec_()
+        self.append_log("Đã đóng cửa sổ chỉnh sửa Map.")
 
     def refresh_batch_waypoint_views(self):
         mode_text = "ON" if self.batch_waypoint_mode else "OFF"
@@ -1141,7 +1192,7 @@ class MainWindow(QWidget):
         return self.cmb_odom_source.currentData() or "esp"
 
     def get_selected_esp_wheel_odom_mode(self):
-        return self.cmb_esp_wheel_mode.currentData() or "wheels_1_4"
+        return self.cmb_esp_wheel_mode.currentData() or "diff_2"
 
     def get_selected_odom_topic(self):
         return "/odom"
@@ -1429,6 +1480,17 @@ class MainWindow(QWidget):
     def stop_nav2(self):
         self.proc_mgr.stop(self.NAV2)
 
+    def start_nhiemvuboss(self):
+        sim_time = _bool_to_ros(self.is_sim_mode())
+        cmd = (
+            self.ros_prefix()
+            + "ros2 run nhiemvuboss nhiemvuboss --ros-args -p use_sim_time:=" + sim_time
+        )
+        self.proc_mgr.start(self.NHIEMVUBOSS, cmd)
+
+    def stop_nhiemvuboss(self):
+        self.proc_mgr.stop(self.NHIEMVUBOSS)
+
     def unpause_gazebo_physics(self):
         if not self.proc_mgr.is_running(self.LAYER1_SIM):
             return
@@ -1573,10 +1635,12 @@ class MainWindow(QWidget):
             nav2_on = nav2_on or self.proc_mgr.is_running(self.SLAM_LOCALIZATION) or self.proc_mgr.is_running(
                 self.AMCL
             )
+        nhiemvuboss_on = self.proc_mgr.is_running(self.NHIEMVUBOSS)
 
         self._set_status_label(self.lbl_platform_status, "Layer1 Odom", platform_on)
         self._set_status_label(self.lbl_mode_status, "Layer2 Mode", mode_on)
         self._set_status_label(self.lbl_nav2_status, "Nav2", nav2_on)
+        self._set_status_label(self.lbl_nhiemvuboss_status, "NhiemVuBoss", nhiemvuboss_on)
         if self.is_sim_mode():
             self.lbl_odom_status.setText("Odom source: gazebo -> /odom")
         else:
@@ -1690,4 +1754,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
