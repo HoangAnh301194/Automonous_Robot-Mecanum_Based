@@ -202,3 +202,4 @@ class MapEditorDialog(QDialog):
         painter.end()
         self.last_point = current_point
         self.update_display()
+ 
