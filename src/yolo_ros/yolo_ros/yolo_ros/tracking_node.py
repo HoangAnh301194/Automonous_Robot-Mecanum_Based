@@ -78,7 +78,14 @@ class TrackingNode(LifecycleNode):
             self.get_parameter("image_reliability").get_parameter_value().integer_value
         )
 
-        self.tracker = self.create_tracker(tracker_name)
+        try:
+            self.tracker = self.create_tracker(tracker_name)
+        except Exception as e:
+            self.get_logger().error(f"Failed to create tracker: {e}")
+            import traceback
+            self.get_logger().error(traceback.format_exc())
+            return TransitionCallbackReturn.ERROR
+
         self._pub = self.create_publisher(DetectionArray, "tracking", 10)
 
         super().on_configure(state)
@@ -196,7 +203,7 @@ class TrackingNode(LifecycleNode):
             "bytetrack",
             "botsort",
         ], f"Only support 'bytetrack' and 'botsort' for now, but got '{cfg.tracker_type}'"
-        tracker = TRACKER_MAP[cfg.tracker_type](args=cfg, frame_rate=1)
+        tracker = TRACKER_MAP[cfg.tracker_type](args=cfg)
         return tracker
 
     def detections_cb(self, img_msg: Image, detections_msg: DetectionArray) -> None:
@@ -268,10 +275,22 @@ class TrackingNode(LifecycleNode):
 def main():
     rclpy.init()
     node = TrackingNode()
+
+    # The lifecycle state machine transitions are processed by the executor.
+    # We must spin until the state actually changes before triggering the next
+    # transition, otherwise trigger_activate() fires while still 'unconfigured'.
     node.trigger_configure()
+    while node._state_machine.current_state[1] != 'inactive':
+        rclpy.spin_once(node, timeout_sec=0.5)
+    node.get_logger().info("Configure complete, now activating...")
+
     node.trigger_activate()
+    while node._state_machine.current_state[1] != 'active':
+        rclpy.spin_once(node, timeout_sec=0.5)
+    node.get_logger().info("Activate complete.")
 
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+

@@ -13,9 +13,9 @@ def generate_launch_description():
     
     # Arguments
     model_arg = DeclareLaunchArgument('model', default_value='/home/orin/ros2_ws/src/Pose_detection/yolo26n-pose.engine')
-    input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/camera/camera/color/image_raw')
-    input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='/camera/camera/depth/image_rect_raw')
-    input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/camera/depth/camera_info')
+    input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/camera/color/image_raw')
+    input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='/camera/depth/image_raw')
+    input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/depth/camera_info')
     target_frame_arg = DeclareLaunchArgument('target_frame', default_value='camera_link')
     threshold_arg = DeclareLaunchArgument('threshold', default_value='0.25')
     
@@ -26,13 +26,13 @@ def generate_launch_description():
             'model': LaunchConfiguration('model'),
             'use_tracking': 'True',
             'use_3d': 'True',
-            'use_debug': 'True', # This enables the visual bounding boxes window
+            'use_debug': 'False', # Disabled to save CPU and improve FPS
             'input_image_topic': LaunchConfiguration('input_image_topic'),
             'input_depth_topic': LaunchConfiguration('input_depth_topic'),
             'input_depth_info_topic': LaunchConfiguration('input_depth_info_topic'),
             'target_frame': LaunchConfiguration('target_frame'),
             'threshold': LaunchConfiguration('threshold'),
-            'imgsz_height': '640',
+            'imgsz_height': '480',
             'imgsz_width': '640',
             'namespace': 'yolo'
         }.items()

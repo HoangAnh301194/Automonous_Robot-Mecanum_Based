@@ -107,6 +107,18 @@ def generate_launch_description():
             'angle_compensate': True,
             'scan_mode': 'Sensitivity'
         }],
+        remappings=[('scan', 'scan_raw')],
+        output='screen'
+    )
+
+    laser_filter_node = Node(
+        package='laser_filters',
+        executable='scan_to_scan_filter_chain',
+        parameters=['/home/orin/ros2_ws/config/scan_filter.yaml'],
+        remappings=[
+            ('scan', 'scan_raw'),
+            ('scan_filtered', 'scan')
+        ],
         output='screen'
     )
 
@@ -131,6 +143,7 @@ def generate_launch_description():
     return LaunchDescription([
         rsp_node,
         lidar_node,
+        laser_filter_node,
         imu_node,
         odom_node
     ])

@@ -82,8 +82,8 @@ class MissionAB(Node):
 
         # ---------- Params ----------
         self.declare_parameter("detections_topic", "/yolo/detections")
-        self.declare_parameter("camera_info_topic", "/camera/camera/color/camera_info")
-        self.declare_parameter("aligned_depth_topic", "/camera/camera/aligned_depth_to_color/image_raw")
+        self.declare_parameter("camera_info_topic", "/camera/color/camera_info")
+        self.declare_parameter("aligned_depth_topic", "/camera/depth/image_raw")
 
         self.declare_parameter("class_name", "person")
         self.declare_parameter("min_confidence", 0.6)

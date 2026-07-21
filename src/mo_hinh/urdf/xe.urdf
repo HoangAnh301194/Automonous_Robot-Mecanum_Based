@@ -107,9 +107,6 @@
     <origin xyz="0 0 0.055" rpy="0 0 0"/>
   </joint>
 
-  <!-- ========================= -->
-  <!-- Laser (lùi 12cm v? sau) -->
-  <!-- ========================= -->
   <link name="laser_link">
     <visual>
       <geometry>
@@ -136,7 +133,7 @@
   <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser_link"/>
-    <origin xyz="-0.12 0 0.15" rpy="0 0 0"/>
+    <origin xyz="+0.05 0 0.15" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -200,7 +197,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="support_link"/>
     <child link="camera_link"/>
-    <origin xyz="0 0 0.265" rpy="0 -0.0873 0"/>
+    <origin xyz="0.30 0.15 0.335" rpy="0 0.87266 0"/>
   </joint>
 
   <!-- Optical frame -->
@@ -217,6 +214,23 @@
   <joint name="camera_optical_joint" type="fixed">
     <parent link="camera_link"/>
     <child link="camera_color_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <!-- Depth Optical frame -->
+  <link name="camera_depth_optical_frame">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.0001"/>
+      <inertia ixx="1e-9" ixy="0.0" ixz="0.0"
+               iyy="1e-9" iyz="0.0"
+               izz="1e-9"/>
+    </inertial>
+  </link>
+
+  <joint name="camera_depth_optical_joint" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_depth_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
   </joint>
 
