@@ -79,5 +79,5 @@ ros2 run nav2_map_server map_saver_cli -f ${WS}/src/mo_hinh/maps/my_map
 ros2 launch mo_hinh virtual_robot_gazebo.launch.py
 ros2 launch mo_hinh virtual_slam.launch.py
 ```
-ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/nen_final.yaml
+ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/phuongoi.yaml
 
