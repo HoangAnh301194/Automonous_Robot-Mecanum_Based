@@ -281,9 +281,9 @@ class RosInterface(Node):
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel", 10)
-        self.cancel_nav2_client = self.create_client(CancelGoal, "navigate_to_pose/_action/cancel")
-        self.cancel_nav_through_client = self.create_client(CancelGoal, "navigate_through_poses/_action/cancel")
+        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cancel_nav2_client = self.create_client(CancelGoal, "/navigate_to_pose/_action/cancel_goal")
+        self.cancel_nav_through_client = self.create_client(CancelGoal, "/navigate_through_poses/_action/cancel_goal")
         
         self.pose_timer = self.create_timer(0.05, self.publish_pose_from_tf)
 
@@ -970,6 +970,8 @@ class MainWindow(QWidget):
         node = self.get_ros_node()
         if node is not None:
             node.cancel_nav2_goals()
+        if self.proc_mgr.is_running(self.NHIEMVUBOSS):
+            self.stop_nhiemvuboss()
         self.append_log(">>> USER BẤM E-STOP (HỦY NAV2) <<<")
 
     def init_ros(self):
@@ -1349,14 +1351,6 @@ class MainWindow(QWidget):
 
     def start_slam_mapping(self):
         self.append_log("Layer2 mode: SLAM Mapping")
-        if not self.is_layer1_running():
-            QMessageBox.warning(
-                self,
-                "Thi?u Layer 1",
-                "B?n c?n start Layer 1 (Odom) tr??c.",
-            )
-            return
-
         sim_time = _bool_to_ros(self.is_sim_mode())
         self.proc_mgr.stop(self.AMCL)
         self.proc_mgr.stop(self.SLAM_LOCALIZATION)
@@ -1382,13 +1376,6 @@ class MainWindow(QWidget):
         self.append_log(
             f"Layer2 mode: Localization ({self.cmb_localization_backend.currentText()})"
         )
-        if not self.is_layer1_running():
-            QMessageBox.warning(
-                self,
-                "Thi?u Layer 1",
-                "B?n c?n start Layer 1 (Odom) tr??c.",
-            )
-            return
         sim_time = _bool_to_ros(self.is_sim_mode())
         backend = self.cmb_localization_backend.currentText()
         if not self.ensure_map_selected(backend):
@@ -1456,13 +1443,6 @@ class MainWindow(QWidget):
         self.proc_mgr.stop(self.AMCL)
 
     def start_nav2(self):
-        if not self.is_layer1_running():
-            QMessageBox.warning(
-                self,
-                "Thi?u Layer 1",
-                "B?n c?n start Layer 1 (Odom) tr??c.",
-            )
-            return
         sim_time = _bool_to_ros(self.is_sim_mode())
         if (not self.is_sim_mode()) and self.cmb_operation_mode.currentText() == "Localization":
             self.append_log(

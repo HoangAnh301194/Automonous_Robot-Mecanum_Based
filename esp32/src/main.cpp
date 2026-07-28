@@ -12,11 +12,22 @@ HardwareSerial HoverSerial(2);
 #define WHEEL_BASE          0.58f
 #define K_SPEED             114.28f
 
+// ============ Gi?i h?n di?u khi?n ============
+constexpr int16_t CMD_MAX = 150;
+constexpr int16_t RC_DEADBAND = 15;
+constexpr uint32_t CONTROL_PERIOD_MS = 50;
+
+// Ðon v?: command/second.
+// 0 -> 150 m?t kho?ng 1.25 s; 150 -> 0 m?t kho?ng 0.83 s.
+constexpr float CMD_ACCEL_RATE = 120.0f;
+constexpr float CMD_DECEL_RATE = 180.0f;
+
 // ============ C?u trúc gói ============
+// Hoverboard dã ch?y tank mode: hai tru?ng 16-bit là l?nh bánh trái/ph?i.
 typedef struct {
   uint16_t start;
-  int16_t  steer;
-  int16_t  speed;
+  int16_t  left;
+  int16_t  right;
   uint16_t checksum;
 } __attribute__((packed)) SerialCommand;
 
@@ -44,8 +55,19 @@ long    absolute_ticks_R = 0;
 int16_t last_ticks_L = 0;
 int16_t last_ticks_R = 0;
 
-int16_t target_left  = 0;
-int16_t target_right = 0;
+// L?nh PC du?c luu riêng, không dùng chung v?i RC.
+int16_t pc_target_left  = 0;
+int16_t pc_target_right = 0;
+
+// L?nh mong mu?n sau khi ch?n ngu?n RC/PC.
+int16_t desired_left  = 0;
+int16_t desired_right = 0;
+
+// Tr?ng thái profile hình thang. Dùng float d? tránh m?t ph?n l? m?i chu k?.
+float applied_left_f  = 0.0f;
+float applied_right_f = 0.0f;
+int16_t applied_left  = 0;
+int16_t applied_right = 0;
 
 // ============ RC Receiver ============
 #define RC_THROTTLE_PIN 22
@@ -56,9 +78,12 @@ volatile uint32_t ch_steer_start    = 0;
 volatile uint16_t ch_throttle_val   = 1500;
 volatile uint16_t ch_steer_val      = 1500;
 volatile uint32_t last_rc_time      = 0;
-volatile uint32_t last_pc_time      = 0;
+uint32_t last_pc_time               = 0;
 
-// Ð?c bit GPIO tr?c ti?p t? thanh ghi ? an toàn trong IRAM, không ph? thu?c cache flash
+// Khai báo tru?c vì emergencyStopImmediately() g?i hàm này.
+void sendSpeedCmd(int16_t cmdL, int16_t cmdR);
+
+// Ð?c bit GPIO tr?c ti?p t? thanh ghi d? an toàn trong IRAM.
 #define PIN_HIGH(pin) ((GPIO.in >> (pin)) & 1U)
 
 void IRAM_ATTR calc_throttle() {
@@ -99,6 +124,119 @@ class MyServerCallbacks: public BLEServerCallbacks {
   void onDisconnect(BLEServer* pServer) { deviceConnected = false; }
 };
 
+// ============ Hàm h? tr? di?u khi?n ============
+void normalizeWheelPair(float &left, float &right) {
+  float peak = max(fabsf(left), fabsf(right));
+  if (peak > (float)CMD_MAX) {
+    float scale = (float)CMD_MAX / peak;
+    left  *= scale;
+    right *= scale;
+  }
+}
+
+// Deadband có remap: ngay ngoài vùng ch?t, l?nh b?t d?u g?n 0 thay vì nh?y lên 15.
+int16_t applyDeadbandAndRemap(int16_t input) {
+  int16_t magnitude = abs(input);
+
+  if (magnitude <= RC_DEADBAND) {
+    return 0;
+  }
+
+  float normalized =
+      (float)(magnitude - RC_DEADBAND) /
+      (float)(CMD_MAX - RC_DEADBAND);
+
+  int16_t output = (int16_t)lroundf(normalized * CMD_MAX);
+  return input > 0 ? output : -output;
+}
+
+// Arcade/tank mixing liên t?c:
+//   left  = throttle + steer
+//   right = throttle - steer
+// N?u robot quay ngu?c hu?ng tay lái, d?i d?u steer ? hai dòng du?i.
+void mixTankDrive(int16_t throttle, int16_t steer,
+                  int16_t &leftOut, int16_t &rightOut) {
+  float left  = (float)throttle + (float)steer;
+  float right = (float)throttle - (float)steer;
+
+  // Scale chung d? gi? t? l? hai bánh khi bão hòa.
+  normalizeWheelPair(left, right);
+
+  leftOut  = (int16_t)lroundf(left);
+  rightOut = (int16_t)lroundf(right);
+}
+
+bool oppositeSigns(float a, float b) {
+  return (a > 0.0f && b < 0.0f) || (a < 0.0f && b > 0.0f);
+}
+
+float effectiveTargetBeforeReverse(float current, float desired) {
+  // Không d?i chi?u tr?c ti?p. Tru?c tiên gi?m v? 0, chu k? sau m?i tang chi?u ngu?c.
+  if (oppositeSigns(current, desired)) {
+    return 0.0f;
+  }
+  return desired;
+}
+
+float allowedStep(float current, float target, float dt) {
+  bool increasingMagnitude = fabsf(target) > fabsf(current);
+  float rate = increasingMagnitude ? CMD_ACCEL_RATE : CMD_DECEL_RATE;
+  return rate * dt;
+}
+
+// C?p nh?t d?ng th?i hai bánh theo m?t h? s? chung.
+// Nh? dó qu? d?o chuy?n ti?p trong không gian (left, right) không b? méo quá m?nh.
+void updateTrapezoidalProfile(int16_t targetLeft,
+                              int16_t targetRight,
+                              float dt) {
+  // Tránh bu?c nh?y l?n n?u loop b? tr? b?t thu?ng.
+  dt = constrain(dt, 0.0f, 0.20f);
+
+  float effectiveLeft =
+      effectiveTargetBeforeReverse(applied_left_f, (float)targetLeft);
+  float effectiveRight =
+      effectiveTargetBeforeReverse(applied_right_f, (float)targetRight);
+
+  float deltaLeft  = effectiveLeft  - applied_left_f;
+  float deltaRight = effectiveRight - applied_right_f;
+
+  float stepLeft  = allowedStep(applied_left_f, effectiveLeft, dt);
+  float stepRight = allowedStep(applied_right_f, effectiveRight, dt);
+
+  float scale = 1.0f;
+
+  if (fabsf(deltaLeft) > stepLeft && fabsf(deltaLeft) > 1e-6f) {
+    scale = min(scale, stepLeft / fabsf(deltaLeft));
+  }
+  if (fabsf(deltaRight) > stepRight && fabsf(deltaRight) > 1e-6f) {
+    scale = min(scale, stepRight / fabsf(deltaRight));
+  }
+
+  applied_left_f  += deltaLeft  * scale;
+  applied_right_f += deltaRight * scale;
+
+  // Kh? sai s? float quanh 0 d? quá trình d?o chi?u không b? treo.
+  if (effectiveLeft == 0.0f && fabsf(applied_left_f) < 0.5f) {
+    applied_left_f = 0.0f;
+  }
+  if (effectiveRight == 0.0f && fabsf(applied_right_f) < 0.5f) {
+    applied_right_f = 0.0f;
+  }
+
+  applied_left_f  = constrain(applied_left_f,  -(float)CMD_MAX, (float)CMD_MAX);
+  applied_right_f = constrain(applied_right_f, -(float)CMD_MAX, (float)CMD_MAX);
+
+  applied_left  = (int16_t)lroundf(applied_left_f);
+  applied_right = (int16_t)lroundf(applied_right_f);
+}
+
+void emergencyStopImmediately() {
+  desired_left = desired_right = 0;
+  applied_left_f = applied_right_f = 0.0f;
+  applied_left = applied_right = 0;
+  sendSpeedCmd(0, 0);
+}
+
 // ============ USB Serial non-blocking parser ============
 #define RX_BUF_SIZE 64
 char    rxBuf[RX_BUF_SIZE];
@@ -107,12 +245,21 @@ uint8_t rxIdx = 0;
 void parsePCCommand(const char *line) {
   // Ð?nh d?ng: "V <v> <omega>"
   if (line[0] == 'V' && line[1] == ' ') {
-    float v = 0, omega = 0;
+    float v = 0.0f;
+    float omega = 0.0f;
+
     if (sscanf(line + 2, "%f %f", &v, &omega) == 2) {
       float vL = v - (omega * WHEEL_BASE / 2.0f);
       float vR = v + (omega * WHEEL_BASE / 2.0f);
-      target_left  = (int16_t)constrain((int)(vL * K_SPEED), -150, 150);
-      target_right = (int16_t)constrain((int)(vR * K_SPEED), -150, 150);
+
+      float cmdL = vL * K_SPEED;
+      float cmdR = vR * K_SPEED;
+
+      // Scale chung thay vì constrain t?ng bánh d?c l?p.
+      normalizeWheelPair(cmdL, cmdR);
+
+      pc_target_left  = (int16_t)lroundf(cmdL);
+      pc_target_right = (int16_t)lroundf(cmdR);
       last_pc_time = millis();
     }
   }
@@ -130,7 +277,6 @@ void readSerialNonBlocking() {
     } else if (rxIdx < RX_BUF_SIZE - 1) {
       rxBuf[rxIdx++] = c;
     } else {
-      // Tràn buffer -> reset d? tránh k?t
       rxIdx = 0;
     }
   }
@@ -139,20 +285,23 @@ void readSerialNonBlocking() {
 // ============ G?i l?nh ============
 void sendSpeedCmd(int16_t cmdL, int16_t cmdR) {
   Command.start    = START_FRAME;
-  Command.steer    = cmdL;
-  Command.speed    = cmdR;
-  Command.checksum = (uint16_t)(Command.start ^ Command.steer ^ Command.speed);
+  Command.left     = cmdL;
+  Command.right    = cmdR;
+  Command.checksum =
+      (uint16_t)(Command.start ^ Command.left ^ Command.right);
+
   HoverSerial.write((uint8_t*)&Command, sizeof(Command));
 }
 
-// ============ Nh?n feedback (gi?i h?n byte m?i l?n) ============
+// ============ Nh?n feedback ============
 bool receiveFeedback() {
   bool newData = false;
-  // Gi?i h?n s? byte x? lý / l?n g?i ? tránh k?t loop khi data d?n ?p
   uint16_t budget = 64;
+
   while (HoverSerial.available() && budget-- > 0) {
     incomingByte = HoverSerial.read();
-    uint16_t bufStartFrame = ((uint16_t)incomingByte << 8) | incomingBytePrev;
+    uint16_t bufStartFrame =
+        ((uint16_t)incomingByte << 8) | incomingBytePrev;
 
     if (bufStartFrame == START_FRAME) {
       p = (byte*)&NewFeedback;
@@ -165,23 +314,31 @@ bool receiveFeedback() {
     }
 
     if (idx == sizeof(SerialFeedback)) {
-      uint16_t checksum = (uint16_t)(NewFeedback.start ^ NewFeedback.ticksL ^ NewFeedback.ticksR
-                                     ^ NewFeedback.speedR_meas ^ NewFeedback.speedL_meas
-                                     ^ NewFeedback.batVoltage ^ NewFeedback.boardTemp
-                                     ^ NewFeedback.cmdLed);
-      if (NewFeedback.start == START_FRAME && checksum == NewFeedback.checksum) {
-        // Khóa ng?n d? copy (tránh d?c Feedback dang update gi?a ch?ng)
+      uint16_t checksum =
+          (uint16_t)(NewFeedback.start ^
+                     NewFeedback.ticksL ^
+                     NewFeedback.ticksR ^
+                     NewFeedback.speedR_meas ^
+                     NewFeedback.speedL_meas ^
+                     NewFeedback.batVoltage ^
+                     NewFeedback.boardTemp ^
+                     NewFeedback.cmdLed);
+
+      if (NewFeedback.start == START_FRAME &&
+          checksum == NewFeedback.checksum) {
         memcpy(&Feedback, &NewFeedback, sizeof(SerialFeedback));
         newData = true;
       }
       idx = 0;
     }
+
     incomingBytePrev = incomingByte;
   }
+
   return newData;
 }
 
-// ============ Odometry + Debug Serial (KHÔNG g?i BLE ? dây) ============
+// ============ Odometry ============
 void processOdometry() {
   int16_t delta_L = -(Feedback.ticksL - last_ticks_L);
   int16_t delta_R = +(Feedback.ticksR - last_ticks_R);
@@ -198,11 +355,12 @@ uint32_t last_debug_time   = 0;
 uint32_t last_ble_send     = 0;
 uint32_t last_cmd_send     = 0;
 uint32_t last_feedback_rx  = 0;
+bool feedback_fault_active = false;
 
 long  last_debug_ticks_L = 0;
 long  last_debug_ticks_R = 0;
-float last_v_L = 0;
-float last_v_R = 0;
+float last_v_L = 0.0f;
+float last_v_R = 0.0f;
 
 void sendDebugSerial() {
   uint32_t now = millis();
@@ -222,9 +380,11 @@ void sendDebugSerial() {
   float bat_v = Feedback.batVoltage / 100.0f;
   float temp_c = Feedback.boardTemp / 10.0f;
 
+  // Gi? nguyên protocol USB Serial cu d? node ROS 2 parse du?c.
+  // TL/TR là l?nh th?c t? sau profile, dúng v?i giá tr? g?i xu?ng hoverboard.
   Serial.printf("V:%.2f A:%.2f RC:%u/%u TL:%d TR:%d EL:%ld ER:%ld B:%.1f T:%.1f\n",
                 v_avg, a_avg, ch_throttle_val, ch_steer_val,
-                target_left, target_right,
+                applied_left, applied_right,
                 absolute_ticks_L, absolute_ticks_R,
                 bat_v, temp_c);
 
@@ -235,9 +395,9 @@ void sendDebugSerial() {
   last_v_R = v_R;
 }
 
-// BLE notify ch?y riêng, chu k? 100ms, ch? khi dang connect
 void sendBleTelemetry() {
   if (!deviceConnected) return;
+
   uint32_t now = millis();
   if (now - last_ble_send < 100) return;
   last_ble_send = now;
@@ -245,12 +405,13 @@ void sendBleTelemetry() {
   float bat_v  = Feedback.batVoltage / 100.0f;
   float temp_c = Feedback.boardTemp / 10.0f;
 
-  char txString[120];
+  char txString[150];
+  // Gi? BLE telemetry tuong thích v?i format cu.
   snprintf(txString, sizeof(txString),
            "V:%d EL:%ld ER:%ld B:%.1f T:%.1f RC:%u/%u CMD:%d/%d",
            (int)0, absolute_ticks_L, absolute_ticks_R,
            bat_v, temp_c, ch_throttle_val, ch_steer_val,
-           target_left, target_right);
+           applied_left, applied_right);
 
   pTxCharacteristic->setValue((uint8_t*)txString, strlen(txString));
   pTxCharacteristic->notify();
@@ -263,50 +424,54 @@ void setup() {
 
   pinMode(RC_THROTTLE_PIN, INPUT_PULLDOWN);
   pinMode(RC_STEER_PIN,    INPUT_PULLDOWN);
-  attachInterrupt(digitalPinToInterrupt(RC_THROTTLE_PIN), calc_throttle, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(RC_STEER_PIN),    calc_steer,    CHANGE);
+  attachInterrupt(
+      digitalPinToInterrupt(RC_THROTTLE_PIN), calc_throttle, CHANGE);
+  attachInterrupt(
+      digitalPinToInterrupt(RC_STEER_PIN), calc_steer, CHANGE);
 
   BLEDevice::init("ESP32_Hoverbot");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
   BLEService *pService = pServer->createService(SERVICE_UUID);
   pTxCharacteristic = pService->createCharacteristic(
-                        CHARACTERISTIC_UUID_TX,
-                        BLECharacteristic::PROPERTY_NOTIFY);
+      CHARACTERISTIC_UUID_TX,
+      BLECharacteristic::PROPERTY_NOTIFY);
   pTxCharacteristic->addDescriptor(new BLE2902());
   pService->start();
   pServer->getAdvertising()->start();
 
-  // Kh?i t?o timer d? dt d?u tiên không b? sai
   uint32_t now = millis();
-  last_debug_time = now;
-  last_ble_send   = now;
-  last_cmd_send   = now;
-  last_pc_time    = 0;       // chua có l?nh PC
-  last_rc_time    = 0;       // chua có tín hi?u RC
+  last_debug_time  = now;
+  last_ble_send    = now;
+  last_cmd_send    = now;
+  last_pc_time     = 0;
+  last_rc_time     = 0;
   last_feedback_rx = now;
 
-  Serial.println("=========================================");
-  Serial.println("  ESP32 HOVERBOT - RC ONLY + BLE DEBUG   ");
-  Serial.println("=========================================");
+  Serial.println("============================================");
+  Serial.println(" ESP32 HOVERBOT - TANK + TRAPEZOID PROFILE ");
+  Serial.println("============================================");
 }
 
 // ============ Loop ============
 void loop() {
-  // 1. Ð?c feedback (non-blocking, có budget byte)
+  // 1. Nh?n feedback.
   bool gotFB = receiveFeedback();
-  if (gotFB) last_feedback_rx = millis();
+  if (gotFB) {
+    last_feedback_rx = millis();
+    processOdometry();
+  }
 
-  // 2. X? lý odometry khi có feedback
-  if (gotFB) processOdometry();
-
-  // 3. Ð?c l?nh PC (non-blocking)
+  // 2. Nh?n l?nh PC.
   readSerialNonBlocking();
 
-  // 4. BLE reconnect (non-blocking)
+  // 3. BLE reconnect.
   if (!deviceConnected && oldDeviceConnected) {
     static uint32_t ble_reconnect_time = 0;
-    if (ble_reconnect_time == 0) ble_reconnect_time = millis();
+    if (ble_reconnect_time == 0) {
+      ble_reconnect_time = millis();
+    }
+
     if (millis() - ble_reconnect_time >= 500) {
       pServer->startAdvertising();
       Serial.println("BLE: Disconnected. Restarting advertising...");
@@ -314,72 +479,87 @@ void loop() {
       ble_reconnect_time = 0;
     }
   }
+
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
     Serial.println("BLE: Client Connected!");
   }
 
-  // 5. Debug Serial & BLE telemetry (theo timer riêng)
+  // 4. Telemetry.
   sendDebugSerial();
   sendBleTelemetry();
 
-  // 6. Safety: m?t feedback > 300ms -> d?ng xe
-  if (millis() - last_feedback_rx > 300) {
-    target_left  = 0;
-    target_right = 0;
-  }
-
-  // 7. G?i l?nh di?u khi?n m?i 50ms
   uint32_t now = millis();
-  if (now - last_cmd_send >= 50) {
+
+  // 5. Safety override: m?t feedback thì d?ng ngay, không qua profile ch?m.
+  if ((uint32_t)(now - last_feedback_rx) > 300) {
+    // G?i ngay ? l?n d?u phát hi?n l?i, sau dó duy trì gói zero m?i 50 ms.
+    if (!feedback_fault_active ||
+        (uint32_t)(now - last_cmd_send) >= CONTROL_PERIOD_MS) {
+      emergencyStopImmediately();
+      last_cmd_send = now;
+    }
+    feedback_fault_active = true;
+    return;
+  }
+  feedback_fault_active = false;
+
+  // 6. Ði?u khi?n m?i 50 ms.
+  if ((uint32_t)(now - last_cmd_send) >= CONTROL_PERIOD_MS) {
+    float dt = (now - last_cmd_send) / 1000.0f;
     last_cmd_send = now;
 
-    int16_t throttle = 0;
-    int16_t steer    = 0;
-    bool rc_moving   = false;
+    // Ch?p bi?n RC volatile v? local d? dùng nh?t quán trong chu k? này.
+    uint16_t throttlePulse;
+    uint16_t steerPulse;
+    uint32_t rcTimestamp;
 
-    bool rc_active   = (last_rc_time != 0) && ((uint32_t)(now - last_rc_time) < 500);
-    bool pc_active   = (last_pc_time != 0) && ((uint32_t)(now - last_pc_time) < 1000);
+    noInterrupts();
+    throttlePulse = ch_throttle_val;
+    steerPulse = ch_steer_val;
+    rcTimestamp = last_rc_time;
+    interrupts();
+
+    bool rc_active =
+        (rcTimestamp != 0) && ((uint32_t)(now - rcTimestamp) < 500);
+    bool pc_active =
+        (last_pc_time != 0) && ((uint32_t)(now - last_pc_time) < 1000);
+
+    int16_t throttle = 0;
+    int16_t steer = 0;
+    bool rc_moving = false;
 
     if (rc_active) {
-      throttle = map(constrain(ch_throttle_val, 1000, 2000), 1000, 2000, -150, 150);
-      steer    = map(constrain(ch_steer_val,    1000, 2000), 1000, 2000, -150, 150);
-      if (abs(throttle) < 15) throttle = 0;
-      if (abs(steer)    < 15) steer    = 0;
-      if (throttle != 0 || steer != 0) rc_moving = true;
+      throttle = (int16_t)map(
+          constrain((int)throttlePulse, 1000, 2000),
+          1000, 2000, -CMD_MAX, CMD_MAX);
+
+      steer = (int16_t)map(
+          constrain((int)steerPulse, 1000, 2000),
+          1000, 2000, -CMD_MAX, CMD_MAX);
+
+      throttle = applyDeadbandAndRemap(throttle);
+      steer = applyDeadbandAndRemap(steer);
+      rc_moving = (throttle != 0 || steer != 0);
     }
 
     if (rc_moving) {
-      // Uu tiên 1: RC dang g?t
-      if (throttle == 0) {
-        target_left  = steer;
-        target_right = -steer;
-      } else {
-        if (steer > 0) {
-          target_left  = throttle;
-          target_right = (int16_t)(throttle * (1.0f - (float)steer / 75.0f));
-        } else {
-          target_left  = (int16_t)(throttle * (1.0f + (float)steer / 75.0f));
-          target_right = throttle;
-        }
-      }
-      target_left  = constrain(target_left,  -150, 150);
-      target_right = constrain(target_right, -150, 150);
+      // Uu tiên 1: RC dang du?c g?t.
+      mixTankDrive(throttle, steer, desired_left, desired_right);
     }
     else if (pc_active) {
-      // Uu tiên 2: l?nh PC còn hi?u l?c (gi? target dã parse)
-    }
-    else if (rc_active) {
-      // Uu tiên 3: RC online nhung dang trung l?p -> d?ng yên
-      target_left  = 0;
-      target_right = 0;
+      // Uu tiên 2: l?nh PC còn hi?u l?c.
+      desired_left  = pc_target_left;
+      desired_right = pc_target_right;
     }
     else {
-      // Không có tín hi?u nào -> d?ng an toàn
-      target_left  = 0;
-      target_right = 0;
+      // RC ? gi?a ho?c m?t toàn b? ngu?n l?nh: gi?m t?c theo profile v? 0.
+      desired_left  = 0;
+      desired_right = 0;
     }
 
-    sendSpeedCmd(target_left, target_right);
+    // 7. Sinh profile hình thang r?i g?i l?nh dã làm mu?t.
+    updateTrapezoidalProfile(desired_left, desired_right, dt);
+    sendSpeedCmd(applied_left, applied_right);
   }
 }

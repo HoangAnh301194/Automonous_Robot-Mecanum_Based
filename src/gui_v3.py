@@ -1055,7 +1055,6 @@ class MainWindow(QWidget):
     def stop_platform(self): self.proc_mgr.stop(self.LAYER1_SIM); self.proc_mgr.stop(self.LAYER1_REAL)
     def start_slam_mapping(self):
         self.append_log("Layer2 mode: SLAM Mapping")
-        if not self.is_layer1_running(): QMessageBox.warning(self, "Thiếu Layer 1", "Bạn cần start Layer 1 (Odom) trước."); return
         sim_time = _bool_to_ros(self.is_sim_mode())
         self.proc_mgr.stop(self.AMCL); self.proc_mgr.stop(self.SLAM_LOCALIZATION)
         slam_params = self.build_slam_mapping_params()
@@ -1066,7 +1065,6 @@ class MainWindow(QWidget):
             self.proc_mgr.start(self.SLAM_MAPPING, self.ros_prefix() + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:={sim_time} slam_params_file:='{slam_params}' use_rviz:=true")
     def start_localization_backend(self):
         self.append_log(f"Layer2 mode: Localization ({self.cmb_localization_backend.currentText()})")
-        if not self.is_layer1_running(): QMessageBox.warning(self, "Thiếu Layer 1", "Bạn cần start Layer 1 (Odom) trước."); return
         sim_time = _bool_to_ros(self.is_sim_mode())
         backend = self.cmb_localization_backend.currentText()
         if not self.ensure_map_selected(backend): return
@@ -1095,7 +1093,6 @@ class MainWindow(QWidget):
         self.append_log("Switch Layer 2 mode..."); self.stop_operation_mode(); QTimer.singleShot(600, self.start_operation_mode)
     def stop_operation_mode(self): self.proc_mgr.stop(self.SLAM_MAPPING); self.proc_mgr.stop(self.SLAM_LOCALIZATION); self.proc_mgr.stop(self.AMCL)
     def start_nav2(self):
-        if not self.is_layer1_running(): QMessageBox.warning(self, "Thiếu Layer 1", "Bạn cần start Layer 1 (Odom) trước."); return
         sim_time = _bool_to_ros(self.is_sim_mode())
         if (not self.is_sim_mode()) and self.cmb_operation_mode.currentText() == "Localization":
             self.append_log("Localization mode (real) đã bao gồm Nav2, bỏ qua Start Nav2 riêng."); return

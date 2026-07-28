@@ -65,7 +65,7 @@ bt_navigator:
     navigate_through_poses:
       plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
     # 'default_nav_through_poses_bt_xml' and 'default_nav_to_pose_bt_xml' are use defaults:
-    # nav2_bt_navigator/navigate_to_pose_w_replanning_and_recovery.xml
+    default_nav_to_pose_bt_xml: "/home/orin/ros2_ws/config/navigate_to_pose_custom_recovery.xml"
     # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
     # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
 
