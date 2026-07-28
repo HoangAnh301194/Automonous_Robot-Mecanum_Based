@@ -142,14 +142,14 @@
   <link name="support_link">
     <visual>
       <geometry>
-        <box size="0.02 0.02 0.10"/>
+        <box size="0.02 0.02 0.87"/>
       </geometry>
       <material name="grey"/>
     </visual>
 
     <collision>
       <geometry>
-        <box size="0.02 0.02 0.10"/>
+        <box size="0.02 0.02 0.87"/>
       </geometry>
     </collision>
 
@@ -165,7 +165,7 @@
   <joint name="support_joint" type="fixed">
     <parent link="base_link"/>
     <child link="support_link"/>
-    <origin xyz="0.15 0 0.265" rpy="0 0 0"/>
+    <origin xyz="0.30 0.14 0.435" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -195,9 +195,9 @@
   </link>
 
   <joint name="camera_joint" type="fixed">
-    <parent link="support_link"/>
+    <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="0.30 0.15 0.335" rpy="0 0.87266 0"/>
+    <origin xyz="0.30 0.14 0.87" rpy="0 0.698132 0"/>
   </joint>
 
   <!-- Optical frame -->

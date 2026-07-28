@@ -381,6 +381,18 @@ class DebuggerGUI(QMainWindow):
         tilt_layout.addWidget(self.lbl_tilt_val)
         ground_layout.addLayout(tilt_layout)
 
+        # LaserScan Distance Calibration Offset Slider
+        offset_layout = QHBoxLayout()
+        offset_layout.addWidget(QLabel("Distance Offset (m):"))
+        self.sld_dist_offset = QSlider(Qt.Horizontal)
+        self.sld_dist_offset.setRange(-100, 100)  # -1.00m to +1.00m (-100cm to +100cm)
+        self.sld_dist_offset.setValue(0)
+        self.sld_dist_offset.valueChanged.connect(self.on_param_changed)
+        offset_layout.addWidget(self.sld_dist_offset)
+        self.lbl_dist_offset_val = QLabel("+0.00 m")
+        offset_layout.addWidget(self.lbl_dist_offset_val)
+        ground_layout.addLayout(offset_layout)
+
         self.btn_capture_ground = QPushButton("Capture Ground")
         self.btn_capture_ground.clicked.connect(self.on_capture_ground)
         ground_layout.addWidget(self.btn_capture_ground)
@@ -632,6 +644,8 @@ class DebuggerGUI(QMainWindow):
         self.lbl_median_val.setText(str(self.sld_median.value()))
         self.lbl_morph_val.setText(str(self.sld_morph.value()))
         self.lbl_tilt_val.setText(f"{self.sld_tilt_angle.value()}°")
+        offset_m = self.sld_dist_offset.value() / 100.0
+        self.lbl_dist_offset_val.setText(f"{offset_m:+.2f} m")
 
     def on_param_changed(self):
         # Force odd median kernel size
@@ -757,7 +771,8 @@ class DebuggerGUI(QMainWindow):
                     'morphology_size': int(self.sld_morph.value()),
                     'ground_file_path': str(self.ground_file_path) if self.ground_file_path else "None",
                     'target_frame': str(self.target_frame),
-                    'camera_tilt': int(self.sld_tilt_angle.value())
+                    'camera_tilt': int(self.sld_tilt_angle.value()),
+                    'distance_offset': float(self.sld_dist_offset.value() / 100.0)
                 }
                 with open(filename, 'w') as f:
                     yaml.dump(config_data, f, default_flow_style=False)
@@ -785,6 +800,7 @@ class DebuggerGUI(QMainWindow):
                 self.sld_median.blockSignals(True)
                 self.sld_morph.blockSignals(True)
                 self.sld_tilt_angle.blockSignals(True)
+                self.sld_dist_offset.blockSignals(True)
 
                 self.sld_roi_x.setValue(config_data.get('roi_x', 0))
                 self.sld_roi_y.setValue(config_data.get('roi_y', 0))
@@ -795,6 +811,9 @@ class DebuggerGUI(QMainWindow):
                 self.sld_median.setValue(config_data.get('median_filter', 3))
                 self.sld_morph.setValue(config_data.get('morphology_size', 3))
                 self.sld_tilt_angle.setValue(config_data.get('camera_tilt', 0))
+                
+                dist_off = config_data.get('distance_offset', 0.0)
+                self.sld_dist_offset.setValue(int(round(dist_off * 100)))
 
                 self.sld_roi_x.blockSignals(False)
                 self.sld_roi_y.blockSignals(False)
@@ -805,6 +824,7 @@ class DebuggerGUI(QMainWindow):
                 self.sld_median.blockSignals(False)
                 self.sld_morph.blockSignals(False)
                 self.sld_tilt_angle.blockSignals(False)
+                self.sld_dist_offset.blockSignals(False)
 
                 self.update_slider_labels()
 
@@ -1253,6 +1273,11 @@ class DebuggerGUI(QMainWindow):
                             thetas = np.arctan2(x_3d, z_3d)
                             planar_ranges = np.sqrt(x_3d**2 + z_3d**2)
                     
+                    # Apply calibration distance offset if specified
+                    dist_offset_m = self.sld_dist_offset.value() / 100.0
+                    if dist_offset_m != 0.0:
+                        planar_ranges = np.maximum(0.0, planar_ranges + dist_offset_m)
+
                     # Determine range bin indexes
                     bin_idx = ((thetas - scan_msg.angle_min) / scan_msg.angle_increment).astype(np.int32)
                     

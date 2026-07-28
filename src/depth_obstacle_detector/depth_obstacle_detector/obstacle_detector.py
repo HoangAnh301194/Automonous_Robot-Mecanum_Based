@@ -81,6 +81,7 @@ class ObstacleDetectorNode(Node):
             self.k_morph = int(self.config.get('morphology_size', 3))
             self.target_frame = str(self.config.get('target_frame', 'base_link'))
             self.camera_tilt = int(self.config.get('camera_tilt', 0))
+            self.distance_offset = float(self.config.get('distance_offset', 0.0))
             
             ground_path = self.config.get('ground_file_path', 'None')
             
@@ -99,6 +100,7 @@ class ObstacleDetectorNode(Node):
 
             # Print parameters for verification
             self.get_logger().info(f"Target Frame: {self.target_frame}")
+            self.get_logger().info(f"Distance Offset: {self.distance_offset:+.2f} m")
             self.get_logger().info(f"ROI: X={self.roi_x}, Y={self.roi_y}, W={self.roi_w}, H={self.roi_h}")
             self.get_logger().info(f"Filters: Threshold={self.thresh_val}mm, MinArea={self.min_area}px, Median={self.k_median}, Morph={self.k_morph}")
 
@@ -295,6 +297,10 @@ class ObstacleDetectorNode(Node):
                             thetas = np.arctan2(x_3d, z_3d)
                             planar_ranges = np.sqrt(x_3d**2 + z_3d**2)
                     
+                    # Apply calibration distance offset if specified
+                    if self.distance_offset != 0.0:
+                        planar_ranges = np.maximum(0.0, planar_ranges + self.distance_offset)
+
                     bin_idx = ((thetas - scan_msg.angle_min) / scan_msg.angle_increment).astype(np.int32)
                     
                     # Filter bins lying within image width bounds

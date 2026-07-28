@@ -78,6 +78,9 @@ ros2 run nav2_map_server map_saver_cli -f ${WS}/src/mo_hinh/maps/my_map
 ```bash
 ros2 launch mo_hinh virtual_robot_gazebo.launch.py
 ros2 launch mo_hinh virtual_slam.launch.py
+## 5) Lenh chay layer1
+ros2 launch layer1_bringup layer1.launch.py esp_port:=/dev/ttyUSB0 lidar_port:=/dev/ttyUSB1
+
 ```
 ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/phuongoi.yaml
 
