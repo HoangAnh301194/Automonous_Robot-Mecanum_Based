@@ -88,8 +88,8 @@ def generate_launch_description():
             
             # Detection params
             {'detections_topic': '/yolo/detections'},
-            {'camera_info_topic': '/camera/camera/color/camera_info'},
-            {'aligned_depth_topic': '/camera/camera/aligned_depth_to_color/image_raw'},
+            {'camera_info_topic': '/camera/color/camera_info'},
+            {'aligned_depth_topic': '/camera/depth/image_raw'},
             {'class_name': 'person'},
             {'min_confidence': 0.6},
             {'depth_roi_size': 20},

@@ -1,17 +1,3 @@
-# Copyright (C) 2023 Miguel Ángel González Santamarta
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 from launch import LaunchDescription, LaunchContext
@@ -39,7 +25,7 @@ def generate_launch_description():
         model = LaunchConfiguration("model")
         model_cmd = DeclareLaunchArgument(
             "model",
-            default_value="yolov8m.pt",
+            default_value="/home/orin/ros2_ws/src/Pose_detection/yolo26n-pose.engine", 
             description="Model name or path",
         )
 
@@ -60,7 +46,7 @@ def generate_launch_description():
         fuse_model = LaunchConfiguration("fuse_model")
         fuse_model_cmd = DeclareLaunchArgument(
             "fuse_model",
-            default_value="False",
+            default_value="True",
             description="Whether to fuse the model for inference optimization",
         )
 
@@ -109,7 +95,7 @@ def generate_launch_description():
         half = LaunchConfiguration("half")
         half_cmd = DeclareLaunchArgument(
             "half",
-            default_value="False",
+            default_value="True",
             description="Whether to enable half-precision (FP16) inference speeding up model inference with minimal impact on accuracy",
         )
 
