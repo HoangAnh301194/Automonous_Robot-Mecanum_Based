@@ -12,7 +12,7 @@ def generate_launch_description():
     yolo_bringup_dir = get_package_share_directory('yolo_bringup')
     
     # Arguments
-    model_arg = DeclareLaunchArgument('model', default_value='/home/orin/ros2_ws/src/Pose_detection/yolo26n-pose.engine')
+    model_arg = DeclareLaunchArgument('model', default_value='/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine')
     input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/camera/color/image_raw')
     input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='/camera/depth/image_raw')
     input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/depth/camera_info')

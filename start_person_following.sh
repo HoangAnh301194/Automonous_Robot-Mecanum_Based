@@ -24,7 +24,6 @@ pkill -9 -f realsense2_camera
 pkill -9 -f yolo_node
 pkill -9 -f follower_node
 pkill -9 -f face_recognition_node
-pkill -9 -f pose_ros_node
 
 rm -rf /dev/shm/fastrtps* 2>/dev/null
 sleep 2
@@ -56,7 +55,7 @@ sleep 5
 # 5. Launch Person Follower (YOLOv8 TensorRT)
 echo "Launching Person Follower (YOLO26 pose TensorRT)..."
 ros2 launch yolo_bringup person_follower.launch.py \
-    model:=/home/orin/ros2_ws/src/Pose_detection/yolo26n-pose.engine \
+    model:=/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine \
     device:=cuda:0 \
     input_image_topic:=/camera/color/image_raw \
     input_depth_topic:=/camera/depth/image_raw \
@@ -64,18 +63,12 @@ ros2 launch yolo_bringup person_follower.launch.py \
     > /tmp/yolo.log 2>&1 &
 sleep 15
 
-# 6. Launch Pose Detection (Vẫy tay)
-echo "Launching Pose Detection (Wave Gesture)..."
-ros2 run pose_detection pose_ros_node &
-sleep 2
-
 echo "----------------------------------------------------"
 echo "He thong da san sang! (Face Recognition da tat)"
 echo "Camera: Orbbec Astra Pro"
 echo "  - Color: /camera/color/image_raw"
 echo "  - Depth: /camera/depth/image_raw"
 echo "- Xem anh Debug YOLO: ros2 run rqt_image_view rqt_image_view /yolo/dbg_image"
-echo "- Trang thai vay tay: ros2 topic echo /pose/wave_status"
 echo "- Log camera:  tail -f /tmp/camera.log"
 echo "- Log YOLO:    tail -f /tmp/yolo.log"
 echo "----------------------------------------------------"

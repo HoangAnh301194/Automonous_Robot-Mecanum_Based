@@ -37,3 +37,11 @@ pip-delete-this-directory.txt
 # ROS2 specific
 *.db3
 *.mcap
+
+# Compressed archives
+*.tar.xz
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar

@@ -20,7 +20,7 @@ def generate_launch_description():
                     )
                 ),
                 launch_arguments={
-                    "model": LaunchConfiguration("model", default="/home/orin/ros2_ws/src/Pose_detection/yolo26n-pose.engine"),
+                    "model": LaunchConfiguration("model", default="/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine"),
                     "tracker": LaunchConfiguration("tracker", default="bytetrack.yaml"),
                     "device": LaunchConfiguration("device", default="cuda:0"),
                     "enable": LaunchConfiguration("enable", default="True"),
