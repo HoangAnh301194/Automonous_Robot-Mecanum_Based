@@ -1,0 +1,16 @@
+[Unit]
+Description=Robot Admin Developer Web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orin
+WorkingDirectory=/home/orin/ros2_ws
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /opt/ros/humble/setup.bash && source /home/orin/ros2_ws/install/setup.bash && ros2 launch robot_ui robot_ui.launch.py'
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
