@@ -1,0 +1,29 @@
+stage: raised_hand
+backend: yolo11
+device: cpu
+source: 0
+
+models:
+  yolo_pose: models/yolo11n-pose.pt
+  detector: models/yolo11n.pt
+  rtmpose: models/rtmpose-s.onnx
+
+processing:
+  max_people: 5
+  input_width: 640
+  input_height: 384
+  pose_input_width: 192
+  pose_input_height: 256
+  pose_bbox_margin_ratio: 0.12
+  confidence: 0.25
+  iou: 0.50
+  keypoint_threshold: 0.40
+  head_margin_ratio: 0.02
+  full_precision: false
+
+output:
+  display: true
+  save_video: false
+  path: outputs/result.mp4
+  save_jsonl: false
+  jsonl_path: outputs/predictions.jsonl
