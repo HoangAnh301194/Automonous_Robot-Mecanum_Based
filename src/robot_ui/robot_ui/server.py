@@ -13,7 +13,8 @@ def parse_args():
     parser.add_argument("--config", default=None, help="Path to robot_ui.yaml")
     parser.add_argument("--host", default=None, help="Override bind host")
     parser.add_argument("--port", type=int, default=None, help="Override bind port")
-    return parser.parse_args()
+    args, _ = parser.parse_known_args()
+    return args
 
 
 def main():

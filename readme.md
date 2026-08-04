@@ -84,3 +84,23 @@ ros2 launch layer1_bringup layer1.launch.py esp_port:=/dev/ttyUSB0 lidar_port:=/
 ```
 ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/phuongoi.yaml
 
+
+## launch asstra pro camera 
+source ~/ros2_ws/install/setup.bash
+ros2 launch astra_camera astra_pro.launch.xml
+
+
+## runyolo pose detection 
+source ~/ros2_ws/install/setup.bash
+ros2 launch yolo_bringup yolo.launch.py
+
+
+
+## pose ros node hand wave detection 
+source ~/ros2_ws/install/setup.bash
+ros2 run pose_detection pose_ros_node
+
+
+## robot gui WWeb 
+source ~/ros2_ws/install/setup.bash
+ros2 launch robot_ui robot_ui.launch.py

@@ -113,9 +113,14 @@ def default_web_dir() -> Path:
     try:
         from ament_index_python.packages import get_package_share_directory
 
-        return Path(get_package_share_directory("robot_ui")) / "web_dist"
+        path = Path(get_package_share_directory("robot_ui")) / "web_dist"
     except Exception:
-        return Path(__file__).resolve().parent / "web_dist"
+        path = Path(__file__).resolve().parent / "web_dist"
+
+    index_file = path / "index.html"
+    if index_file.exists():
+        return index_file.resolve().parent
+    return path
 
 
 @dataclass(frozen=True)
