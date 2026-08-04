@@ -46,12 +46,24 @@ DIAGNOSTIC_LEVEL_LABELS = {
     DiagnosticStatus.ERROR: "ERROR",
     DiagnosticStatus.STALE: "STALE",
 }
+def log_level_to_int(val: Any) -> int:
+    if isinstance(val, bytes):
+        return int.from_bytes(val, "big")
+    return int(val)
+
+
+LOG_DEBUG = log_level_to_int(Log.DEBUG)
+LOG_INFO = log_level_to_int(Log.INFO)
+LOG_WARN = log_level_to_int(Log.WARN)
+LOG_ERROR = log_level_to_int(Log.ERROR)
+LOG_FATAL = log_level_to_int(Log.FATAL)
+
 ROS_LOG_LEVEL_LABELS = {
-    Log.DEBUG: "DEBUG",
-    Log.INFO: "INFO",
-    Log.WARN: "WARN",
-    Log.ERROR: "ERROR",
-    Log.FATAL: "FATAL",
+    LOG_DEBUG: "DEBUG",
+    LOG_INFO: "INFO",
+    LOG_WARN: "WARN",
+    LOG_ERROR: "ERROR",
+    LOG_FATAL: "FATAL",
 }
 
 
@@ -950,127 +962,133 @@ class RobotUiBridgeNode(Node):
         )
 
     def _on_diagnostics(self, message: DiagnosticArray) -> None:
-        timestamp = (
-            message.header.stamp.sec
-            + message.header.stamp.nanosec / 1_000_000_000
-        ) or time.time()
-        max_statuses = max(
-            1, int(self._diagnostics_config.get("max_statuses", 200))
-        )
-        statuses: list[dict[str, Any]] = []
-        summary = {
-            "ok_count": 0,
-            "warn_count": 0,
-            "error_count": 0,
-            "stale_count": 0,
-            "total_count": 0,
-        }
-        current_levels: dict[str, int] = {}
-
-        for status in message.status[:max_statuses]:
-            level = int(status.level)
-            level_name = DIAGNOSTIC_LEVEL_LABELS.get(level, str(level))
-            name = status.name or "unnamed diagnostic"
-            values = {
-                item.key[:256]: item.value[:512]
-                for item in status.values
-            }
-            statuses.append(
-                {
-                    "name": name,
-                    "level": level,
-                    "level_name": level_name,
-                    "message": status.message[:1024],
-                    "hardware_id": status.hardware_id[:256],
-                    "values": values,
-                    "timestamp": timestamp,
-                }
+        try:
+            timestamp = (
+                message.header.stamp.sec
+                + message.header.stamp.nanosec / 1_000_000_000
+            ) or time.time()
+            max_statuses = max(
+                1, int(self._diagnostics_config.get("max_statuses", 200))
             )
-            summary_key = f"{level_name.lower()}_count"
-            if summary_key in summary:
-                summary[summary_key] += 1
-            summary["total_count"] += 1
-            current_levels[name] = level
+            statuses: list[dict[str, Any]] = []
+            summary = {
+                "ok_count": 0,
+                "warn_count": 0,
+                "error_count": 0,
+                "stale_count": 0,
+                "total_count": 0,
+            }
+            current_levels: dict[str, int] = {}
 
-            previous_level = self._diagnostic_levels.get(name)
-            if (
-                previous_level != level
-                and level
-                in (
-                    DiagnosticStatus.WARN,
-                    DiagnosticStatus.ERROR,
-                    DiagnosticStatus.STALE,
+            for status in message.status[:max_statuses]:
+                level = log_level_to_int(status.level)
+                level_name = DIAGNOSTIC_LEVEL_LABELS.get(level, str(level))
+                name = status.name or "unnamed diagnostic"
+                values = {
+                    item.key[:256]: item.value[:512]
+                    for item in status.values
+                }
+                statuses.append(
+                    {
+                        "name": name,
+                        "level": level,
+                        "level_name": level_name,
+                        "message": status.message[:1024],
+                        "hardware_id": status.hardware_id[:256],
+                        "values": values,
+                        "timestamp": timestamp,
+                    }
                 )
-            ):
-                self._store.append_event(
-                    "WARN" if level == DiagnosticStatus.WARN else "ERROR",
-                    "diagnostics",
-                    f"{name}: {level_name} - {status.message[:512]}",
-                )
+                summary_key = f"{level_name.lower()}_count"
+                if summary_key in summary:
+                    summary[summary_key] += 1
+                summary["total_count"] += 1
+                current_levels[name] = level
 
-        self._diagnostic_levels = current_levels
-        diagnostics_state = {
-            "summary": summary,
-            "statuses": statuses,
-            "message_timestamp": timestamp,
-            "truncated": len(message.status) > max_statuses,
-        }
-        self._store.patch_section("diagnostics", diagnostics_state)
-        self._store.update_topic(
-            self._topics["diagnostics"],
-            {
-                "message_type": "diagnostic_msgs/DiagnosticArray",
-                "latest": summary,
-            },
-            self._expected_rates.get(self._topics["diagnostics"]),
-        )
+                previous_level = self._diagnostic_levels.get(name)
+                if (
+                    previous_level != level
+                    and level
+                    in (
+                        DiagnosticStatus.WARN,
+                        DiagnosticStatus.ERROR,
+                        DiagnosticStatus.STALE,
+                    )
+                ):
+                    self._store.append_event(
+                        "WARN" if level == DiagnosticStatus.WARN else "ERROR",
+                        "diagnostics",
+                        f"{name}: {level_name} - {status.message[:512]}",
+                    )
+
+            self._diagnostic_levels = current_levels
+            diagnostics_state = {
+                "summary": summary,
+                "statuses": statuses,
+                "message_timestamp": timestamp,
+                "truncated": len(message.status) > max_statuses,
+            }
+            self._store.patch_section("diagnostics", diagnostics_state)
+            self._store.update_topic(
+                self._topics["diagnostics"],
+                {
+                    "message_type": "diagnostic_msgs/DiagnosticArray",
+                    "latest": summary,
+                },
+                self._expected_rates.get(self._topics["diagnostics"]),
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Error processing _on_diagnostics: {exc}")
 
     def _on_rosout(self, message: Log) -> None:
-        timestamp = (
-            message.stamp.sec + message.stamp.nanosec / 1_000_000_000
-        ) or time.time()
-        level = int(message.level)
-        level_name = ROS_LOG_LEVEL_LABELS.get(level, str(level))
-        entry = {
-            "timestamp": timestamp,
-            "received_at": time.time(),
-            "level": level,
-            "level_name": level_name,
-            "name": message.name[:256],
-            "message": message.msg[:4096],
-            "file": message.file[:512],
-            "function": message.function[:256],
-            "line": int(message.line),
-        }
-        self._store.append_ros_log(
-            entry,
-            max(
-                1,
-                int(
-                    self._diagnostics_config.get(
-                        "max_rosout_entries", 500
-                    )
+        try:
+            timestamp = (
+                message.stamp.sec + message.stamp.nanosec / 1_000_000_000
+            ) or time.time()
+            level = log_level_to_int(message.level)
+            level_name = ROS_LOG_LEVEL_LABELS.get(level, str(level))
+            entry = {
+                "timestamp": timestamp,
+                "received_at": time.time(),
+                "level": level,
+                "level_name": level_name,
+                "name": str(message.name)[:256],
+                "message": str(message.msg)[:4096],
+                "file": str(message.file)[:512],
+                "function": str(message.function)[:256],
+                "line": int(message.line),
+            }
+            self._store.append_ros_log(
+                entry,
+                max(
+                    1,
+                    int(
+                        self._diagnostics_config.get(
+                            "max_rosout_entries", 500
+                        )
+                    ),
                 ),
-            ),
-        )
-        if level >= Log.WARN:
-            self._store.append_event(
-                level_name,
-                message.name or "rosout",
-                message.msg[:1024],
             )
-        self._store.update_topic(
-            self._topics["rosout"],
-            {
-                "message_type": "rcl_interfaces/Log",
-                "latest": {
-                    "level": level_name,
-                    "name": message.name,
-                    "message": message.msg[:1024],
+            if level >= LOG_WARN:
+                self._store.append_event(
+                    level_name,
+                    message.name or "rosout",
+                    str(message.msg)[:1024],
+                )
+            self._store.update_topic(
+                self._topics["rosout"],
+                {
+                    "message_type": "rcl_interfaces/Log",
+                    "latest": {
+                        "level": level_name,
+                        "name": message.name,
+                        "message": str(message.msg)[:1024],
+                    },
                 },
-            },
-            self._expected_rates.get(self._topics["rosout"]),
-        )
+                self._expected_rates.get(self._topics["rosout"]),
+            )
+        except Exception as exc:
+            self.get_logger().error(f"Error processing _on_rosout: {exc}")
 
     def _refresh_topic_health(self) -> None:
         transitions = self._store.refresh_topic_health(
