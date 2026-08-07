@@ -82,7 +82,8 @@ ros2 launch mo_hinh virtual_slam.launch.py
 ros2 launch layer1_bringup layer1.launch.py esp_port:=/dev/ttyUSB0 lidar_port:=/dev/ttyUSB1
 
 ```
-ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/phuongoi.yaml
+ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=/home/orin/ros2_ws/my_map/cam.yaml
+```
 
 
 ## launch asstra pro camera 
@@ -90,15 +91,25 @@ source ~/ros2_ws/install/setup.bash
 ros2 launch astra_camera astra_pro.launch.xml
 
 
-## runyolo pose detection 
+## YOLO11 person detection
 source ~/ros2_ws/install/setup.bash
-ros2 launch yolo_bringup yolo.launch.py
+ros2 launch yolo_bringup yolo.launch.py model:=yolo11n.pt device:=cuda:0 input_image_topic:=/camera/color/image_raw
 
 
 
-## pose ros node hand wave detection 
+## hand wave detection
+cd ~/ros2_ws/src/HandWaveDetection_Pose
+bash setup_env.sh
+source .venv/bin/activate
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install --packages-select hand_wave_detection
 source ~/ros2_ws/install/setup.bash
-ros2 run pose_detection pose_ros_node
+ros2 launch hand_wave_detection hand_wave_detection.launch.py backend:=rtmpose device:=cuda:0
+
+## person following + hand wave
+cd ~/ros2_ws
+PERSON_MODEL=yolo11n.pt HAND_WAVE_BACKEND=rtmpose bash start_person_following.sh
 
 
 ## robot gui WWeb 

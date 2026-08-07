@@ -12,7 +12,11 @@ Source = Union[int, str]
 class ModelSettings:
     yolo_pose: str = 'yolo11n-pose.pt'
     detector: str = 'yolo11n.pt'
-    rtmpose: str = 'models/rtmpose-s.onnx'
+    rtmpose: str = (
+        'https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/'
+        'onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-'
+        'acd4a1ef_20230504.zip'
+    )
 
 
 @dataclass(slots=True)

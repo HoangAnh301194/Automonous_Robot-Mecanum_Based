@@ -79,10 +79,10 @@ The compatible models for yolo_ros are the following:
 ros2 launch yolo_bringup yolov5.launch.py
 ```
 
-### YOLOv8
+### YOLO
 
 ```shell
-ros2 launch yolo_bringup yolov8.launch.py
+ros2 launch yolo_bringup yolo.launch.py model:=yolo11n.pt
 ```
 
 ### YOLOv9

@@ -19,5 +19,5 @@ colcon build --packages-select yolo_ros yolo_msgs yolo_bringup
 echo "--------------------------------------------------------"
 echo "Cai dat thanh cong! Ban hay chay lenh sau de su dung YOLO chay bang he thong GPU:"
 echo "source $WS_ROOT/install/setup.bash"
-echo "ros2 launch yolo_bringup yolov8.launch.py"
+echo "ros2 launch yolo_bringup yolo.launch.py model:=yolo11n.pt"
 echo "--------------------------------------------------------"

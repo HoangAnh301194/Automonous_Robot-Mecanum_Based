@@ -25,7 +25,7 @@ def generate_launch_description():
         model = LaunchConfiguration("model")
         model_cmd = DeclareLaunchArgument(
             "model",
-            default_value="/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine", 
+            default_value="yolo11n.pt",
             description="Model name or path",
         )
 

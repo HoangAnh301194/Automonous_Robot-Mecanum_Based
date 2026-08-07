@@ -12,7 +12,9 @@ def generate_launch_description():
     yolo_bringup_dir = get_package_share_directory('yolo_bringup')
     
     # Arguments
-    model_arg = DeclareLaunchArgument('model', default_value='/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine')
+    model_arg = DeclareLaunchArgument('model', default_value='yolo11n.pt')
+    tracker_arg = DeclareLaunchArgument('tracker', default_value='bytetrack.yaml')
+    device_arg = DeclareLaunchArgument('device', default_value='cuda:0')
     input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/camera/color/image_raw')
     input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='/camera/depth/image_raw')
     input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/depth/camera_info')
@@ -21,9 +23,11 @@ def generate_launch_description():
     
     # YOLO + Tracking + 3D + Debug (Visuals)
     yolo_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(yolo_bringup_dir, 'launch', 'yolov8.launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(yolo_bringup_dir, 'launch', 'yolo.launch.py')),
         launch_arguments={
             'model': LaunchConfiguration('model'),
+            'tracker': LaunchConfiguration('tracker'),
+            'device': LaunchConfiguration('device'),
             'use_tracking': 'True',
             'use_3d': 'True',
             'use_debug': 'False', # Disabled to save CPU and improve FPS
@@ -51,6 +55,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         model_arg,
+        tracker_arg,
+        device_arg,
         input_image_topic_arg,
         input_depth_topic_arg,
         input_depth_info_topic_arg,

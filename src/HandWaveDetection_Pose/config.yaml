@@ -1,12 +1,12 @@
 stage: raised_hand
-backend: yolo11
+backend: rtmpose
 device: cpu
 source: 0
 
 models:
-  yolo_pose: models/yolo11n-pose.pt
-  detector: models/yolo11n.pt
-  rtmpose: models/rtmpose-s.onnx
+  yolo_pose: yolo11n-pose.pt
+  detector: yolo11n.pt
+  rtmpose: https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip
 
 processing:
   max_people: 5

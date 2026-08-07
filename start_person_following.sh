@@ -9,6 +9,7 @@ cleanup() {
     pkill -9 -f ros2 2>/dev/null
     pkill -9 -f astra_camera 2>/dev/null
     pkill -9 -f yolo_node 2>/dev/null
+    pkill -9 -f hand_wave_detector 2>/dev/null
     exit 0
 }
 
@@ -24,6 +25,7 @@ pkill -9 -f realsense2_camera
 pkill -9 -f yolo_node
 pkill -9 -f follower_node
 pkill -9 -f face_recognition_node
+pkill -9 -f hand_wave_detector
 
 rm -rf /dev/shm/fastrtps* 2>/dev/null
 sleep 2
@@ -40,6 +42,9 @@ source /opt/ros/humble/setup.bash
 cd /home/orin/ros2_ws
 source install/setup.bash
 
+PERSON_MODEL="${PERSON_MODEL:-yolo11n.pt}"
+HAND_WAVE_BACKEND="${HAND_WAVE_BACKEND:-rtmpose}"
+
 # 4. Launch Astra Pro Camera in background
 # Topics: /camera/color/image_raw, /camera/depth/image_raw, /camera/depth/camera_info
 echo "Launching Astra Pro Camera..."
@@ -52,16 +57,24 @@ ros2 launch astra_camera astra_pro.launch.xml \
     > /tmp/camera.log 2>&1 &
 sleep 5
 
-# 5. Launch Person Follower (YOLOv8 TensorRT)
-echo "Launching Person Follower (YOLO26 pose TensorRT)..."
+# 5. Launch Person Follower (YOLO11)
+echo "Launching Person Follower (YOLO11)..."
 ros2 launch yolo_bringup person_follower.launch.py \
-    model:=/home/orin/ros2_ws/src/HandWaveDetection_Pose/models/yolo26n-pose.engine \
+    model:="$PERSON_MODEL" \
     device:=cuda:0 \
     input_image_topic:=/camera/color/image_raw \
     input_depth_topic:=/camera/depth/image_raw \
     input_depth_info_topic:=/camera/depth/camera_info \
     > /tmp/yolo.log 2>&1 &
 sleep 15
+
+echo "Launching Hand Wave Detection ($HAND_WAVE_BACKEND)..."
+ros2 launch hand_wave_detection hand_wave_detection.launch.py \
+    backend:="$HAND_WAVE_BACKEND" \
+    device:=cuda:0 \
+    image_topic:=/camera/color/image_raw \
+    > /tmp/hand_wave.log 2>&1 &
+sleep 5
 
 echo "----------------------------------------------------"
 echo "He thong da san sang! (Face Recognition da tat)"
@@ -71,6 +84,7 @@ echo "  - Depth: /camera/depth/image_raw"
 echo "- Xem anh Debug YOLO: ros2 run rqt_image_view rqt_image_view /yolo/dbg_image"
 echo "- Log camera:  tail -f /tmp/camera.log"
 echo "- Log YOLO:    tail -f /tmp/yolo.log"
+echo "- Log HandWave: tail -f /tmp/hand_wave.log"
 echo "----------------------------------------------------"
 
 # Stay alive to keep processes running
