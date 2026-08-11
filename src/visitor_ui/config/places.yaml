@@ -1,0 +1,32 @@
+places:
+  - id: reception
+    name:
+      vi: Quầy lễ tân
+      en: Reception
+    category: service
+    pose: {x: 0.50, y: 0.50, yaw: 0.0}
+    description:
+      vi: Nơi hỗ trợ thông tin và tiếp nhận khách.
+      en: Visitor information and assistance desk.
+
+  - id: cafeteria
+    name:
+      vi: Căn tin
+      en: Cafeteria
+    category: facility
+    pose: {x: 2.50, y: 1.50, yaw: 1.57}
+    description:
+      vi: Khu vực ăn uống.
+      en: Dining area.
+
+  - id: restroom
+    name:
+      vi: Nhà vệ sinh
+      en: Restroom
+    category: facility
+    pose: {x: 1.50, y: 0.50, yaw: 0.0}
+    description:
+      vi: Nhà vệ sinh gần nhất.
+      en: Nearest restroom.
+
+# Thay tọa độ mẫu bằng pose trên map thực tế trước khi chạy navigation.

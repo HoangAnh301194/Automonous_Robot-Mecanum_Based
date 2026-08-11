@@ -1,0 +1,56 @@
+app:
+  title: Robot Hỗ Trợ Sảnh
+  kiosk_mode: true
+  default_language: vi
+  supported_languages: [vi, en]
+  session_idle_reset_seconds: 60
+
+theme:
+  mode: light
+  primary_color: '#1565C0'
+  accent_color: '#00A6A6'
+  background_color: '#F6F9FC'
+  high_contrast_enabled: true
+  minimum_touch_target_px: 72
+
+emotion:
+  initial_state: idle
+  states:
+    - idle
+    - greeting
+    - thinking
+    - navigating
+    - arrived
+    - warning
+    - offline
+
+navigation:
+  enabled: true
+  map_topic: /map
+  action_name: /navigate_to_pose
+  action_status_topic: /navigate_to_pose/_action/status
+  map_frame: map
+  base_frame: base_footprint
+  allow_free_map_goal: true
+  require_confirmation: true
+  goal_timeout_seconds: 300
+  minimum_goal_distance_m: 0.30
+  approved_places_file: places.yaml
+
+information:
+  knowledge_base_file: knowledge_base.vi.yaml
+  search_max_results: 6
+  enable_external_llm: false
+
+feedback:
+  enabled: true
+  storage: sqlite
+  database_path: data/visitor_feedback.sqlite3
+  retain_days: 90
+  allow_free_text: true
+  maximum_comment_length: 500
+
+privacy:
+  show_camera_preview: false
+  store_personal_data: false
+  store_question_history: false

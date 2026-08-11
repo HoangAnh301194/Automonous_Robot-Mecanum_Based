@@ -1,0 +1,25 @@
+entries:
+  - id: robot_intro
+    intents: [giới thiệu robot, robot làm được gì, robot này là gì]
+    title: Giới thiệu robot
+    answer: Robot hỗ trợ khách tìm đường, cung cấp thông tin và tiếp nhận phản hồi tại sảnh.
+    suggested_actions: [navigate, feedback]
+
+  - id: how_to_navigate
+    intents: [cách dẫn đường, đi đến địa điểm, sử dụng bản đồ]
+    title: Cách chọn điểm đến
+    answer: Chọn Dẫn đường, chạm một điểm trên bản đồ, kéo mũi tên để chọn hướng khi đến nơi, rồi xác nhận.
+    suggested_actions: [navigate]
+
+  - id: reception_info
+    intents: [quầy lễ tân ở đâu, lễ tân]
+    title: Quầy lễ tân
+    answer: Tôi có thể dẫn bạn đến quầy lễ tân.
+    linked_place_id: reception
+    suggested_actions: [navigate]
+
+  - id: privacy
+    intents: [quyền riêng tư, camera, dữ liệu]
+    title: Quyền riêng tư
+    answer: Giao diện khách không lưu lịch sử câu hỏi hoặc dữ liệu cá nhân. Camera preview không hiển thị mặc định.
+    suggested_actions: []
