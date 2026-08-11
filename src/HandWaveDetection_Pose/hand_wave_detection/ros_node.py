@@ -285,9 +285,10 @@ class HandWaveDetectionNode(Node):
         self.debug_pub.publish(debug_message)
 
     def _report_error(self, error: Exception) -> None:
+        import traceback
         now = time.monotonic()
         if now - self.last_error_time >= 5.0:
-            self.get_logger().error(f'Hand-wave frame processing failed: {error}')
+            self.get_logger().error(f'Hand-wave frame processing failed: {error}\n{traceback.format_exc()}')
             self.last_error_time = now
 
 
