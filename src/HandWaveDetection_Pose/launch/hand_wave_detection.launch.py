@@ -53,6 +53,11 @@ def generate_launch_description():
                 ),
                 description='Optional local RTMPose ONNX model override.',
             ),
+            DeclareLaunchArgument(
+                'tracking_topic',
+                default_value='/yolo/tracking',
+                description='YOLO tracking topic for person bounding boxes (yolo_msgs/DetectionArray).',
+            ),
             Node(
                 package='hand_wave_detection',
                 executable='hand_wave_detector',
@@ -62,6 +67,7 @@ def generate_launch_description():
                     {
                         'config': LaunchConfiguration('config'),
                         'image_topic': LaunchConfiguration('image_topic'),
+                        'tracking_topic': LaunchConfiguration('tracking_topic'),
                         'backend': LaunchConfiguration('backend'),
                         'device': LaunchConfiguration('device'),
                         'detector_model': LaunchConfiguration('detector_model'),
