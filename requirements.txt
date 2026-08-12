@@ -14,10 +14,5 @@ ultralytics==8.4.6              # YOLOv8 pose detection
 # --- Tracking (ByteTrack) ---
 lap>=0.5.12                     # Linear Assignment Problem solver cho tracker
 
-# --- Face Recognition ---
-face-recognition                # dlib-based face recognition
-face-recognition-models         # model data cho face-recognition
-dlib                            # dependency của face-recognition (cần cmake)
-
 # --- Realsense Camera (Python bindings) ---
 pyrealsense2                    # Intel RealSense SDK Python wrapper
