@@ -113,6 +113,7 @@ ros2 launch yolo_bringup yolo.launch.py \
   imgsz_height:=384 \
   imgsz_width:=640 \
   max_det:=10 \
+  namespace:=yolo \
   input_image_topic:=/camera/color/image_raw
 ```
 *Infers 2D BBoxes (Person class only, 384x640) & Tracking IDs, published to `/yolo/tracking`.*
