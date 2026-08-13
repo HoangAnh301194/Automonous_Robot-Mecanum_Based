@@ -40,7 +40,7 @@ source /opt/ros/humble/setup.bash
 cd /home/orin/ros2_ws
 source install/setup.bash
 
-PERSON_MODEL="${PERSON_MODEL:-yolo11n.pt}"
+PERSON_MODEL="${PERSON_MODEL:-yolo11n.engine}"
 HAND_WAVE_BACKEND="${HAND_WAVE_BACKEND:-rtmpose}"
 
 # Patch 1: optimized defaults
