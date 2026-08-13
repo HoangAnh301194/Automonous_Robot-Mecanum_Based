@@ -18,6 +18,7 @@ from ultralytics.engine.results import Boxes
 from ultralytics.engine.results import Masks
 from ultralytics.engine.results import Keypoints
 
+from rcl_interfaces.msg import ParameterDescriptor
 from std_srvs.srv import SetBool
 from sensor_msgs.msg import Image
 from yolo_msgs.msg import Point2D
@@ -73,7 +74,10 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("augment", False)
         self.declare_parameter("agnostic_nms", False)
         self.declare_parameter("retina_masks", False)
-        self.declare_parameter("classes", "")
+        self.declare_parameter(
+            "classes",
+            descriptor=ParameterDescriptor(dynamic_typing=True),
+        )
 
         self.type_to_model = {"YOLO": YOLO, "World": YOLOWorld, "YOLOE": YOLOE}
 
