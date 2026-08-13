@@ -469,6 +469,30 @@ class DebugNode(LifecycleNode):
                     marker.id = len(kp_marker_array.markers)
                     kp_marker_array.markers.append(marker)
 
+        # Calculate and render FPS on debug image
+        import time
+        now = time.perf_counter()
+        if not hasattr(self, '_last_cb_time'):
+            self._last_cb_time = now
+            self._debug_fps = 0.0
+        else:
+            dt = now - self._last_cb_time
+            self._last_cb_time = now
+            if dt > 0:
+                self._debug_fps = 0.9 * getattr(self, '_debug_fps', 0.0) + 0.1 * (1.0 / dt)
+
+        fps_text = f"YOLO FPS: {getattr(self, '_debug_fps', 0.0):.1f}"
+        cv2.putText(
+            cv_image,
+            fps_text,
+            (20, 40),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 255, 0),
+            2,
+            cv2.LINE_AA,
+        )
+
         # Publish dbg image
         self._dbg_pub.publish(
             self.cv_bridge.cv2_to_imgmsg(cv_image, encoding="bgr8", header=img_msg.header)

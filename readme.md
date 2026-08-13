@@ -102,7 +102,7 @@ ros2 launch astra_camera astra_pro.launch.xml
 ```
 *Published topics: `/camera/color/image_raw`, `/camera/depth/image_raw`, `/camera/depth/camera_info`*
 
-### Step 2: Launch YOLO11 Detection (TensorRT Accelerated + Skip Frame)
+### Step 2: Launch YOLO11 Detection (TensorRT Accelerated - Maximum FPS)
 > [!TIP]
 > **Export TensorRT Engine (thực hiện 1 lần trên Jetson)**:
 > `yolo export model=yolo11n.pt format=engine imgsz=384,640 half=True device=0`
@@ -112,7 +112,8 @@ source ~/ros2_ws/install/setup.bash
 ros2 launch yolo_bringup yolo.launch.py \
   model:=yolo11n.engine \
   use_tracking:=False \
-  skip_frames:=2 \
+  skip_frames:=0 \
+  use_debug:=True \
   device:=cuda:0 \
   classes:=0 \
   imgsz_height:=384 \
@@ -121,7 +122,7 @@ ros2 launch yolo_bringup yolo.launch.py \
   namespace:=yolo \
   input_image_topic:=/camera/color/image_raw
 ```
-*Infers 2D BBoxes (Person class only, 384x640) with Skip Frame 2 (processes 1/3 frames) via TensorRT GPU Engine, published to `/yolo/detections`.*
+*Infers 2D BBoxes (Person class only, 384x640) at maximum FPS via TensorRT GPU Engine, published to `/yolo/detections` and `/yolo/dbg_image` with live FPS overlay.*
 
 ### Step 3: Launch Hand Wave Detection (Lightweight RTMPose)
 ```bash

@@ -222,7 +222,7 @@ def generate_launch_description():
         skip_frames = LaunchConfiguration("skip_frames")
         skip_frames_cmd = DeclareLaunchArgument(
             "skip_frames",
-            default_value="2",
+            default_value="0",
             description="Number of frames to skip between inferences (0 = process all frames, 2 = process 1 frame every 3 frames)",
         )
 
