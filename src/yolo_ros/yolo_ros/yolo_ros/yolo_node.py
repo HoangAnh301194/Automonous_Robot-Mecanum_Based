@@ -123,23 +123,26 @@ class YoloNode(LifecycleNode):
         )
 
         # Classes filter (Patch 1)
-        classes_value = (
-            self.get_parameter("classes")
-            .get_parameter_value()
-            .string_value
-            .strip()
-        )
-        try:
-            self.classes = (
-                [int(item.strip()) for item in classes_value.split(",")]
-                if classes_value
-                else None
-            )
-        except ValueError:
-            self.get_logger().error(
-                f"Invalid classes parameter: '{classes_value}'"
-            )
-            return TransitionCallbackReturn.ERROR
+        classes_param = self.get_parameter("classes").value
+        if classes_param is None or classes_param == "" or classes_param == []:
+            self.classes = None
+        elif isinstance(classes_param, (int, float)):
+            self.classes = [int(classes_param)]
+        elif isinstance(classes_param, (list, tuple)):
+            self.classes = [int(x) for x in classes_param]
+        else:
+            classes_str = str(classes_param).strip()
+            try:
+                self.classes = (
+                    [int(item.strip()) for item in classes_str.split(",") if item.strip()]
+                    if classes_str
+                    else None
+                )
+            except ValueError:
+                self.get_logger().error(
+                    f"Invalid classes parameter: '{classes_str}'"
+                )
+                return TransitionCallbackReturn.ERROR
         self.get_logger().info(f"Classes filter: {self.classes}")
 
         # ROS params
