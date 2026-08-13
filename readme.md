@@ -139,7 +139,7 @@ ros2 launch hand_wave_detection hand_wave_detection.launch.py \
 > - **Chạy `backend:=rtmpose`**: Dùng `device:=cpu`. RTMPose chạy thông qua ONNX Runtime. Gói `onnxruntime` mặc định từ `pip` trên Linux ARM64 (Jetson Orin) chỉ hỗ trợ CPU execution provider. Vì khung hình crop của RTMPose rất nhỏ (256x192) nên xử lý trên CPU cực kỳ nhanh (~2-5ms) và không gây tải nặng.
 > - **Chạy `backend:=yolo11`**: Có thể dùng `device:=cuda:0` vì YOLO11 Pose chạy trực tiếp qua PyTorch GPU (`torch.cuda`).
 > - **Để bật GPU cho RTMPose về sau**: Cần cài đặt gói `onnxruntime-gpu` (bản build riêng hỗ trợ CUDA/TensorRT cho Jetson JetPack).
-*Synchronizes color images with `/yolo/tracking`, executes BatchedRTMPose, and applies temporal hand wave rules.*
+*Synchronizes color images with `/yolo/detections`, executes BatchedRTMPose, and applies temporal hand wave rules.*
 
 ### Step 4: Verify Output Topics & Visualization
 ```bash
