@@ -85,6 +85,7 @@ class HandWaveDetectionNode(Node):
         self._metric_frame_count = 0
         self._metric_last_log = time.monotonic()
         self._metric_log_interval = 3.0
+        self._current_fps = 0.0
 
         image_topic = self._string_parameter(
             'image_topic', '/camera/color/image_raw'
@@ -305,6 +306,7 @@ class HandWaveDetectionNode(Node):
                 avg_total = self._metric_total_ms_sum / n
                 avg_bbox = self._metric_bbox_count_sum / n
                 fps = n / elapsed
+                self._current_fps = fps
                 self.get_logger().info(
                     f'[HandWave metrics] fps={fps:.1f} '
                     f'pose={avg_pose:.1f}ms '
@@ -356,13 +358,15 @@ class HandWaveDetectionNode(Node):
             self.config.processing.keypoint_threshold,
             stage=self.config.stage,
         )
+        fps_text = f"FPS: {self._current_fps:.1f}" if self._current_fps > 0 else "FPS: --"
+        overlay_text = f"{self.config.backend} | {fps_text} | {self.device}"
         cv2.putText(
             annotated,
-            f'{self.config.backend} | {backend_name} | {self.device}',
+            overlay_text,
             (16, 30),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.70,
-            (255, 255, 255),
+            0.80,
+            (0, 255, 0),
             2,
             cv2.LINE_AA,
         )

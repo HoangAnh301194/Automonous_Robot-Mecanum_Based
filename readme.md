@@ -102,23 +102,28 @@ ros2 launch astra_camera astra_pro.launch.xml
 ```
 *Published topics: `/camera/color/image_raw`, `/camera/depth/image_raw`, `/camera/depth/camera_info`*
 
-### Step 2: Launch YOLO11 Detection & Tracking
+### Step 2: Launch YOLO11 Detection & Tracking (Optimized Person Only)
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch yolo_bringup yolo.launch.py \
   model:=yolo11n.pt \
   use_tracking:=True \
   device:=cuda:0 \
+  classes:=0 \
+  imgsz_height:=384 \
+  imgsz_width:=640 \
+  max_det:=10 \
   input_image_topic:=/camera/color/image_raw
 ```
-*Infers 2D BBoxes & Tracking IDs, published to `/yolo/tracking`.*
+*Infers 2D BBoxes (Person class only, 384x640) & Tracking IDs, published to `/yolo/tracking`.*
 
-### Step 3: Launch Hand Wave Detection (Lightweight RTMPose with External BBoxes)
+### Step 3: Launch Hand Wave Detection (Lightweight RTMPose)
 ```bash
 source ~/ros2_ws/install/setup.bash
 ros2 launch hand_wave_detection hand_wave_detection.launch.py \
   backend:=rtmpose \
   device:=cpu \
+  max_people:=5 \
   image_topic:=/camera/color/image_raw \
   tracking_topic:=/yolo/tracking
 ```
