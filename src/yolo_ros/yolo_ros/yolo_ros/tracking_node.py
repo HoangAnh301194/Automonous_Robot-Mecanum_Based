@@ -14,6 +14,8 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import time
+
 import rclpy
 from rclpy.qos import QoSProfile
 from rclpy.qos import QoSHistoryPolicy
@@ -54,6 +56,15 @@ class TrackingNode(LifecycleNode):
         Declares ROS parameters for tracker configuration.
         """
         super().__init__("tracking_node")
+
+        # ── Patch 0: instrumentation ──
+        self._metric_convert_ms_sum = 0.0
+        self._metric_tracker_ms_sum = 0.0
+        self._metric_input_det_sum = 0
+        self._metric_output_track_sum = 0
+        self._metric_frame_count = 0
+        self._metric_last_log = time.monotonic()
+        self._metric_log_interval = 3.0
 
         # Params
         self.declare_parameter("tracker", "bytetrack.yaml")
@@ -216,12 +227,22 @@ class TrackingNode(LifecycleNode):
         @param detections_msg Detections message
         """
 
+        # ── Patch 0: measure sync input age ──
+        try:
+            stamp = rclpy.time.Time.from_msg(img_msg.header.stamp)
+            input_age_ms = (self.get_clock().now() - stamp).nanoseconds / 1e6
+        except Exception:
+            input_age_ms = -1.0
+
         tracked_detections_msg = DetectionArray()
         tracked_detections_msg.header = img_msg.header
 
+        # ── Patch 0: measure image conversion ──
+        t_convert_start = time.perf_counter()
         # Convert image
         cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
         cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        convert_ms = (time.perf_counter() - t_convert_start) * 1000.0
 
         # Parse detections
         detection_list = []
@@ -239,6 +260,8 @@ class TrackingNode(LifecycleNode):
                 ]
             )
 
+        # ── Patch 0: measure tracker update ──
+        t_tracker_start = time.perf_counter()
         # Tracking
         if len(detection_list) > 0:
 
@@ -268,8 +291,42 @@ class TrackingNode(LifecycleNode):
                     # Append msg
                     tracked_detections_msg.detections.append(tracked_detection)
 
+        tracker_ms = (time.perf_counter() - t_tracker_start) * 1000.0
+        input_det_count = len(detection_list)
+        output_track_count = len(tracked_detections_msg.detections)
+
         # Publish detections
         self._pub.publish(tracked_detections_msg)
+
+        # ── Patch 0: accumulate and log throttled ──
+        self._metric_convert_ms_sum += convert_ms
+        self._metric_tracker_ms_sum += tracker_ms
+        self._metric_input_det_sum += input_det_count
+        self._metric_output_track_sum += output_track_count
+        self._metric_frame_count += 1
+
+        now = time.monotonic()
+        elapsed = now - self._metric_last_log
+        if elapsed >= self._metric_log_interval:
+            n = self._metric_frame_count
+            avg_convert = self._metric_convert_ms_sum / n
+            avg_tracker = self._metric_tracker_ms_sum / n
+            avg_in = self._metric_input_det_sum / n
+            avg_out = self._metric_output_track_sum / n
+            fps = n / elapsed
+            self.get_logger().info(
+                f'[Tracking metrics] fps={fps:.1f} '
+                f'convert={avg_convert:.1f}ms '
+                f'tracker={avg_tracker:.1f}ms '
+                f'in_det={avg_in:.1f} out_track={avg_out:.1f} '
+                f'input_age={input_age_ms:.0f}ms'
+            )
+            self._metric_convert_ms_sum = 0.0
+            self._metric_tracker_ms_sum = 0.0
+            self._metric_input_det_sum = 0
+            self._metric_output_track_sum = 0
+            self._metric_frame_count = 0
+            self._metric_last_log = now
 
 
 def main():

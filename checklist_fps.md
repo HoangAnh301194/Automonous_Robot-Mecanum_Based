@@ -8,10 +8,10 @@
 ## Patch 0 — Instrumentation baseline ⏱️
 > Mục tiêu: Có số liệu thực tế TRƯỚC KHI sửa bất kỳ thứ gì
 
-- [ ] **0.1** Thêm `time.perf_counter()` đo `predict_ms` trong `yolo_node.py` (quanh `self.yolo.predict`)
-- [ ] **0.2** Thêm đo `tracker_update_ms` + `image_conversion_ms` trong `tracking_node.py` (quanh `imgmsg_to_cv2` + `cvtColor` + `tracker.update`)
-- [ ] **0.3** Thêm đo `pose_ms` + `callback_total_ms` + `pair_age_ms` trong `ros_node.py` (quanh `self.pose()` và toàn callback)
-- [ ] **0.4** Log tổng hợp throttled mỗi 3 giây (không log mỗi frame)
+- [x] **0.1** Thêm `time.perf_counter()` đo `predict_ms` trong `yolo_node.py` (quanh `self.yolo.predict`)
+- [x] **0.2** Thêm đo `tracker_update_ms` + `image_conversion_ms` trong `tracking_node.py` (quanh `imgmsg_to_cv2` + `cvtColor` + `tracker.update`)
+- [x] **0.3** Thêm đo `pose_ms` + `callback_total_ms` + `pair_age_ms` trong `ros_node.py` (quanh `self.pose()` và toàn callback)
+- [x] **0.4** Log tổng hợp throttled mỗi 3 giây (không log mỗi frame)
 - [ ] **0.5** Chạy trên Jetson: `sudo nvpmodel -m 0 && sudo jetson_clocks`
 - [ ] **0.6** Ghi lại version: JetPack, PyTorch, ONNX Runtime, Ultralytics, Python
 - [ ] **0.7** Thu thập baseline 120 giây, ghi vào bảng:

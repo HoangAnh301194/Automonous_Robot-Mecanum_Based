@@ -66,6 +66,16 @@ class HandWaveDetectionNode(Node):
         self.temporal_filter = TemporalRaisedHandFilter()
         self.last_error_time = 0.0
 
+        # ── Patch 0: instrumentation ──
+        self._metric_pose_ms_sum = 0.0
+        self._metric_classify_ms_sum = 0.0
+        self._metric_debug_ms_sum = 0.0
+        self._metric_total_ms_sum = 0.0
+        self._metric_bbox_count_sum = 0
+        self._metric_frame_count = 0
+        self._metric_last_log = time.monotonic()
+        self._metric_log_interval = 3.0
+
         image_topic = self._string_parameter(
             'image_topic', '/camera/color/image_raw'
         )
@@ -150,6 +160,14 @@ class HandWaveDetectionNode(Node):
         self, image_msg: Image, tracking_msg: DetectionArray
     ) -> None:
         try:
+            # ── Patch 0: measure callback total and pair age ──
+            t_callback_start = time.perf_counter()
+            try:
+                stamp = rclpy.time.Time.from_msg(image_msg.header.stamp)
+                pair_age_ms = (self.get_clock().now() - stamp).nanoseconds / 1e6
+            except Exception:
+                pair_age_ms = -1.0
+
             frame = self.bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
             confidence_threshold = self.config.processing.confidence
 
@@ -192,7 +210,11 @@ class HandWaveDetectionNode(Node):
                     track_ids.append(tid)
                     confidences.append(float(det.score))
 
+            bbox_count = len(raw_bboxes)
+
             people: List[PersonPose] = []
+            # ── Patch 0: measure pose inference ──
+            t_pose_start = time.perf_counter()
             if raw_bboxes:
                 expanded_bboxes = [
                     expand_bbox(
@@ -232,10 +254,56 @@ class HandWaveDetectionNode(Node):
                         keypoint_scores=kpts_scores,
                     )
                     people.append(person)
+            pose_ms = (time.perf_counter() - t_pose_start) * 1000.0
 
+            # ── Patch 0: measure classify ──
+            t_classify_start = time.perf_counter()
             self._classify_people(people)
             self._publish_wave_status(people)
+            classify_ms = (time.perf_counter() - t_classify_start) * 1000.0
+
+            # ── Patch 0: measure debug render ──
+            t_debug_start = time.perf_counter()
             self._publish_debug_image(frame, people, 'rtmpose_external_bbox', image_msg)
+            debug_ms = (time.perf_counter() - t_debug_start) * 1000.0
+
+            total_ms = (time.perf_counter() - t_callback_start) * 1000.0
+
+            # ── Patch 0: accumulate and log throttled ──
+            self._metric_pose_ms_sum += pose_ms
+            self._metric_classify_ms_sum += classify_ms
+            self._metric_debug_ms_sum += debug_ms
+            self._metric_total_ms_sum += total_ms
+            self._metric_bbox_count_sum += bbox_count
+            self._metric_frame_count += 1
+
+            now = time.monotonic()
+            elapsed = now - self._metric_last_log
+            if elapsed >= self._metric_log_interval:
+                n = self._metric_frame_count
+                avg_pose = self._metric_pose_ms_sum / n
+                avg_cls = self._metric_classify_ms_sum / n
+                avg_dbg = self._metric_debug_ms_sum / n
+                avg_total = self._metric_total_ms_sum / n
+                avg_bbox = self._metric_bbox_count_sum / n
+                fps = n / elapsed
+                self.get_logger().info(
+                    f'[HandWave metrics] fps={fps:.1f} '
+                    f'pose={avg_pose:.1f}ms '
+                    f'classify={avg_cls:.1f}ms '
+                    f'debug={avg_dbg:.1f}ms '
+                    f'total={avg_total:.1f}ms '
+                    f'bbox_count={avg_bbox:.1f} '
+                    f'pair_age={pair_age_ms:.0f}ms'
+                )
+                self._metric_pose_ms_sum = 0.0
+                self._metric_classify_ms_sum = 0.0
+                self._metric_debug_ms_sum = 0.0
+                self._metric_total_ms_sum = 0.0
+                self._metric_bbox_count_sum = 0
+                self._metric_frame_count = 0
+                self._metric_last_log = now
+
         except Exception as error:
             self._report_error(error)
 

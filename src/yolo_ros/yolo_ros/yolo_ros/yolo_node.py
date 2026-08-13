@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
+import time
 from typing import List, Dict
 from cv_bridge import CvBridge
 
@@ -61,6 +62,14 @@ class YoloNode(LifecycleNode):
         Declares all ROS parameters for model configuration and inference settings.
         """
         super().__init__("yolo_node")
+
+        # ── Patch 0: instrumentation ──
+        self._metric_predict_ms_sum = 0.0
+        self._metric_parse_ms_sum = 0.0
+        self._metric_det_count_sum = 0
+        self._metric_frame_count = 0
+        self._metric_last_log = time.monotonic()
+        self._metric_log_interval = 3.0  # seconds
 
         # Params
         self.declare_parameter("model_type", "YOLO")
@@ -444,10 +453,20 @@ class YoloNode(LifecycleNode):
 
         if self.enable:
 
+            # ── Patch 0: measure frame age ──
+            try:
+                stamp = rclpy.time.Time.from_msg(msg.header.stamp)
+                frame_age_ms = (self.get_clock().now() - stamp).nanoseconds / 1e6
+            except Exception:
+                frame_age_ms = -1.0
+
             # Convert image + predict
             cv_image = self.cv_bridge.imgmsg_to_cv2(
                 msg, desired_encoding=self.yolo_encoding
             )
+
+            # ── Patch 0: measure predict ──
+            t_predict_start = time.perf_counter()
             results = self.yolo.predict(
                 source=cv_image,
                 verbose=False,
@@ -462,6 +481,10 @@ class YoloNode(LifecycleNode):
                 retina_masks=self.retina_masks,
                 device=self.device,
             )
+            predict_ms = (time.perf_counter() - t_predict_start) * 1000.0
+
+            # ── Patch 0: measure GPU→CPU parse ──
+            t_parse_start = time.perf_counter()
             results: Results = results[0].cpu()
 
             if results.boxes or results.obb:
@@ -496,9 +519,39 @@ class YoloNode(LifecycleNode):
 
                 detections_msg.detections.append(aux_msg)
 
+            parse_ms = (time.perf_counter() - t_parse_start) * 1000.0
+            det_count = len(detections_msg.detections)
+
             # Publish detections
             detections_msg.header = msg.header
             self._pub.publish(detections_msg)
+
+            # ── Patch 0: accumulate and log throttled ──
+            self._metric_predict_ms_sum += predict_ms
+            self._metric_parse_ms_sum += parse_ms
+            self._metric_det_count_sum += det_count
+            self._metric_frame_count += 1
+
+            now = time.monotonic()
+            elapsed = now - self._metric_last_log
+            if elapsed >= self._metric_log_interval:
+                n = self._metric_frame_count
+                avg_predict = self._metric_predict_ms_sum / n
+                avg_parse = self._metric_parse_ms_sum / n
+                avg_det = self._metric_det_count_sum / n
+                fps = n / elapsed
+                self.get_logger().info(
+                    f'[YOLO metrics] fps={fps:.1f} '
+                    f'predict={avg_predict:.1f}ms '
+                    f'parse={avg_parse:.1f}ms '
+                    f'det_count={avg_det:.1f} '
+                    f'frame_age={frame_age_ms:.0f}ms'
+                )
+                self._metric_predict_ms_sum = 0.0
+                self._metric_parse_ms_sum = 0.0
+                self._metric_det_count_sum = 0
+                self._metric_frame_count = 0
+                self._metric_last_log = now
 
             del results
             del cv_image
