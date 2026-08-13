@@ -18,6 +18,7 @@ class BatchedRTMPose(RTMPose):
         **kwargs,
     ):
         model_file = onnx_path or onnx_model
+        kwargs.pop('backend', None)
         super().__init__(onnx_model=model_file, device=device, backend='onnxruntime', **kwargs)
         try:
             if model_file and hasattr(self, 'session'):
