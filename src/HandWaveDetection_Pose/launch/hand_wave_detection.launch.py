@@ -58,6 +58,11 @@ def generate_launch_description():
                 default_value='/yolo/tracking',
                 description='YOLO tracking topic for person bounding boxes (yolo_msgs/DetectionArray).',
             ),
+            DeclareLaunchArgument(
+                'max_people',
+                default_value='5',
+                description='Maximum people to run RTMPose on (limits GPU/CPU load).',
+            ),
             Node(
                 package='hand_wave_detection',
                 executable='hand_wave_detector',
@@ -73,6 +78,7 @@ def generate_launch_description():
                         'detector_model': LaunchConfiguration('detector_model'),
                         'yolo_pose_model': LaunchConfiguration('yolo_pose_model'),
                         'rtmpose_model': LaunchConfiguration('rtmpose_model'),
+                        'max_people': LaunchConfiguration('max_people'),
                     }
                 ],
             ),

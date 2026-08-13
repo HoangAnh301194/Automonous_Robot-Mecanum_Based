@@ -28,9 +28,9 @@ from raised_hand.backends import (
     validate_torch_device,
 )
 from raised_hand.config import load_config
-from raised_hand.logic import RaisedHandRule, TemporalRaisedHandFilter
+from raised_hand.logic import NearestTrackSelector, RaisedHandRule, TemporalRaisedHandFilter
 from raised_hand.rtmpose_batch import BatchedRTMPose
-from raised_hand.types import PersonPose
+from raised_hand.types import PersonPose, TrackedBox
 from raised_hand.visualization import draw_people
 
 
@@ -65,6 +65,16 @@ class HandWaveDetectionNode(Node):
         )
         self.temporal_filter = TemporalRaisedHandFilter()
         self.last_error_time = 0.0
+
+        # Patch 2: max_people selector
+        max_people_param = self._integer_parameter(
+            'max_people', self.config.processing.max_people
+        )
+        self.config.processing.max_people = max_people_param
+        self.selector = NearestTrackSelector(
+            max_people=self.config.processing.max_people
+        )
+        self.get_logger().info(f'max_people={self.config.processing.max_people}')
 
         # ── Patch 0: instrumentation ──
         self._metric_pose_ms_sum = 0.0
@@ -156,6 +166,9 @@ class HandWaveDetectionNode(Node):
     def _string_parameter(self, name: str, default: str) -> str:
         return str(self.declare_parameter(name, default).value)
 
+    def _integer_parameter(self, name: str, default: int) -> int:
+        return int(self.declare_parameter(name, default).value)
+
     def sync_callback(
         self, image_msg: Image, tracking_msg: DetectionArray
     ) -> None:
@@ -171,11 +184,10 @@ class HandWaveDetectionNode(Node):
             frame = self.bridge.imgmsg_to_cv2(image_msg, desired_encoding='bgr8')
             confidence_threshold = self.config.processing.confidence
 
-            raw_bboxes = []
-            track_ids = []
-            confidences = []
+            # Patch 2: collect as TrackedBox for NearestTrackSelector
+            tracked_boxes: List[TrackedBox] = []
 
-            for det in tracking_msg.detections:
+            for index, det in enumerate(tracking_msg.detections):
                 # Filter person class and confidence score threshold
                 is_person = (
                     det.class_name.lower() == 'person'
@@ -188,12 +200,12 @@ class HandWaveDetectionNode(Node):
                     w = det.bbox.size.x
                     h = det.bbox.size.y
 
-                    x1 = cx - w / 2.0
-                    y1 = cy - h / 2.0
-                    x2 = cx + w / 2.0
-                    y2 = cy + h / 2.0
-
-                    raw_bboxes.append([x1, y1, x2, y2])
+                    bbox = np.asarray([
+                        cx - w / 2.0,
+                        cy - h / 2.0,
+                        cx + w / 2.0,
+                        cy + h / 2.0,
+                    ], dtype=np.float32)
 
                     # Parse track ID from Detection.id
                     tid_str = str(det.id).strip()
@@ -205,24 +217,29 @@ class HandWaveDetectionNode(Node):
                         except ValueError:
                             tid = abs(hash(tid_str)) % (10**8)
                     else:
-                        tid = len(track_ids) + 1
+                        tid = -(index + 1)
 
-                    track_ids.append(tid)
-                    confidences.append(float(det.score))
+                    tracked_boxes.append(TrackedBox(
+                        bbox=bbox,
+                        confidence=float(det.score),
+                        track_id=tid,
+                    ))
 
-            bbox_count = len(raw_bboxes)
+            # Patch 2: select top max_people nearest
+            selected_boxes = self.selector.select(tracked_boxes, frame.shape)
+            bbox_count = len(selected_boxes)
 
             people: List[PersonPose] = []
             # ── Patch 0: measure pose inference ──
             t_pose_start = time.perf_counter()
-            if raw_bboxes:
+            if selected_boxes:
                 expanded_bboxes = [
                     expand_bbox(
-                        bbox,
+                        tb.bbox,
                         frame.shape,
                         self.config.processing.pose_bbox_margin_ratio,
                     ).tolist()
-                    for bbox in raw_bboxes
+                    for tb in selected_boxes
                 ]
 
                 keypoints_arr, scores_arr = self.pose(frame, bboxes=expanded_bboxes)
@@ -234,7 +251,7 @@ class HandWaveDetectionNode(Node):
                 if scores_arr.ndim == 1:
                     scores_arr = scores_arr[None, ...]
 
-                for i in range(len(raw_bboxes)):
+                for i, tb in enumerate(selected_boxes):
                     kpts = (
                         keypoints_arr[i]
                         if i < len(keypoints_arr)
@@ -247,9 +264,9 @@ class HandWaveDetectionNode(Node):
                     )
 
                     person = PersonPose(
-                        bbox=np.asarray(raw_bboxes[i], dtype=np.float32),
-                        confidence=confidences[i],
-                        track_id=track_ids[i],
+                        bbox=tb.bbox,
+                        confidence=tb.confidence,
+                        track_id=tb.track_id,
                         keypoints=kpts,
                         keypoint_scores=kpts_scores,
                     )
@@ -262,9 +279,10 @@ class HandWaveDetectionNode(Node):
             self._publish_wave_status(people)
             classify_ms = (time.perf_counter() - t_classify_start) * 1000.0
 
-            # ── Patch 0: measure debug render ──
+            # ── Patch 2: conditional debug render ──
             t_debug_start = time.perf_counter()
-            self._publish_debug_image(frame, people, 'rtmpose_external_bbox', image_msg)
+            if self.debug_pub.get_subscription_count() > 0:
+                self._publish_debug_image(frame, people, 'rtmpose_external_bbox', image_msg)
             debug_ms = (time.perf_counter() - t_debug_start) * 1000.0
 
             total_ms = (time.perf_counter() - t_callback_start) * 1000.0

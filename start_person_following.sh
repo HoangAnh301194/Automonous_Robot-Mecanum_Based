@@ -6,7 +6,6 @@ cleanup() {
     echo "Caught Ctrl+C! Terminating all background processes..."
     kill $(jobs -p) 2>/dev/null
     # Also attempt to run the original cleanup commands just in case
-    pkill -9 -f ros2 2>/dev/null
     pkill -9 -f astra_camera 2>/dev/null
     pkill -9 -f yolo_node 2>/dev/null
     pkill -9 -f hand_wave_detector 2>/dev/null
@@ -19,7 +18,6 @@ trap cleanup SIGINT SIGTERM
 
 # 1. Clean up old processes
 echo "Cleaning up old processes and shared memory..."
-pkill -9 -f ros2
 pkill -9 -f astra_camera
 pkill -9 -f realsense2_camera
 pkill -9 -f yolo_node
@@ -45,6 +43,15 @@ source install/setup.bash
 PERSON_MODEL="${PERSON_MODEL:-yolo11n.pt}"
 HAND_WAVE_BACKEND="${HAND_WAVE_BACKEND:-rtmpose}"
 
+# Patch 1: optimized defaults
+YOLO_DEVICE="${YOLO_DEVICE:-cuda:0}"
+YOLO_IMGSZ_HEIGHT="${YOLO_IMGSZ_HEIGHT:-384}"
+YOLO_IMGSZ_WIDTH="${YOLO_IMGSZ_WIDTH:-640}"
+YOLO_MAX_DET="${YOLO_MAX_DET:-10}"
+YOLO_CLASSES="${YOLO_CLASSES:-0}"
+HAND_WAVE_DEVICE="${HAND_WAVE_DEVICE:-cpu}"
+HAND_WAVE_MAX_PEOPLE="${HAND_WAVE_MAX_PEOPLE:-5}"
+
 # 4. Launch Astra Pro Camera in background
 # Topics: /camera/color/image_raw, /camera/depth/image_raw, /camera/depth/camera_info
 echo "Launching Astra Pro Camera..."
@@ -61,7 +68,11 @@ sleep 5
 echo "Launching Person Follower (YOLO11)..."
 ros2 launch yolo_bringup person_follower.launch.py \
     model:="$PERSON_MODEL" \
-    device:=cuda:0 \
+    device:="$YOLO_DEVICE" \
+    classes:="$YOLO_CLASSES" \
+    imgsz_height:="$YOLO_IMGSZ_HEIGHT" \
+    imgsz_width:="$YOLO_IMGSZ_WIDTH" \
+    max_det:="$YOLO_MAX_DET" \
     input_image_topic:=/camera/color/image_raw \
     input_depth_topic:=/camera/depth/image_raw \
     input_depth_info_topic:=/camera/depth/camera_info \
@@ -71,8 +82,10 @@ sleep 15
 echo "Launching Hand Wave Detection ($HAND_WAVE_BACKEND)..."
 ros2 launch hand_wave_detection hand_wave_detection.launch.py \
     backend:="$HAND_WAVE_BACKEND" \
-    device:=cuda:0 \
+    device:="$HAND_WAVE_DEVICE" \
+    max_people:="$HAND_WAVE_MAX_PEOPLE" \
     image_topic:=/camera/color/image_raw \
+    tracking_topic:=/yolo/tracking \
     > /tmp/hand_wave.log 2>&1 &
 sleep 5
 

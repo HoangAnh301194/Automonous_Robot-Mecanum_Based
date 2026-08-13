@@ -20,6 +20,15 @@ def generate_launch_description():
     input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/depth/camera_info')
     target_frame_arg = DeclareLaunchArgument('target_frame', default_value='camera_link')
     threshold_arg = DeclareLaunchArgument('threshold', default_value='0.25')
+
+    # Patch 1: person-following optimized defaults
+    classes_arg = DeclareLaunchArgument('classes', default_value='0',
+        description='Person class only for person follower')
+    imgsz_height_arg = DeclareLaunchArgument('imgsz_height', default_value='384',
+        description='Reduced from 480 to save 25% compute')
+    imgsz_width_arg = DeclareLaunchArgument('imgsz_width', default_value='640')
+    max_det_arg = DeclareLaunchArgument('max_det', default_value='10',
+        description='Reduced from 300; 10 is enough for person following')
     
     # YOLO + Tracking + 3D + Debug (Visuals)
     yolo_launch = IncludeLaunchDescription(
@@ -36,8 +45,10 @@ def generate_launch_description():
             'input_depth_info_topic': LaunchConfiguration('input_depth_info_topic'),
             'target_frame': LaunchConfiguration('target_frame'),
             'threshold': LaunchConfiguration('threshold'),
-            'imgsz_height': '480',
-            'imgsz_width': '640',
+            'classes': LaunchConfiguration('classes'),
+            'imgsz_height': LaunchConfiguration('imgsz_height'),
+            'imgsz_width': LaunchConfiguration('imgsz_width'),
+            'max_det': LaunchConfiguration('max_det'),
             'namespace': 'yolo'
         }.items()
     )
@@ -62,6 +73,10 @@ def generate_launch_description():
         input_depth_info_topic_arg,
         target_frame_arg,
         threshold_arg,
+        classes_arg,
+        imgsz_height_arg,
+        imgsz_width_arg,
+        max_det_arg,
         yolo_launch,
         tracker_node
     ])

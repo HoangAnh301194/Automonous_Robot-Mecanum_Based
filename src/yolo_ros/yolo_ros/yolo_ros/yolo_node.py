@@ -1,19 +1,3 @@
-# Copyright (C) 2023 Miguel Ángel González Santamarta
-
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-
 import time
 from typing import List, Dict
 from cv_bridge import CvBridge
@@ -89,6 +73,7 @@ class YoloNode(LifecycleNode):
         self.declare_parameter("augment", False)
         self.declare_parameter("agnostic_nms", False)
         self.declare_parameter("retina_masks", False)
+        self.declare_parameter("classes", "")
 
         self.type_to_model = {"YOLO": YOLO, "World": YOLOWorld, "YOLOE": YOLOE}
 
@@ -136,6 +121,26 @@ class YoloNode(LifecycleNode):
         self.retina_masks = (
             self.get_parameter("retina_masks").get_parameter_value().bool_value
         )
+
+        # Classes filter (Patch 1)
+        classes_value = (
+            self.get_parameter("classes")
+            .get_parameter_value()
+            .string_value
+            .strip()
+        )
+        try:
+            self.classes = (
+                [int(item.strip()) for item in classes_value.split(",")]
+                if classes_value
+                else None
+            )
+        except ValueError:
+            self.get_logger().error(
+                f"Invalid classes parameter: '{classes_value}'"
+            )
+            return TransitionCallbackReturn.ERROR
+        self.get_logger().info(f"Classes filter: {self.classes}")
 
         # ROS params
         self.enable = self.get_parameter("enable").get_parameter_value().bool_value
@@ -479,6 +484,7 @@ class YoloNode(LifecycleNode):
                 augment=self.augment,
                 agnostic_nms=self.agnostic_nms,
                 retina_masks=self.retina_masks,
+                classes=self.classes,
                 device=self.device,
             )
             predict_ms = (time.perf_counter() - t_predict_start) * 1000.0

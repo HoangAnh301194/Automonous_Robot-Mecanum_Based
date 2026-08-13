@@ -42,26 +42,26 @@
 ## Patch 1 — Giảm tải YOLO (rủi ro thấp, lợi ích cao) 🎯
 > Mục tiêu: Giảm thời gian YOLO inference + giảm lượng output cho downstream
 
-- [ ] **1.1** Thêm parameter `classes` (string, default `''`) vào `yolo_node.py`
+- [x] **1.1** Thêm parameter `classes` (string, default `''`) vào `yolo_node.py`
   - Parse `'0'` → `[0]`, `'0,2'` → `[0,2]`, `''` → `None`
   - Truyền `classes=self.classes` vào `self.yolo.predict()`
   - Chuỗi sai (e.g. `'abc'`) → `TransitionCallbackReturn.ERROR`
 
-- [ ] **1.2** Thêm `imgsz_height`, `imgsz_width`, `max_det` vào `person_follower.launch.py`
+- [x] **1.2** Thêm `imgsz_height`, `imgsz_width`, `max_det` vào `person_follower.launch.py`
   - Bỏ hard-code `'imgsz_height': '480'` (dòng 39)
   - Default: `classes='0'`, `imgsz_height='384'`, `imgsz_width='640'`, `max_det='10'`
 
-- [ ] **1.3** Forward các parameter mới qua `yolo.launch.py`
+- [x] **1.3** Forward các parameter mới qua `yolo.launch.py`
   - `DeclareLaunchArgument` + truyền vào `yolo_node` parameters
 
-- [ ] **1.4** Cập nhật `start_person_following.sh` với biến environment:
+- [x] **1.4** Cập nhật `start_person_following.sh` với biến environment:
   ```bash
   YOLO_CLASSES="${YOLO_CLASSES:-0}"
   YOLO_IMGSZ_HEIGHT="${YOLO_IMGSZ_HEIGHT:-384}"
   YOLO_MAX_DET="${YOLO_MAX_DET:-10}"
   ```
 
-- [ ] **1.5** Đổi default RTMPose device trong `start_person_following.sh` từ `cuda:0` → `cpu`
+- [x] **1.5** Đổi default RTMPose device trong `start_person_following.sh` từ `cuda:0` → `cpu`
   - GPU contention giữa YOLO và RTMPose là rủi ro đã xác nhận
 
 - [ ] **1.6** Kiểm tra letterbox behavior: chạy YOLO với `imgsz=(384,640)` trên ảnh 640×480, xác nhận resize thực tế
@@ -81,15 +81,15 @@ ros2 topic hz /pose/wave_detected
 ## Patch 2 — Giảm tải RTMPose + Debug (lợi ích rõ ràng) 🔧
 > Mục tiêu: RTMPose chỉ chạy trên top-N người gần nhất, debug không tốn resource khi không cần
 
-- [ ] **2.1** Import `NearestTrackSelector` và `TrackedBox` vào `ros_node.py`
+- [x] **2.1** Import `NearestTrackSelector` và `TrackedBox` vào `ros_node.py`
 
-- [ ] **2.2** Khởi tạo `self.selector = NearestTrackSelector(max_people=...)` trong `__init__`
+- [x] **2.2** Khởi tạo `self.selector = NearestTrackSelector(max_people=...)` trong `__init__`
 
-- [ ] **2.3** Refactor `sync_callback`: thay 3 list (`raw_bboxes`, `track_ids`, `confidences`) bằng `List[TrackedBox]`
+- [x] **2.3** Refactor `sync_callback`: thay 3 list (`raw_bboxes`, `track_ids`, `confidences`) bằng `List[TrackedBox]`
   - Gọi `self.selector.select(tracked_boxes, frame.shape)` trước RTMPose
   - Chỉ đưa `selected_boxes` vào `self.pose()`
 
-- [ ] **2.4** Thêm guard: `if not selected_boxes: return` (không gọi RTMPose khi rỗng)
+- [x] **2.4** Thêm guard: `if not selected_boxes: return` (không gọi RTMPose khi rỗng)
 
 - [ ] **2.5** Fix `BatchedRTMPose.__call__` trong `rtmpose_batch.py`: khi `bboxes=[]` → return empty arrays thay vì chạy inference toàn frame
   ```python
@@ -97,10 +97,10 @@ ros2 topic hz /pose/wave_detected
       return np.empty((0, 17, 2), dtype=np.float32), np.empty((0, 17), dtype=np.float32)
   ```
 
-- [ ] **2.6** Thêm parameter `max_people` (ROS integer parameter, default từ config.yaml)
+- [x] **2.6** Thêm parameter `max_people` (ROS integer parameter, default từ config.yaml)
   - Thêm `DeclareLaunchArgument('max_people', default_value='1')` trong launch
 
-- [ ] **2.7** Conditional debug render:
+- [x] **2.7** Conditional debug render:
   ```python
   if self.debug_pub.get_subscription_count() > 0:
       self._publish_debug_image(...)
