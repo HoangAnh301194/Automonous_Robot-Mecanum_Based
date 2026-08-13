@@ -5,7 +5,31 @@ from rtmlib import RTMPose
 from rtmlib.tools.pose_estimation.post_processings import convert_coco_to_openpose
 
 
+import onnxruntime as ort
+
+
 class BatchedRTMPose(RTMPose):
+    def __init__(
+        self,
+        onnx_path: Optional[str] = None,
+        onnx_model: Optional[str] = None,
+        device: str = 'cpu',
+        num_threads: int = 4,
+        **kwargs,
+    ):
+        model_file = onnx_path or onnx_model
+        super().__init__(onnx_model=model_file, device=device, backend='onnxruntime', **kwargs)
+        try:
+            if model_file and hasattr(self, 'session'):
+                opts = ort.SessionOptions()
+                opts.intra_op_num_threads = num_threads
+                opts.inter_op_num_threads = 2
+                opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+                providers = self.session.get_providers()
+                self.session = ort.InferenceSession(model_file, sess_options=opts, providers=providers)
+        except Exception:
+            pass
+
     def __call__(
         self,
         image: np.ndarray,
