@@ -219,6 +219,13 @@ def generate_launch_description():
         elif use_3d:
             debug_detections_topic = "detections_3d"
 
+        skip_frames = LaunchConfiguration("skip_frames")
+        skip_frames_cmd = DeclareLaunchArgument(
+            "skip_frames",
+            default_value="2",
+            description="Number of frames to skip between inferences (0 = process all frames, 2 = process 1 frame every 3 frames)",
+        )
+
         yolo_node_cmd = Node(
             package="yolo_ros",
             executable="yolo_node",
@@ -238,6 +245,7 @@ def generate_launch_description():
                     "imgsz_width": imgsz_width,
                     "half": half,
                     "max_det": max_det,
+                    "skip_frames": skip_frames,
                     "augment": augment,
                     "agnostic_nms": agnostic_nms,
                     "retina_masks": retina_masks,
@@ -320,6 +328,7 @@ def generate_launch_description():
             depth_image_units_divisor_cmd,
             namespace_cmd,
             use_debug_cmd,
+            skip_frames_cmd,
             yolo_node_cmd,
             tracking_node_cmd,
             detect_3d_node_cmd,

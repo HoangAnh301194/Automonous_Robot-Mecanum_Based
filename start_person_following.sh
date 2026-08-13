@@ -85,7 +85,7 @@ ros2 launch hand_wave_detection hand_wave_detection.launch.py \
     device:="$HAND_WAVE_DEVICE" \
     max_people:="$HAND_WAVE_MAX_PEOPLE" \
     image_topic:=/camera/color/image_raw \
-    tracking_topic:=/yolo/tracking \
+    tracking_topic:=/yolo/detections \
     > /tmp/hand_wave.log 2>&1 &
 sleep 5
 

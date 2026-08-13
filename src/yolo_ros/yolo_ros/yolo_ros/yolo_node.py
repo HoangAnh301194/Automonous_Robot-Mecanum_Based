@@ -78,6 +78,8 @@ class YoloNode(LifecycleNode):
             "classes",
             descriptor=ParameterDescriptor(dynamic_typing=True),
         )
+        self.declare_parameter("skip_frames", 0)
+        self._frame_counter = 0
 
         self.type_to_model = {"YOLO": YOLO, "World": YOLOWorld, "YOLOE": YOLOE}
 
@@ -124,6 +126,9 @@ class YoloNode(LifecycleNode):
         )
         self.retina_masks = (
             self.get_parameter("retina_masks").get_parameter_value().bool_value
+        )
+        self.skip_frames = (
+            self.get_parameter("skip_frames").get_parameter_value().integer_value
         )
 
         # Classes filter (Patch 1)
@@ -464,6 +469,10 @@ class YoloNode(LifecycleNode):
         """
 
         if self.enable:
+
+            self._frame_counter += 1
+            if self.skip_frames > 0 and (self._frame_counter % (self.skip_frames + 1) != 0):
+                return
 
             # ── Patch 0: measure frame age ──
             try:
