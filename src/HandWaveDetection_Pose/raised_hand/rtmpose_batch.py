@@ -21,15 +21,24 @@ class BatchedRTMPose(RTMPose):
         kwargs.pop('backend', None)
         super().__init__(onnx_model=model_file, device=device, backend='onnxruntime', **kwargs)
         try:
-            if model_file and hasattr(self, 'session'):
+            real_model_path = None
+            if hasattr(self, 'onnx_model') and isinstance(self.onnx_model, str) and not self.onnx_model.startswith('http'):
+                real_model_path = self.onnx_model
+            elif hasattr(self, 'session') and hasattr(self.session, '_model_path'):
+                real_model_path = self.session._model_path
+
+            if real_model_path:
                 opts = ort.SessionOptions()
                 opts.intra_op_num_threads = num_threads
                 opts.inter_op_num_threads = 2
                 opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-                providers = self.session.get_providers()
-                self.session = ort.InferenceSession(model_file, sess_options=opts, providers=providers)
-        except Exception:
-            pass
+                providers = self.session.get_providers() if hasattr(self, 'session') else ['CPUExecutionProvider']
+                self.session = ort.InferenceSession(real_model_path, sess_options=opts, providers=providers)
+                print(f"[BatchedRTMPose] ONNX session successfully re-initialized with intra_op_num_threads={num_threads} on {real_model_path}")
+            else:
+                print(f"[BatchedRTMPose WARNING] Could not resolve local .onnx path. model_file={model_file}, onnx_model={getattr(self, 'onnx_model', None)}")
+        except Exception as err:
+            print(f"[BatchedRTMPose ERROR] Failed to enable ONNX multi-threading: {err}")
 
     def __call__(
         self,
