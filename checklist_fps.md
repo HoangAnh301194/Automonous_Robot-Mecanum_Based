@@ -175,7 +175,7 @@ ros2 topic hz /pose/wave_detected
 ## Patch 4 — Tối ưu sâu (chỉ khi cần) 🔬
 > Chỉ thực hiện nếu Patch 1–3 chưa đạt mục tiêu 15+ FPS
 
-- [ ] **4.1** Implement latest-frame worker thread:
+- [x] **4.1** Implement latest-frame worker thread:
   - Callback chỉ lưu pair mới nhất (ghi đè cũ)
   - Worker thread lấy pair → chạy RTMPose → publish
   - Dừng worker trước khi publisher/session bị hủy

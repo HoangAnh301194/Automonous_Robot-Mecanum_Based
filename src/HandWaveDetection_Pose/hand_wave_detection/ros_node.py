@@ -1,5 +1,6 @@
 import sys
 import time
+import threading
 from pathlib import Path
 from typing import List
 
@@ -87,6 +88,12 @@ class HandWaveDetectionNode(Node):
         self._metric_log_interval = 3.0
         self._current_fps = 0.0
 
+        # Patch 4: Async Worker Thread for zero callback latency (no backlog)
+        self._pending_lock = threading.Lock()
+        self._pending_pair = None
+        self._stop_event = threading.Event()
+        self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+
         image_topic = self._string_parameter(
             'image_topic', '/camera/color/image_raw'
         )
@@ -131,9 +138,12 @@ class HandWaveDetectionNode(Node):
         )
         self.wave_status_pub = self.create_publisher(String, wave_status_topic, 10)
 
+        # Start async worker thread
+        self._worker_thread.start()
+
         self.get_logger().info(
             f'HandWaveDetection active: {image_topic} + {tracking_topic} '
-            f'-> {wave_detected_topic}, {wave_status_topic}'
+            f'-> {wave_detected_topic}, {wave_status_topic} (Async Worker Active)'
         )
 
     def _load_config(self, default_config: Path):
@@ -173,6 +183,32 @@ class HandWaveDetectionNode(Node):
     def sync_callback(
         self, image_msg: Image, tracking_msg: DetectionArray
     ) -> None:
+        """Non-blocking ROS callback: stores latest frame pair and returns immediately."""
+        with self._pending_lock:
+            self._pending_pair = (image_msg, tracking_msg)
+
+    def _worker_loop(self) -> None:
+        """Background worker thread loop that processes the freshest frame pair."""
+        while not self._stop_event.is_set():
+            pair = None
+            with self._pending_lock:
+                if self._pending_pair is not None:
+                    pair = self._pending_pair
+                    self._pending_pair = None
+
+            if pair is None:
+                self._stop_event.wait(0.005)
+                continue
+
+            try:
+                self._process_pair(pair[0], pair[1])
+            except Exception as error:
+                self._report_error(error)
+
+    def _process_pair(
+        self, image_msg: Image, tracking_msg: DetectionArray
+    ) -> None:
+        """Runs RTMPose inference, classification, and debug output on the worker thread."""
         try:
             # ── Patch 0: measure callback total and pair age ──
             t_callback_start = time.perf_counter()
@@ -373,6 +409,12 @@ class HandWaveDetectionNode(Node):
         debug_message = self.bridge.cv2_to_imgmsg(annotated, encoding='bgr8')
         debug_message.header = source.header
         self.debug_pub.publish(debug_message)
+
+    def destroy_node(self) -> bool:
+        self._stop_event.set()
+        if hasattr(self, '_worker_thread') and self._worker_thread.is_alive():
+            self._worker_thread.join(timeout=1.0)
+        return super().destroy_node()
 
     def _report_error(self, error: Exception) -> None:
         import traceback
