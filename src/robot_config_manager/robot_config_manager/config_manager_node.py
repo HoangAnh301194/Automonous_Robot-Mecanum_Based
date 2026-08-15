@@ -3,30 +3,33 @@ from rclpy.node import Node
 import yaml
 import os
 
-from robot_interfaces.srv import SaveLocation, GetLocations, SetLanguage
-from std_srvs.srv import Trigger
+from robot_interfaces.srv import SaveLocation, GetLocation, SetLanguage, FinishSetup, SaveRoute
 
 class ConfigManagerNode(Node):
     def __init__(self):
         super().__init__('config_manager_node')
         
-        self.config_dir = os.path.expanduser('~/.robot_config')
+        # Determine workspace config path
+        self.config_dir = os.path.join(os.path.expanduser('~'), 'robot_ws', 'config')
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
             
         self.locations_file = os.path.join(self.config_dir, 'locations.yaml')
-        self.settings_file = os.path.join(self.config_dir, 'settings.yaml')
+        self.robot_config_file = os.path.join(self.config_dir, 'robot_config.yaml')
+        self.routes_file = os.path.join(self.config_dir, 'routes.yaml')
         
         self.locations = self.load_yaml(self.locations_file)
-        self.settings = self.load_yaml(self.settings_file)
+        self.robot_config = self.load_yaml(self.robot_config_file)
+        self.routes = self.load_yaml(self.routes_file)
         
         # Services
         self.srv_save_loc = self.create_service(SaveLocation, '/config/save_location', self.cb_save_location)
-        self.srv_get_locs = self.create_service(GetLocations, '/config/get_locations', self.cb_get_locations)
+        self.srv_get_loc = self.create_service(GetLocation, '/config/get_location', self.cb_get_location)
         self.srv_set_lang = self.create_service(SetLanguage, '/config/set_language', self.cb_set_language)
-        self.srv_finish_setup = self.create_service(Trigger, '/config/finish_setup', self.cb_finish_setup)
+        self.srv_finish_setup = self.create_service(FinishSetup, '/config/finish_setup', self.cb_finish_setup)
+        self.srv_save_route = self.create_service(SaveRoute, '/config/save_route', self.cb_save_route)
         
-        self.get_logger().info('Config Manager Node started.')
+        self.get_logger().info('Config Manager Node started. YAML persistence enabled.')
 
     def load_yaml(self, path):
         if os.path.exists(path):
@@ -39,56 +42,56 @@ class ConfigManagerNode(Node):
             yaml.dump(data, f)
 
     def cb_save_location(self, request, response):
-        loc_type = request.location_type
-        if loc_type not in self.locations:
-            self.locations[loc_type] = {}
-            
-        self.locations[loc_type][request.location_name] = {
+        name = request.name
+        self.locations[name] = {
             'x': request.x,
             'y': request.y,
-            'theta': request.theta
+            'yaw': request.yaw
         }
         self.save_yaml(self.locations, self.locations_file)
         
         response.success = True
-        response.message = f"Location {request.location_name} saved as {loc_type}."
+        response.message = f"Location {name} saved."
         self.get_logger().info(response.message)
         return response
 
-    def cb_get_locations(self, request, response):
-        loc_type = request.location_type
-        response.names = []
-        response.x = []
-        response.y = []
-        response.theta = []
-        
-        if loc_type in self.locations:
-            for name, coords in self.locations[loc_type].items():
-                response.names.append(name)
-                response.x.append(float(coords['x']))
-                response.y.append(float(coords['y']))
-                response.theta.append(float(coords['theta']))
+    def cb_get_location(self, request, response):
+        name = request.name
+        if name in self.locations:
+            coords = self.locations[name]
+            response.x = float(coords['x'])
+            response.y = float(coords['y'])
+            response.yaw = float(coords['yaw'])
             response.success = True
-            response.message = f"Loaded {len(response.names)} locations."
+            response.message = f"Location {name} loaded."
         else:
             response.success = False
-            response.message = "Location type not found."
+            response.message = f"Location {name} not found."
             
         return response
 
     def cb_set_language(self, request, response):
-        self.settings['language'] = request.language
-        self.save_yaml(self.settings, self.settings_file)
+        self.robot_config['language'] = request.language
+        self.save_yaml(self.robot_config, self.robot_config_file)
         response.success = True
         response.message = f"Language set to {request.language}"
         self.get_logger().info(response.message)
         return response
         
     def cb_finish_setup(self, request, response):
-        self.settings['setup_completed'] = True
-        self.save_yaml(self.settings, self.settings_file)
+        self.robot_config['setup_completed'] = request.is_finished
+        self.save_yaml(self.robot_config, self.robot_config_file)
         response.success = True
-        response.message = "Setup completed. System is READY."
+        response.message = f"Setup completed set to {request.is_finished}."
+        self.get_logger().info(response.message)
+        return response
+
+    def cb_save_route(self, request, response):
+        route_name = request.route_name
+        self.routes[route_name] = list(request.waypoints)
+        self.save_yaml(self.routes, self.routes_file)
+        response.success = True
+        response.message = f"Route {route_name} saved with {len(request.waypoints)} waypoints."
         self.get_logger().info(response.message)
         return response
 
