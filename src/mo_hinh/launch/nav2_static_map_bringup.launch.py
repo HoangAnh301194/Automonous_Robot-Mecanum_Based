@@ -81,14 +81,27 @@ def detect_ports():
     return esp_port, lidar_port
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
+    if os.path.exists(user_src_path):
+        return user_src_path
+    user_ws_path = os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
+    if os.path.exists(user_ws_path):
+        return user_ws_path
+    try:
+        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+    except Exception:
+        return user_src_path
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
 
-    default_map_yaml = os.path.join(pkg_share, 'maps', 'my_map.yaml')
-    default_nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
-    default_rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
-    urdf_file = os.path.join(pkg_share, 'urdf', 'xe.urdf')
+    default_map_yaml = resolve_path('maps', 'my_map.yaml')
+    default_nav2_params = resolve_path('config', 'nav2_params.yaml')
+    default_rviz_config = resolve_path('config', 'rviz.rviz')
+    urdf_file = resolve_path('urdf', 'xe.urdf')
+    scan_filter_config = resolve_path('config', 'scan_filter.yaml')
 
     map_yaml_file = LaunchConfiguration('map')
     nav2_params_file = LaunchConfiguration('params_file')
@@ -124,7 +137,7 @@ def generate_launch_description():
     laser_filter_node = Node(
         package='laser_filters',
         executable='scan_to_scan_filter_chain',
-        parameters=['/home/orin/ros2_ws/config/scan_filter.yaml'],
+        parameters=[scan_filter_config],
         remappings=[
             ('scan', 'scan_raw'),
             ('scan_filtered', 'scan')

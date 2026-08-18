@@ -3,7 +3,10 @@ from rclpy.node import Node
 import yaml
 import os
 
-from robot_interfaces.srv import SaveLocation, GetLocation, SetLanguage, FinishSetup, SaveRoute
+from robot_interfaces.srv import (
+    SaveLocation, GetLocation, DeleteLocation, 
+    SetLanguage, FinishSetup, SaveRoute, GetRoute
+)
 
 class ConfigManagerNode(Node):
     def __init__(self):
@@ -25,9 +28,11 @@ class ConfigManagerNode(Node):
         # Services
         self.srv_save_loc = self.create_service(SaveLocation, '/config/save_location', self.cb_save_location)
         self.srv_get_loc = self.create_service(GetLocation, '/config/get_location', self.cb_get_location)
+        self.srv_del_loc = self.create_service(DeleteLocation, '/config/delete_location', self.cb_delete_location)
         self.srv_set_lang = self.create_service(SetLanguage, '/config/set_language', self.cb_set_language)
         self.srv_finish_setup = self.create_service(FinishSetup, '/config/finish_setup', self.cb_finish_setup)
         self.srv_save_route = self.create_service(SaveRoute, '/config/save_route', self.cb_save_route)
+        self.srv_get_route = self.create_service(GetRoute, '/config/get_route', self.cb_get_route)
         
         self.get_logger().info('Config Manager Node started. YAML persistence enabled.')
 
@@ -70,6 +75,19 @@ class ConfigManagerNode(Node):
             
         return response
 
+    def cb_delete_location(self, request, response):
+        name = request.name
+        if name in self.locations:
+            del self.locations[name]
+            self.save_yaml(self.locations, self.locations_file)
+            response.success = True
+            response.message = f"Location '{name}' deleted."
+        else:
+            response.success = False
+            response.message = f"Location '{name}' not found."
+        self.get_logger().info(response.message)
+        return response
+
     def cb_set_language(self, request, response):
         self.robot_config['language'] = request.language
         self.save_yaml(self.robot_config, self.robot_config_file)
@@ -93,6 +111,18 @@ class ConfigManagerNode(Node):
         response.success = True
         response.message = f"Route {route_name} saved with {len(request.waypoints)} waypoints."
         self.get_logger().info(response.message)
+        return response
+
+    def cb_get_route(self, request, response):
+        route_name = request.route_name
+        if route_name in self.routes:
+            response.waypoints = self.routes[route_name]
+            response.success = True
+            self.get_logger().info(f"Route '{route_name}' loaded with {len(response.waypoints)} waypoints.")
+        else:
+            response.waypoints = []
+            response.success = False
+            self.get_logger().info(f"Route '{route_name}' not found.")
         return response
 
 def main(args=None):

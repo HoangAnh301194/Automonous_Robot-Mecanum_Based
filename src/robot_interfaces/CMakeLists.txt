@@ -17,9 +17,11 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CustomerStatus.msg"
   "srv/SaveLocation.srv"
   "srv/GetLocation.srv"
+  "srv/DeleteLocation.srv"
   "srv/SetLanguage.srv"
   "srv/FinishSetup.srv"
   "srv/SaveRoute.srv"
+  "srv/GetRoute.srv"
   "action/Patrol.action"
   "action/DirectGo.action"
   DEPENDENCIES action_msgs

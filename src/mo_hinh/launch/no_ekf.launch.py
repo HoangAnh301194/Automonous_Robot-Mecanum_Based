@@ -71,12 +71,24 @@ def detect_ports():
     return esp_port, lidar_port
 
 
-def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
+    if os.path.exists(user_src_path):
+        return user_src_path
+    user_ws_path = os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
+    if os.path.exists(user_ws_path):
+        return user_ws_path
+    try:
+        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+    except Exception:
+        return user_src_path
 
-    rviz_config_file = os.path.join(pkg_share, 'config', 'rviz_slam.rviz')
-    urdf_file = os.path.join(pkg_share, 'urdf', 'xe.urdf')
-    slam_params_file = os.path.join(pkg_share, 'config', 'mapper_params_online_async.yaml')
+
+def generate_launch_description():
+    rviz_config_file = resolve_path('config', 'rviz_slam.rviz')
+    urdf_file = resolve_path('urdf', 'xe.urdf')
+    slam_params_file = resolve_path('config', 'mapper_params_online_async.yaml')
+    scan_filter_config = resolve_path('config', 'scan_filter.yaml')
 
     with open(urdf_file, 'r', encoding='utf-8') as f:
         robot_description = f.read()
@@ -108,7 +120,7 @@ def generate_launch_description():
     laser_filter_node = Node(
         package='laser_filters',
         executable='scan_to_scan_filter_chain',
-        parameters=['/home/orin/ros2_ws/config/scan_filter.yaml'],
+        parameters=[scan_filter_config],
         remappings=[
             ('scan', 'scan_raw'),
             ('scan_filtered', 'scan')

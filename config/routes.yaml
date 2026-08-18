@@ -1,3 +1,7 @@
 patrol_1:
 - table_1
 - table_2
+patrol_route:
+- point1
+- point2
+- point3

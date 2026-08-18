@@ -151,10 +151,10 @@ def _detect_esp_lidar_ports():
     return esp_port, lidar_port, "scan"
 
 ROS_SETUP = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
-WS_SETUP = os.environ.get("WS_SETUP", os.path.join(WS_ROOT, "install", "setup.bash"))
-NAV2_PARAMS_BASE = os.environ.get("NAV2_PARAMS", _pick_first_existing([os.path.join(CONFIG_DIR, "nav2_params.yaml"), os.path.join(MO_HINH_CONFIG_DIR, "nav2_params.yaml")]))
-SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_existing([os.path.join(CONFIG_DIR, "mapper_params_online_async.yaml"), os.path.join(MO_HINH_CONFIG_DIR, "mapper_params_online_async.yaml")]))
-SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(CONFIG_DIR, "slam_localization.yaml"), os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml")]))
+WS_SETUP = os.path.join(WS_ROOT, "install", "setup.bash")
+NAV2_PARAMS_BASE = os.environ.get("NAV2_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "nav2_params.yaml"), os.path.join(CONFIG_DIR, "nav2_params.yaml")]))
+SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "mapper_params_online_async.yaml"), os.path.join(CONFIG_DIR, "mapper_params_online_async.yaml")]))
+SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 class RosInterface(Node):
     def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None):
@@ -202,6 +202,8 @@ class RosInterface(Node):
     def publish_pose_from_tf(self):
         if not self.pose_callback:
             return
+        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
+            return
         if not self.tf_buffer.can_transform(self.target_map_frame, self.target_base_frame, Time(), timeout=Duration(seconds=0.02)):
             return
         try:
@@ -216,6 +218,8 @@ class RosInterface(Node):
     def _scan_to_world_points(self, msg):
         ranges = msg.ranges
         if not ranges:
+            return []
+        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
             return []
         source_frame = msg.header.frame_id if msg.header.frame_id else self.target_base_frame
         scan_time = Time.from_msg(msg.header.stamp)
@@ -981,7 +985,13 @@ class MainWindow(QWidget):
         if (not self.is_sim_mode()) and is_loc: self.chk_auto_nav2.setChecked(False); self.chk_auto_nav2.setEnabled(False)
         else: self.chk_auto_nav2.setEnabled(True)
     def on_robot_mode_changed(self):
-        self.cmb_odom_source.setEnabled(not self.is_sim_mode()); self.on_operation_mode_changed(); self.on_odom_source_changed()
+        if self.ros_node:
+            sim_active = self.is_sim_mode()
+            param = rclpy.parameter.Parameter('use_sim_time', rclpy.Parameter.Type.BOOL, sim_active)
+            self.ros_node.set_parameters([param])
+        self.cmb_odom_source.setEnabled(not self.is_sim_mode())
+        self.on_operation_mode_changed()
+        self.on_odom_source_changed()
 
     def _map_base_stem_from_selected(self):
         stem = os.path.splitext(self.selected_map_file)[0] if self.selected_map_file else os.path.join(self.map_dir, "my_map")
@@ -1045,7 +1055,7 @@ class MainWindow(QWidget):
         sim_time = _bool_to_ros(self.is_sim_mode())
         if self.is_sim_mode():
             self.proc_mgr.stop(self.LAYER1_REAL)
-            self.proc_mgr.start(self.LAYER1_SIM, self.ros_prefix() + f"ros2 launch mo_hinh virtual_robot_gazebo.launch.py use_sim_time:={sim_time} gui:=true")
+            self.proc_mgr.start(self.LAYER1_SIM, self.ros_prefix() + f"ros2 launch mo_hinh virtual_robot_gazebo.launch.py use_sim_time:={sim_time}")
             QTimer.singleShot(3500, self.unpause_gazebo_physics)
         else:
             self.proc_mgr.stop(self.LAYER1_SIM)

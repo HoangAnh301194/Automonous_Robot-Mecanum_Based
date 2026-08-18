@@ -31,20 +31,12 @@
   <!-- ========================= -->
   <!-- Base Footprint -->
   <!-- ========================= -->
-  <link name="base_footprint">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.0001"/>
-      <inertia ixx="1e-9" ixy="0.0" ixz="0.0"
-               iyy="1e-9" iyz="0.0"
-               izz="1e-9"/>
-    </inertial>
-  </link>
+  <link name="base_footprint"/>
 
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="0 0 0.10255" rpy="0 0 0"/>
+    <origin xyz="0 0 0.08255" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -107,19 +99,17 @@
     <origin xyz="0 0 0.055" rpy="0 0 0"/>
   </joint>
 
+  <!-- ========================= -->
+  <!-- 2D LiDAR Link -->
+  <!-- ========================= -->
   <link name="laser_link">
     <visual>
+      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
       <geometry>
         <cylinder radius="0.05" length="0.05"/>
       </geometry>
       <material name="red"/>
     </visual>
-
-    <collision>
-      <geometry>
-        <cylinder radius="0.05" length="0.05"/>
-      </geometry>
-    </collision>
 
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -165,7 +155,7 @@
   <joint name="support_joint" type="fixed">
     <parent link="base_link"/>
     <child link="support_link"/>
-    <origin xyz="0.30 0.14 0.435" rpy="0 0 0"/>
+    <origin xyz="0.25 0.14 0.435" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -197,7 +187,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="0.30 0.14 0.87" rpy="0 0.698132 0"/>
+    <origin xyz="0.25 0.14 0.87" rpy="0 0.698132 0"/>
   </joint>
 
   <!-- Optical frame -->
@@ -235,7 +225,7 @@
   </joint>
 
   <!-- ========================= -->
-  <!-- Wheels (Diff Drive 2 bánh) -->
+  <!-- Drive Wheels (Diff Drive) -->
   <!-- ========================= -->
   <link name="wheel_left_link">
     <visual>
@@ -298,253 +288,141 @@
   </joint>
 
   <!-- ========================= -->
-  <!-- Caster Wheels (Bánh phụ đằng trước) -->
+  <!-- Caster Wheels (Bánh phụ) -->
   <!-- ========================= -->
-  <!-- Caster Front Left -->
-  <link name="caster_front_left_link">
+  <link name="caster_front_link">
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.08255" length="0.04"/>
+        <sphere radius="0.05"/>
       </geometry>
-      <material name="red"/>
+      <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <sphere radius="0.08255"/>
+        <sphere radius="0.05"/>
       </geometry>
     </collision>
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.1"/>
-      <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
-               iyy="0.0001" iyz="0.0"
-               izz="0.0001"/>
+      <inertia ixx="1e-4" ixy="0.0" ixz="0.0"
+               iyy="1e-4" iyz="0.0"
+               izz="1e-4"/>
     </inertial>
   </link>
 
-  <joint name="caster_front_left_joint" type="fixed">
+  <joint name="caster_front_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="caster_front_left_link"/>
-    <origin xyz="0.23 0.20 -0.02" rpy="0 0 0"/>
+    <child link="caster_front_link"/>
+    <origin xyz="0.22 0 -0.05255" rpy="0 0 0"/>
   </joint>
 
-  <!-- Caster Front Right -->
-  <link name="caster_front_right_link">
+  <link name="caster_rear_link">
     <visual>
-      <origin xyz="0 0 0" rpy="1.5708 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <cylinder radius="0.08255" length="0.04"/>
+        <sphere radius="0.05"/>
       </geometry>
-      <material name="red"/>
+      <material name="black"/>
     </visual>
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
-        <sphere radius="0.08255"/>
+        <sphere radius="0.05"/>
       </geometry>
     </collision>
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.1"/>
-      <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
-               iyy="0.0001" iyz="0.0"
-               izz="0.0001"/>
+      <inertia ixx="1e-4" ixy="0.0" ixz="0.0"
+               iyy="1e-4" iyz="0.0"
+               izz="1e-4"/>
     </inertial>
   </link>
 
-  <joint name="caster_front_right_joint" type="fixed">
+  <joint name="caster_rear_joint" type="fixed">
     <parent link="base_link"/>
-    <child link="caster_front_right_link"/>
-    <origin xyz="0.23 -0.20 -0.02" rpy="0 0 0"/>
+    <child link="caster_rear_link"/>
+    <origin xyz="-0.22 0 -0.05255" rpy="0 0 0"/>
   </joint>
 
-  <!-- ========================= -->
-  <!-- HC-SR04 Sonar Sensors     -->
-  <!-- ========================= -->
-  <!-- Sonar Center -->
-  <link name="sonar_center_link">
-    <visual>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-      <material name="blue"/>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
-    </inertial>
-  </link>
-
-  <joint name="sonar_center_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="sonar_center_link"/>
-    <origin xyz="0.30 0.0 0.05" rpy="0 0 0"/>
-  </joint>
-
-  <!-- Sonar Left -->
-  <link name="sonar_left_link">
-    <visual>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-      <material name="blue"/>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
-    </inertial>
-  </link>
-
-  <joint name="sonar_left_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="sonar_left_link"/>
-    <origin xyz="0.30 0.20 0.05" rpy="0 0 0.785398"/>
-  </joint>
-
-  <!-- Sonar Right -->
-  <link name="sonar_right_link">
-    <visual>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-      <material name="blue"/>
-    </visual>
-    <collision>
-      <geometry>
-        <box size="0.02 0.04 0.02"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <mass value="0.01"/>
-      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
-    </inertial>
-  </link>
-
-  <joint name="sonar_right_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="sonar_right_link"/>
-    <origin xyz="0.30 -0.20 0.05" rpy="0 0 -0.785398"/>
-  </joint>
-
-  <!-- Gazebo Material & Friction settings for Caster Wheels -->
-  <gazebo reference="caster_front_left_link">
-    <material>Gazebo/Red</material>
+  <!-- Friction settings for caster wheels -->
+  <gazebo reference="caster_front_link">
     <mu1>0.001</mu1>
     <mu2>0.001</mu2>
-    <kp>1000000.0</kp>
-    <kd>1.0</kd>
   </gazebo>
 
-  <gazebo reference="caster_front_right_link">
-    <material>Gazebo/Red</material>
+  <gazebo reference="caster_rear_link">
     <mu1>0.001</mu1>
     <mu2>0.001</mu2>
-    <kp>1000000.0</kp>
-    <kd>1.0</kd>
   </gazebo>
 
+  <!-- ========================= -->
+  <!-- Gazebo Sim (gz-sim) Plugins -->
+  <!-- ========================= -->
   <gazebo>
-    <plugin name="diff_drive" filename="libgazebo_ros_diff_drive.so">
-      <ros>
-        <namespace>/</namespace>
-      </ros>
-      <update_rate>100.0</update_rate>
+    <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>wheel_left_joint</left_joint>
       <right_joint>wheel_right_joint</right_joint>
       <wheel_separation>0.58</wheel_separation>
-      <wheel_diameter>0.1651</wheel_diameter>
-      <max_wheel_torque>20.0</max_wheel_torque>
-      <max_wheel_acceleration>1.0</max_wheel_acceleration>
-      <publish_odom>true</publish_odom>
-      <publish_odom_tf>true</publish_odom_tf>
-      <publish_wheel_tf>true</publish_wheel_tf>
-      <odometry_frame>odom</odometry_frame>
-      <robot_base_frame>base_footprint</robot_base_frame>
-      <covariance_x>0.0005</covariance_x>
-      <covariance_y>0.0005</covariance_y>
-      <covariance_yaw>0.01</covariance_yaw>
+      <wheel_radius>0.08255</wheel_radius>
+      <max_linear_acceleration>1.0</max_linear_acceleration>
+      <min_linear_acceleration>-1.0</min_linear_acceleration>
+      <max_angular_acceleration>2.0</max_angular_acceleration>
+      <min_angular_acceleration>-2.0</min_angular_acceleration>
+      <max_linear_velocity>1.0</max_linear_velocity>
+      <min_linear_velocity>-1.0</min_linear_velocity>
+      <max_angular_velocity>2.0</max_angular_velocity>
+      <min_angular_velocity>-2.0</min_angular_velocity>
+      <topic>cmd_vel</topic>
+      <odom_topic>odom</odom_topic>
+      <tf_topic>tf</tf_topic>
+      <frame_id>odom</frame_id>
+      <child_frame_id>base_footprint</child_frame_id>
+      <odom_publisher_frequency>50</odom_publisher_frequency>
+    </plugin>
+
+    <plugin filename="gz-sim-joint-state-publisher-system" name="gz::sim::systems::JointStatePublisher">
+      <topic>joint_states</topic>
+      <joint_name>wheel_left_joint</joint_name>
+      <joint_name>wheel_right_joint</joint_name>
     </plugin>
   </gazebo>
 
-  <!-- Simulated IMU: publishes /imu/data -->
+  <!-- IMU Sensor -->
   <gazebo reference="imu_link">
-    <gravity>true</gravity>
     <sensor name="imu_sensor" type="imu">
       <always_on>true</always_on>
       <update_rate>100.0</update_rate>
       <visualize>false</visualize>
+      <topic>imu/data</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
       <imu>
         <angular_velocity>
-          <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0002</stddev>
-            </noise>
-          </x>
-          <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0002</stddev>
-            </noise>
-          </y>
-          <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.0002</stddev>
-            </noise>
-          </z>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.0002</stddev></noise></z>
         </angular_velocity>
         <linear_acceleration>
-          <x>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.017</stddev>
-            </noise>
-          </x>
-          <y>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.017</stddev>
-            </noise>
-          </y>
-          <z>
-            <noise type="gaussian">
-              <mean>0.0</mean>
-              <stddev>0.017</stddev>
-            </noise>
-          </z>
+          <x><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></x>
+          <y><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></y>
+          <z><noise type="gaussian"><mean>0.0</mean><stddev>0.017</stddev></noise></z>
         </linear_acceleration>
       </imu>
-      <plugin name="imu_plugin" filename="libgazebo_ros_imu_sensor.so">
-        <ros>
-          <namespace>/imu</namespace>
-          <remapping>~/out:=data</remapping>
-        </ros>
-        <frame_name>imu_link</frame_name>
-        <initial_orientation_as_reference>false</initial_orientation_as_reference>
-      </plugin>
     </sensor>
   </gazebo>
 
-  <!-- Simulated 2D LiDAR: publishes /scan -->
+  <!-- 2D LiDAR Sensor -->
   <gazebo reference="laser_link">
-    <sensor name="lidar_sensor" type="ray">
+    <sensor name="lidar_sensor" type="gpu_lidar">
       <always_on>true</always_on>
       <visualize>true</visualize>
       <update_rate>12.0</update_rate>
-      <ray>
+      <topic>scan</topic>
+      <gz_frame_id>laser_link</gz_frame_id>
+      <lidar>
         <scan>
           <horizontal>
             <samples>720</samples>
@@ -563,23 +441,18 @@
           <mean>0.0</mean>
           <stddev>0.01</stddev>
         </noise>
-      </ray>
-      <plugin name="lidar_plugin" filename="libgazebo_ros_ray_sensor.so">
-        <ros>
-          <remapping>~/out:=scan</remapping>
-        </ros>
-        <output_type>sensor_msgs/LaserScan</output_type>
-        <frame_name>laser_link</frame_name>
-      </plugin>
+      </lidar>
     </sensor>
   </gazebo>
 
-  <!-- RGB camera -->
+  <!-- Camera Sensors (RGB & Depth) -->
   <gazebo reference="camera_link">
-    <sensor name="rgb_camera_sensor" type="camera">
+    <sensor name="camera" type="camera">
       <always_on>true</always_on>
       <visualize>false</visualize>
       <update_rate>15.0</update_rate>
+      <topic>camera/color/image_raw</topic>
+      <gz_frame_id>camera_link</gz_frame_id>
       <camera name="rgb_camera">
         <horizontal_fov>1.3962634</horizontal_fov>
         <image>
@@ -592,20 +465,14 @@
           <far>20.0</far>
         </clip>
       </camera>
-      <plugin name="rgb_camera_plugin" filename="libgazebo_ros_camera.so">
-        <ros>
-          <namespace>/camera/camera</namespace>
-        </ros>
-        <camera_name>color</camera_name>
-        <frame_name>camera_link</frame_name>
-      </plugin>
     </sensor>
 
-    <!-- Depth camera -->
-    <sensor name="depth_camera_sensor" type="depth">
+    <sensor name="depth_camera" type="depth_camera">
       <always_on>true</always_on>
       <visualize>false</visualize>
       <update_rate>15.0</update_rate>
+      <topic>camera/depth/image_raw</topic>
+      <gz_frame_id>camera_link</gz_frame_id>
       <camera name="depth_camera">
         <horizontal_fov>1.3962634</horizontal_fov>
         <image>
@@ -618,112 +485,7 @@
           <far>10.0</far>
         </clip>
       </camera>
-      <plugin name="depth_camera_plugin" filename="libgazebo_ros_camera.so">
-        <ros>
-          <namespace>/camera/camera</namespace>
-          <remapping>image_raw:=image_rect_raw</remapping>
-        </ros>
-        <camera_name>depth</camera_name>
-        <frame_name>camera_link</frame_name>
-        <hack_baseline>0.07</hack_baseline>
-        <min_depth>0.1</min_depth>
-        <max_depth>10.0</max_depth>
-      </plugin>
-    </sensor>
-  </gazebo>
-
-  <!-- Sonar Center Gazebo -->
-  <gazebo reference="sonar_center_link">
-    <sensor type="ray" name="sonar_center_sensor">
-      <always_on>true</always_on>
-      <update_rate>10</update_rate>
-      <visualize>true</visualize>
-      <ray>
-        <scan>
-          <horizontal>
-            <samples>5</samples>
-            <resolution>1</resolution>
-            <min_angle>-0.1309</min_angle>
-            <max_angle>0.1309</max_angle>
-          </horizontal>
-        </scan>
-        <range>
-          <min>0.02</min>
-          <max>4.0</max>
-          <resolution>0.01</resolution>
-        </range>
-      </ray>
-      <plugin name="sonar_center_plugin" filename="libgazebo_ros_ray_sensor.so">
-        <ros>
-          <remapping>~/out:=sonar_center</remapping>
-        </ros>
-        <output_type>sensor_msgs/Range</output_type>
-        <frame_name>sonar_center_link</frame_name>
-      </plugin>
-    </sensor>
-  </gazebo>
-
-  <!-- Sonar Left Gazebo -->
-  <gazebo reference="sonar_left_link">
-    <sensor type="ray" name="sonar_left_sensor">
-      <always_on>true</always_on>
-      <update_rate>10</update_rate>
-      <visualize>true</visualize>
-      <ray>
-        <scan>
-          <horizontal>
-            <samples>5</samples>
-            <resolution>1</resolution>
-            <min_angle>-0.1309</min_angle>
-            <max_angle>0.1309</max_angle>
-          </horizontal>
-        </scan>
-        <range>
-          <min>0.02</min>
-          <max>4.0</max>
-          <resolution>0.01</resolution>
-        </range>
-      </ray>
-      <plugin name="sonar_left_plugin" filename="libgazebo_ros_ray_sensor.so">
-        <ros>
-          <remapping>~/out:=sonar_left</remapping>
-        </ros>
-        <output_type>sensor_msgs/Range</output_type>
-        <frame_name>sonar_left_link</frame_name>
-      </plugin>
-    </sensor>
-  </gazebo>
-
-  <!-- Sonar Right Gazebo -->
-  <gazebo reference="sonar_right_link">
-    <sensor type="ray" name="sonar_right_sensor">
-      <always_on>true</always_on>
-      <update_rate>10</update_rate>
-      <visualize>true</visualize>
-      <ray>
-        <scan>
-          <horizontal>
-            <samples>5</samples>
-            <resolution>1</resolution>
-            <min_angle>-0.1309</min_angle>
-            <max_angle>0.1309</max_angle>
-          </horizontal>
-        </scan>
-        <range>
-          <min>0.02</min>
-          <max>4.0</max>
-          <resolution>0.01</resolution>
-        </range>
-      </ray>
-      <plugin name="sonar_right_plugin" filename="libgazebo_ros_ray_sensor.so">
-        <ros>
-          <remapping>~/out:=sonar_right</remapping>
-        </ros>
-        <output_type>sensor_msgs/Range</output_type>
-        <frame_name>sonar_right_link</frame_name>
-      </plugin>
     </sensor>
   </gazebo>
 
 </robot>
-

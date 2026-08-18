@@ -9,10 +9,22 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
+    if os.path.exists(user_src_path):
+        return user_src_path
+    user_ws_path = os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
+    if os.path.exists(user_ws_path):
+        return user_ws_path
+    try:
+        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+    except Exception:
+        return user_src_path
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
-    default_slam_params = os.path.join(pkg_share, 'config', 'mapper_params_online_async.yaml')
-    default_rviz_config = os.path.join(pkg_share, 'config', 'rviz_slam.rviz')
+    default_slam_params = resolve_path('config', 'mapper_params_online_async.yaml')
+    default_rviz_config = resolve_path('config', 'rviz_slam.rviz')
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_rviz = LaunchConfiguration('use_rviz')
