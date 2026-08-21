@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SaveLocation.srv"
   "srv/GetLocation.srv"
   "srv/DeleteLocation.srv"
+  "srv/GetLocationList.srv"
   "srv/SetLanguage.srv"
   "srv/FinishSetup.srv"
   "srv/SaveRoute.srv"

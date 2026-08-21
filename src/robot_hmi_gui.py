@@ -3,6 +3,8 @@
 import sys
 import threading
 import time
+import os
+import yaml
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPoint
 from PyQt5.QtWidgets import (
@@ -22,8 +24,9 @@ from tf2_ros.transform_listener import TransformListener
 from std_srvs.srv import Trigger
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
+from std_msgs.msg import String
 from robot_interfaces.msg import RobotStatus, CustomerStatus
-from robot_interfaces.srv import SetLanguage, FinishSetup, SaveLocation, DeleteLocation, SaveRoute
+from robot_interfaces.srv import SetLanguage, FinishSetup, SaveLocation, DeleteLocation, SaveRoute, GetLocationList
 from robot_interfaces.action import DirectGo
 
 class MapViewer(QLabel):
@@ -44,6 +47,7 @@ class MapViewer(QLabel):
         self.scale_factor = 1.0
         self.offset_x = 0
         self.offset_y = 0
+        self.saved_locations = {}
 
     def update_map(self, occ_grid):
         info = occ_grid.info
@@ -89,6 +93,32 @@ class MapViewer(QLabel):
         canvas.fill(QColor("#1e1e1e"))
         painter = QPainter(canvas)
         painter.drawPixmap(self.offset_x, self.offset_y, scaled)
+        
+        # Vẽ các điểm đã lưu
+        if self.saved_locations and self.map_resolution is not None:
+            painter.setRenderHint(QPainter.Antialiasing)
+            pen = QPen(QColor(0, 255, 0)) # Xanh lá cho text
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.setBrush(QColor(255, 0, 0, 200)) # Đỏ cho điểm
+            
+            for name, data in self.saved_locations.items():
+                if 'x' in data and 'y' in data:
+                    wx = data['x']
+                    wy = data['y']
+                    # Chuyển đổi world -> map grid
+                    mx = (wx - self.map_origin_x) / self.map_resolution
+                    my = (wy - self.map_origin_y) / self.map_resolution
+                    
+                    # Chuyển đổi map grid -> widget pixel
+                    my_img = self.map_height - 1 - my
+                    px = mx * self.scale_factor + self.offset_x
+                    py = my_img * self.scale_factor + self.offset_y
+                    
+                    if 0 <= px < self.width() and 0 <= py < self.height():
+                        painter.drawEllipse(QPoint(int(px), int(py)), 4, 4)
+                        painter.drawText(int(px) + 7, int(py) + 4, name)
+                        
         painter.end()
         self.setPixmap(canvas)
 
@@ -121,11 +151,12 @@ class MapViewer(QLabel):
 class HmiRosNode(Node):
     """Node ROS 2 ngầm để giao tiếp với 6 Phase backend"""
 
-    def __init__(self, log_callback=None, gui_callback=None, map_callback=None):
+    def __init__(self, log_callback=None, gui_callback=None, map_callback=None, loc_list_callback=None):
         super().__init__('robot_hmi_gui_node')
         self.log_callback = log_callback
         self.gui_callback = gui_callback
         self.map_callback = map_callback
+        self.loc_list_callback = loc_list_callback
         
         # --- Phase 2: Config Manager ---
         self.cli_set_lang = self.create_client(SetLanguage, '/config/set_language')
@@ -133,6 +164,7 @@ class HmiRosNode(Node):
         self.cli_save_location = self.create_client(SaveLocation, '/config/save_location')
         self.cli_del_location = self.create_client(DeleteLocation, '/config/delete_location')
         self.cli_save_route = self.create_client(SaveRoute, '/config/save_route')
+        self.cli_get_loc_list = self.create_client(GetLocationList, '/config/get_location_list')
         
         # TF2 Listener for getting current pose
         self.tf_buffer = Buffer()
@@ -161,6 +193,12 @@ class HmiRosNode(Node):
             depth=1,
         )
         self.sub_map = self.create_subscription(OccupancyGrid, '/map', self.cb_map, map_qos)
+        
+        # --- Logging from Backend ---
+        self.sub_mission_log = self.create_subscription(String, '/mission/status_log', self.cb_mission_log, 10)
+
+    def cb_mission_log(self, msg):
+        self.log(msg.data)
 
     def cb_map(self, msg):
         if self.map_callback:
@@ -175,6 +213,21 @@ class HmiRosNode(Node):
         # Khi nhận được status từ ROS, đẩy nó qua GUI callback
         if self.gui_callback:
             self.gui_callback(msg)
+
+    def cb_get_location_list_done(self, future):
+        try:
+            res = future.result()
+            if res.success:
+                if self.loc_list_callback:
+                    self.loc_list_callback(res.locations)
+        except Exception as e:
+            self.log(f"Lỗi khi lấy danh sách điểm: {e}")
+
+    def get_location_list(self):
+        if self.cli_get_loc_list.service_is_ready():
+            req = GetLocationList.Request()
+            future = self.cli_get_loc_list.call_async(req)
+            future.add_done_callback(self.cb_get_location_list_done)
 
     # --- Các hàm gọi Service Phase 2 ---
     def set_language(self, lang_code):
@@ -284,7 +337,7 @@ class HmiRosNode(Node):
         self.pub_customer.publish(msg)
         self.log("Đã gửi tín hiệu: Khách hàng cần phục vụ (Customer detected = True)")
 
-    # Ví dụ gọi service Phase 6
+    # --- Actions Phase 6 ---
     def start_slam(self):
         if self.cli_start_slam.wait_for_service(timeout_sec=1.0):
             req = Trigger.Request()
@@ -297,6 +350,7 @@ class RobotHmiGui(QWidget):
     log_signal = pyqtSignal(str)
     status_signal = pyqtSignal(object)
     map_signal = pyqtSignal(object)
+    location_list_signal = pyqtSignal(list)
 
     def __init__(self):
         super().__init__()
@@ -313,6 +367,12 @@ class RobotHmiGui(QWidget):
         self.log_signal.connect(self.append_log)
         self.status_signal.connect(self.update_monitor_ui)
         self.map_signal.connect(self.update_map_ui)
+        self.location_list_signal.connect(self.update_locations_ui)
+        
+        # Timer for refreshing location list
+        self.loc_timer = QTimer(self)
+        self.loc_timer.timeout.connect(self.refresh_locations)
+        self.loc_timer.start(2000)
 
     def get_ros_node(self):
         return self.ros_node
@@ -444,7 +504,7 @@ class RobotHmiGui(QWidget):
         group_nav = QGroupBox("📍 Phase 4: Navigation")
         g_nav_layout = QVBoxLayout()
         self.cmb_locations = QComboBox()
-        self.cmb_locations.addItems(["kitchen", "table_1", "table_2", "charger"])
+        self.cmb_locations.addItems(["Đang tải..."])
         btn_go = QPushButton("🚀 Đi tới điểm này (Direct Go)")
         btn_go.clicked.connect(self.on_direct_go)
         g_nav_layout.addWidget(QLabel("Chọn điểm đến:"))
@@ -516,7 +576,8 @@ class RobotHmiGui(QWidget):
             self.ros_node = HmiRosNode(
                 log_callback=self.emit_log, 
                 gui_callback=self.status_signal.emit,
-                map_callback=self.map_signal.emit
+                map_callback=self.map_signal.emit,
+                loc_list_callback=self.location_list_signal.emit
             )
             self.ros_thread = threading.Thread(target=self.spin_ros, daemon=True)
             self.ros_thread.start()
@@ -548,6 +609,39 @@ class RobotHmiGui(QWidget):
 
     def update_map_ui(self, occ_grid):
         self.lbl_map.update_map(occ_grid)
+
+    def update_locations_ui(self, loc_list):
+        current_items = [self.cmb_locations.itemText(i) for i in range(self.cmb_locations.count())]
+        
+        if not loc_list:
+            if current_items != ["Không có điểm nào"] and current_items != ["Đang tải..."]:
+                self.cmb_locations.clear()
+                self.cmb_locations.addItem("Không có điểm nào")
+            return
+            
+        if current_items != loc_list:
+            current_text = self.cmb_locations.currentText()
+            self.cmb_locations.clear()
+            self.cmb_locations.addItems(loc_list)
+            idx = self.cmb_locations.findText(current_text)
+            if idx >= 0:
+                self.cmb_locations.setCurrentIndex(idx)
+
+    def refresh_locations(self):
+        if self.ros_node:
+            self.ros_node.get_location_list()
+            
+        # Đọc locations.yaml để vẽ lên bản đồ
+        yaml_path = os.path.join(os.path.expanduser('~'), 'robot_ws', 'config', 'locations.yaml')
+        try:
+            if os.path.exists(yaml_path):
+                with open(yaml_path, 'r', encoding='utf-8') as f:
+                    data = yaml.safe_load(f) or {}
+                    if data != self.lbl_map.saved_locations:
+                        self.lbl_map.saved_locations = data
+                        self.lbl_map.update_display()
+        except Exception:
+            pass
 
     # --- Actions Phase 2 ---
     def on_set_language(self):

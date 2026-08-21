@@ -5,7 +5,8 @@ import os
 
 from robot_interfaces.srv import (
     SaveLocation, GetLocation, DeleteLocation, 
-    SetLanguage, FinishSetup, SaveRoute, GetRoute
+    SetLanguage, FinishSetup, SaveRoute, GetRoute,
+    GetLocationList
 )
 
 class ConfigManagerNode(Node):
@@ -33,6 +34,7 @@ class ConfigManagerNode(Node):
         self.srv_finish_setup = self.create_service(FinishSetup, '/config/finish_setup', self.cb_finish_setup)
         self.srv_save_route = self.create_service(SaveRoute, '/config/save_route', self.cb_save_route)
         self.srv_get_route = self.create_service(GetRoute, '/config/get_route', self.cb_get_route)
+        self.srv_get_loc_list = self.create_service(GetLocationList, '/config/get_location_list', self.cb_get_location_list)
         
         self.get_logger().info('Config Manager Node started. YAML persistence enabled.')
 
@@ -86,6 +88,12 @@ class ConfigManagerNode(Node):
             response.success = False
             response.message = f"Location '{name}' not found."
         self.get_logger().info(response.message)
+        return response
+
+    def cb_get_location_list(self, request, response):
+        response.locations = list(self.locations.keys())
+        response.success = True
+        response.message = f"Loaded {len(response.locations)} locations."
         return response
 
     def cb_set_language(self, request, response):

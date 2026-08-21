@@ -59,8 +59,11 @@ class ActionGoCharging(Action):
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
+            msg = "CẢNH BÁO: Pin yếu! Đang về trạm sạc..."
             if self.node:
-                self.node.get_logger().warn("Battery Low! Going to charging pile...")
+                self.node.get_logger().warn(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             self.start_time = time.time()
             # Cancel current patrol and customer tasks
             blackboard.set('HMI_start_patrol', False)
@@ -70,8 +73,11 @@ class ActionGoCharging(Action):
         
         # Simulate navigation to charging pile (5 seconds)
         if time.time() - self.start_time > 5.0:
+            msg = "Đã đến trạm sạc. Đang sạc..."
             if self.node:
-                self.node.get_logger().info("Arrived at charging pile. Docking.")
+                self.node.get_logger().info(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
             
@@ -86,16 +92,22 @@ class ActionGoRefill(Action):
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
+            msg = "CẢNH BÁO: Gần hết nước! Đang đi bơm nước..."
             if self.node:
-                self.node.get_logger().warn("Water Low! Interrupting mission to refill...")
+                self.node.get_logger().warn(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             self.start_time = time.time()
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
         
         # Simulate navigation to water refill (5 seconds)
         if time.time() - self.start_time > 5.0:
+            msg = "Đã bơm nước xong. Tiếp tục nhiệm vụ."
             if self.node:
-                self.node.get_logger().info("Refilled water successfully. Returning to mission.")
+                self.node.get_logger().info(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             # Clear the flag (in reality, sensor will update this)
             blackboard.set('SYSTEM_water_low', False)
             self.status = NodeStatus.SUCCESS
@@ -112,16 +124,22 @@ class ActionServeCustomer(Action):
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
+            msg = "Phát hiện Khách hàng! Đang di chuyển để phục vụ..."
             if self.node:
-                self.node.get_logger().info("Customer detected! Moving to serve customer...")
+                self.node.get_logger().info(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             self.start_time = time.time()
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
             
         # Simulate serving time (10 seconds)
         if time.time() - self.start_time > 10.0:
+            msg = "Đã phục vụ xong Khách hàng."
             if self.node:
-                self.node.get_logger().info("Finished serving customer.")
+                self.node.get_logger().info(msg)
+                if hasattr(self.node, 'publish_log'):
+                    self.node.publish_log(msg)
             blackboard.set('CUSTOMER_detected', False) # Reset state
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
@@ -174,8 +192,11 @@ class ActionPatrol(Action):
             response = future.result()
             if response.success and len(response.waypoints) > 0:
                 self.patrol_points = list(response.waypoints)
+                msg = f"Đã tải Lộ trình tuần tra: {self.patrol_points}"
                 if self.node:
-                    self.node.get_logger().info(f"Đã tải Lộ trình tuần tra: {self.patrol_points}")
+                    self.node.get_logger().info(msg)
+                    if hasattr(self.node, 'publish_log'):
+                        self.node.publish_log(msg)
                 self.current_idx = 0
                 self.send_next_goal()
             else:
@@ -187,10 +208,18 @@ class ActionPatrol(Action):
         self.is_fetching_route = False
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        # Nếu vừa chuyển từ trạng thái khác sang RUNNING
-        if self.status != NodeStatus.RUNNING:
+        route_changed = blackboard.get('PATROL_ROUTE_CHANGED', False)
+        
+        # Nếu vừa chuyển từ trạng thái khác sang RUNNING, hoặc có lộ trình mới
+        if self.status != NodeStatus.RUNNING or route_changed:
+            if route_changed:
+                blackboard.set('PATROL_ROUTE_CHANGED', False)
+                # Hủy goal cũ nếu đang chạy
+                if self.is_waiting_for_result and self.goal_handle:
+                    self.goal_handle.cancel_goal_async()
+                    
             if self.node:
-                self.node.get_logger().info("Bắt đầu khởi tạo Tuần tra...")
+                self.node.get_logger().info("Bắt đầu khởi tạo/làm mới Tuần tra...")
             self.is_waiting_at_waypoint = False
             self.is_waiting_for_result = False
             self.fetch_route()
@@ -227,8 +256,11 @@ class ActionPatrol(Action):
             return
             
         target = self.patrol_points[self.current_idx]
+        msg = f"Đang đến: {target}"
         if self.node:
-            self.node.get_logger().info(f"Patrol: Gửi lệnh đến điểm '{target}'...")
+            self.node.get_logger().info(msg)
+            if hasattr(self.node, 'publish_log'):
+                self.node.publish_log(msg)
             
         goal_msg = DirectGo.Goal()
         goal_msg.target_location = target
@@ -253,8 +285,18 @@ class ActionPatrol(Action):
         
     def get_result_callback(self, future):
         result = future.result().result
+        
+        target = self.patrol_points[self.current_idx]
+        if result.success:
+            msg = f"Đã đến: {target}"
+        else:
+            msg = f"Lỗi không thể đến được: {target}"
+            
         if self.node:
-            self.node.get_logger().info(f"Patrol Goal hoàn tất. Thành công: {result.success}")
+            self.node.get_logger().info(msg)
+            if hasattr(self.node, 'publish_log'):
+                self.node.publish_log(msg)
+                
         self.is_waiting_for_result = False
         
         self.wait_start_time = time.time()

@@ -43,6 +43,10 @@ class MissionControllerNode(Node):
         self.srv_pause_patrol = self.create_service(
             Trigger, '/mission/pause_patrol', self.cb_pause_patrol)
             
+        # Publisher for HMI Logs
+        from std_msgs.msg import String
+        self.pub_log = self.create_publisher(String, '/mission/status_log', 10)
+            
         # Build Behavior Tree
         self.tree = self.build_behavior_tree()
         
@@ -64,6 +68,7 @@ class MissionControllerNode(Node):
 
     def cb_start_patrol(self, request, response):
         self.blackboard.set('HMI_start_patrol', True)
+        self.blackboard.set('PATROL_ROUTE_CHANGED', True)
         response.success = True
         response.message = "Patrol requested"
         self.get_logger().info("HMI Command: Start Patrol")
@@ -75,6 +80,12 @@ class MissionControllerNode(Node):
         response.message = "Patrol paused"
         self.get_logger().info("HMI Command: Pause Patrol")
         return response
+
+    def publish_log(self, text):
+        from std_msgs.msg import String
+        msg = String()
+        msg.data = text
+        self.pub_log.publish(msg)
 
     def build_behavior_tree(self):
         """
