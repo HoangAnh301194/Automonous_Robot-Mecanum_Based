@@ -158,3 +158,33 @@ PERSON_MODEL=yolo11n.pt HAND_WAVE_BACKEND=rtmpose bash start_person_following.sh
 source ~/ros2_ws/install/setup.bash
 ros2 launch robot_ui robot_ui.launch.py
 ```
+
+## 8) ROS 2 Modular Backend Architecture
+Hệ thống backend được chia thành các node chuyên biệt để phân chia trách nhiệm rõ ràng, quản lý từng tính năng cụ thể của robot:
+
+- **robot_interfaces**: Chứa các định nghĩa custom messages, services, và actions (ví dụ: `RobotStatus`, `DirectGo`).
+- **robot_config_manager (Phase 2)**: Quản lý việc lưu trữ, cập nhật và xóa các điểm tọa độ (locations), lộ trình (routes), và cài đặt ngôn ngữ thông qua file YAML.
+- **robot_system_monitor (Phase 3)**: Thu thập, giám sát trạng thái phần cứng (pin, mức nước, trạng thái cảm biến lidar/odom) và phát tín hiệu cảnh báo kịp thời.
+- **robot_navigation_manager (Phase 4)**: Xử lý các yêu cầu điều hướng của robot, giao tiếp trực tiếp với Nav2 (`NavigateToPose`) để thực hiện di chuyển chuẩn xác.
+- **robot_mission_control (Phase 5)**: "Bộ não" trung tâm điều phối mọi hoạt động. Tích hợp **Behavior Tree (BT)** để quản lý linh hoạt, tự động chuyển đổi và ưu tiên các nhiệm vụ theo thứ tự:
+  1. Dừng khẩn cấp (E-Stop).
+  2. Về trạm sạc pin (Battery Low).
+  3. Bơm nước (Water Low).
+  4. Phục vụ khách hàng (Customer Request).
+  5. Đi tuần tra lộ trình (Patrol).
+
+## 9) Robot HMI GUI (Control Panel)
+Giao diện điều khiển trung tâm được xây dựng bằng PyQt5 (`robot_hmi_gui.py`), kết nối và điều phối mọi hoạt động của các node Backend.
+
+### Cách chạy HMI GUI:
+```bash
+cd ~/robot_ws
+source install/setup.bash
+python3 src/robot_hmi_gui.py
+```
+
+**Tính năng chính của HMI GUI:**
+- **Map Viewer & Navigation**: Hiển thị bản đồ (từ `/map`), cập nhật các vị trí đã lưu và cho phép click trực tiếp để điều hướng robot (Nav2).
+- **Cấu hình (Config)**: Thêm/Xóa nhanh các vị trí quan trọng, cài đặt ngôn ngữ và thiết lập lộ trình.
+- **Giám sát (Monitor)**: Hiển thị thời gian thực thanh trạng thái pin, trạng thái nước và kết nối cảm biến.
+- **Nhiệm vụ (Mission)**: Giao diện trực quan để bắt đầu/tạm ngưng tuần tra, phát tín hiệu phục vụ khách hàng, hoặc ra lệnh Dừng khẩn cấp.
