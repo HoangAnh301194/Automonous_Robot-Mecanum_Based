@@ -216,6 +216,7 @@ class ActionPatrol(Action):
                 blackboard.set('PATROL_ROUTE_CHANGED', False)
                 # Hủy goal cũ nếu đang chạy
                 if self.is_waiting_for_result and self.goal_handle:
+                    self.is_canceling_old_route = True
                     self.goal_handle.cancel_goal_async()
                     
             if self.node:
@@ -284,6 +285,11 @@ class ActionPatrol(Action):
         get_result_future.add_done_callback(self.get_result_callback)
         
     def get_result_callback(self, future):
+        if hasattr(self, 'is_canceling_old_route') and self.is_canceling_old_route:
+            self.is_canceling_old_route = False
+            self.is_waiting_for_result = False
+            return
+            
         result = future.result().result
         
         target = self.patrol_points[self.current_idx]
