@@ -111,14 +111,8 @@ ros2 topic hz /pose/wave_detected
   - Xác nhận `BYTETracker.update()` không dùng image
   - Truyền `None` thay vì ảnh đã convert
 
-### ✅ Checkpoint 2: Benchmark C–F
+### Checkpoint 2: Benchmark C–F
 ```bash
-# C: Production CPU pose, 3D ON, Debug OFF, max_people=1
-# D: Production GPU pose, 3D ON, Debug OFF, max_people=1
-# E: CPU pose, 3D ON, Debug ON, max_people=1
-# F: CPU pose, 3D ON, Debug OFF, max_people=5
-# G: 0 người trong cảnh (test idle)
-ros2 topic hz /yolo/tracking
 ros2 topic hz /pose/wave_detected
 ```
 > So sánh `rtmpose_ms` và `handwave_hz` với Checkpoint 1
