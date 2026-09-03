@@ -1,5 +1,0 @@
-string route_name
-string[] waypoints
----
-bool success
-string message

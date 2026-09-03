@@ -1,0 +1,12 @@
+camera_tilt: 0
+distance_offset: -0.22
+ground_file_path: /home/orin/ros2_ws/my_map/cam_nen.npy
+median_filter: 3
+min_area: 150
+morphology_size: 3
+roi_height: 298
+roi_width: 614
+roi_x: 1
+roi_y: 108
+target_frame: base_link
+threshold: 80

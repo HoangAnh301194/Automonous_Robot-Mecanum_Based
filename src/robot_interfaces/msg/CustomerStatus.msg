@@ -1,0 +1,4 @@
+bool customer_detected
+float64 customer_x
+float64 customer_y
+float64 customer_distance

@@ -1,0 +1,9 @@
+# Request
+string target_location
+---
+# Result
+bool success
+string finish_message
+---
+# Feedback
+float32 distance_remaining

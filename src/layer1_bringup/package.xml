@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>layer1_bringup</name>
+  <version>0.0.1</version>
+  <description>Unified Layer 1 bringup package with ESP32 bridge and 3-source EKF odometry fusion.</description>
+  <maintainer email="orin@todo.todo">orin</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>std_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>sllidar_ros2</depend>
+  <depend>laser_filters</depend>
+  <depend>bno055_imu</depend>
+  <depend>rf2o_laser_odometry</depend>
+  <depend>robot_localization</depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

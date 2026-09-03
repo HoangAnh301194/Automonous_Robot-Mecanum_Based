@@ -1,0 +1,29 @@
+stage: raised_hand
+backend: rtmpose
+device: cpu
+source: 0
+
+models:
+  yolo_pose: yolo11n-pose.pt
+  detector: yolo11n.pt
+  rtmpose: https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-s_simcc-body7_pt-body7_420e-256x192-acd4a1ef_20230504.zip
+
+processing:
+  max_people: 5
+  input_width: 640
+  input_height: 384
+  pose_input_width: 192
+  pose_input_height: 256
+  pose_bbox_margin_ratio: 0.12
+  confidence: 0.25
+  iou: 0.50
+  keypoint_threshold: 0.40
+  head_margin_ratio: 0.02
+  full_precision: false
+
+output:
+  display: true
+  save_video: false
+  path: outputs/result.mp4
+  save_jsonl: false
+  jsonl_path: outputs/predictions.jsonl

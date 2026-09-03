@@ -1,2 +1,0 @@
-rules:
-  apt-get-update_require_install: off
