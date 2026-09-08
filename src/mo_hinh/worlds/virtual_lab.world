@@ -268,7 +268,7 @@
 
     <!-- Walking Actor -->
     <include>
-      <uri>file:///home/duc/Automonous_Robot-Mecanum_Based-simulator/src/mo_hinh/worlds/Walking_actor</uri>
+      <uri>model://Walking_actor</uri>
       <name>walking_actor</name>
       <pose>0 0 1.0 0 0 0</pose>
     </include>

@@ -1,157 +1,314 @@
 # Robot UI
 
-Web admin/developer dashboard for the ROS 2 robot stack.
+Native ROS 2 touchscreen interface for the robot. The application is built with
+PyQt5 and is intended to run fullscreen on a 7-inch Raspberry Pi touchscreen.
+It does not require a web browser.
 
-Current scaffold is intentionally read-only. It provides:
+The interface contains three screens:
 
-- FastAPI server and WebSocket telemetry endpoint.
-- ROS 2 bridge for hardware, map, TF, LaserScan, Nav2 paths, costmaps and action status.
-- CPU, per-core load, memory, disk, temperature and Jetson GPU monitoring.
-- Topic-rate health, `/diagnostics`, `/rosout` and runtime event monitoring.
-- Mission state, waypoint/Nav2/intercept status from `/mission/status`.
-- CameraInfo, YOLO, wave and depth-obstacle pipeline health.
-- React/TypeScript dashboard with six developer pages.
-- ROS launch file and deployment service example.
+- **Home:** loops the configured Dasai Mochi emotion video.
+- **Navigation:** displays the ROS map, robot pose, planned path and selected
+  goal. Press Start to send a `NavigateToPose` goal and Stop to cancel it.
+- **Chat:** provides the native chat layout. LLM integration is not connected
+  yet.
 
-## Directory Layout
+## Workspace Path
 
-```text
-robot_ui/
-??? config/                 Runtime YAML configuration
-??? deploy/                 Deployment examples
-??? docs/                   Architecture, API contract, roadmap
-??? frontend/               Vite + React + TypeScript source
-??? launch/                 ROS 2 launch files
-??? resource/               ament package marker
-??? robot_ui/               Python backend package
-?   ??? api/                REST and WebSocket routers
-?   ??? web_dist/           Built frontend output
-??? package.xml
-??? setup.py
-??? requirements.txt
-```
-
-## Build Frontend
-
-Requires Node.js `20.19+`.
+The commands below use the current workspace location:
 
 ```bash
-cd ~/ros2_ws/src/robot_ui/frontend
-npm install
-npm run build
+cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
 ```
 
-Vite writes production files to `robot_ui/web_dist`.
+## Prepare a Terminal
 
-## Windows UI Preview (No Jetson)
-
-Requires Node.js `20.19+`. ROS 2, Python backend and Jetson are not required.
-
-From PowerShell:
-
-```powershell
-cd D:\PTIT\NCKH\Automonous_Robot-Mecanum_Based\src\robot_ui
-.\preview_windows.ps1
-```
-
-Or double-click `preview_windows.bat`.
-
-The launcher installs frontend dependencies when needed, opens
-`http://127.0.0.1:5173`, and prints LAN URLs for other devices. The Vite
-development build uses demo telemetry and a demo ROS graph.
-
-If Windows Firewall asks for access, allow Node.js on private networks. Stop
-the preview with `Ctrl+C`.
-
-## Install Backend Dependencies
+Run these commands in every new terminal before using ROS 2 packages from this
+workspace:
 
 ```bash
-cd ~/ros2_ws/src/robot_ui
-python3 -m pip install -r requirements.txt
+cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
+
+source .venv/bin/activate
+source /opt/ros/humble/setup.bash
+source install/setup.bash
 ```
 
-## Build ROS Package
+If `.venv` is not being used, omit this command:
 
 ```bash
-cd ~/ros2_ws
+source .venv/bin/activate
+```
+
+## Install Native UI Dependencies
+
+On Ubuntu 22.04 with ROS 2 Humble:
+
+```bash
+sudo apt update
+sudo apt install python3-pyqt5 python3-opencv python3-numpy
+```
+
+## Build the UI
+
+Build after modifying Python code, launch files, configuration or assets:
+
+```bash
+cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
+
+source .venv/bin/activate
+source /opt/ros/humble/setup.bash
+
 colcon build --symlink-install --packages-select robot_ui
 source install/setup.bash
 ```
 
-## Run
+Verify that ROS 2 can find the package:
 
 ```bash
-ros2 launch robot_ui robot_ui.launch.py
+ros2 pkg prefix robot_ui
 ```
 
-Open from another machine on the same LAN:
+## Run a Windowed Simulation Preview
 
-```text
-http://<robot-ip>:8000
+Use this mode during development. The mouse cursor remains visible and the
+window can be resized:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=true \
+  hide_cursor:=false \
+  use_sim_time:=true
 ```
 
-Useful endpoints:
+## Run Fullscreen with Gazebo
 
-```text
-GET /api/v1/health
-GET /api/v1/state
-GET /api/v1/config
-GET /api/v1/ros/graph
-WS  /ws/telemetry
-GET /docs
+Use the Gazebo clock while displaying the UI fullscreen:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=false \
+  hide_cursor:=true \
+  use_sim_time:=true
 ```
 
-Navigation telemetry defaults:
+## Run Fullscreen on the Real Robot
+
+The real robot uses the system clock:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=false \
+  hide_cursor:=true \
+  use_sim_time:=false
+```
+
+The default launch values are already suitable for the real touchscreen, so
+the shorter equivalent command is:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py
+```
+
+## Start the Robot Backend
+
+Open a separate terminal and prepare it as described above, then run:
+
+```bash
+ros2 launch robot_bringup backend.launch.py
+```
+
+The backend provides robot status, navigation status, saved locations and
+other data consumed by the UI.
+
+## Start the Gazebo Simulation
+
+Open a separate prepared terminal:
+
+```bash
+ros2 launch mo_hinh virtual_robot_gazebo.launch.py
+```
+
+Navigation also requires Nav2 and localization to be running. If using the
+saved virtual lab map, start Nav2 from another prepared terminal:
+
+```bash
+ros2 launch nav2_bringup bringup_launch.py \
+  use_sim_time:=true \
+  map:="$(pwd)/src/mo_hinh/maps/virtual_lab_map.yaml" \
+  params_file:="$(pwd)/src/mo_hinh/config/nav2_params.yaml"
+```
+
+Start the backend and Robot UI in their own terminals after Gazebo and Nav2 are
+running.
+
+## Recommended Simulation Terminal Layout
+
+Use one process per terminal:
 
 ```text
+Terminal 1: Gazebo simulation
+Terminal 2: Nav2 and localization
+Terminal 3: Robot backend
+Terminal 4: Robot UI
+```
+
+Every terminal must source ROS 2 and `install/setup.bash` first.
+
+## ROS Interfaces Used by the UI
+
+The native UI subscribes to:
+
+```text
+/robot_status
+/navigation/status
 /map
+/amcl_pose
 /odom
-/scan
-/goal_pose
 /plan
-/local_plan
-/global_costmap/costmap_raw
-/local_costmap/costmap_raw
-/navigate_to_pose/_action/status
-/diagnostics
-/rosout
-TF: map -> base_footprint
 ```
 
-Mission and vision telemetry defaults:
+It uses these services to load saved locations:
 
 ```text
-/mission/status
-/camera/color/camera_info
-/camera/depth/camera_info
-/yolo/detections
-/pose/wave_detected
-/pose/wave_status
-/scan_obstacles
+/config/get_location_list
+/config/get_location
 ```
 
-`nhiemvuboss` publishes `/mission/status` as a bounded JSON object inside
-`std_msgs/String` at 2 Hz. It includes mission mode, waypoint progress, Nav2
-state, distance remaining, wait time and person-intercept state.
+It sends and cancels goals through the Nav2 action:
 
-Map and costmap grids are downsampled before entering WebSocket snapshots. The
-dashboard remains read-only; navigation goal and process controls are disabled.
+```text
+/navigate_to_pose
+```
 
-Only topics listed under `ros.expected_rates_hz` receive rate and stale checks.
-Their state is reported as `WAITING`, `OK`, `WARN` or `STALE`. Thresholds and
-retention limits live under `ros.diagnostics` in `config/robot_ui.yaml`.
+## Inspect Live Data
 
-## Development Mode
-
-Run backend on port `8000`, then:
+List all active topics and their message types:
 
 ```bash
-cd frontend
-npm run dev
+ros2 topic list -t
 ```
 
-Vite proxies `/api` and `/ws` to the backend.
+Check robot status:
 
-## Safety Boundary
+```bash
+ros2 topic echo /robot_status --once
+```
 
-The scaffold does not expose navigation, process control or teleoperation. These remain disabled in `config/robot_ui.yaml` until authentication, command whitelisting and disconnect safety are implemented.
+Check the localized robot pose:
+
+```bash
+ros2 topic echo /amcl_pose --once
+```
+
+Check whether a map is being published:
+
+```bash
+ros2 topic echo /map --once
+```
+
+Check the generated navigation path:
+
+```bash
+ros2 topic echo /plan --once
+```
+
+Monitor the final velocity sent to Gazebo or the real robot:
+
+```bash
+ros2 topic echo /cmd_vel
+```
+
+Check whether the Nav2 action server is available:
+
+```bash
+ros2 action list | grep navigate_to_pose
+```
+
+## Emotions and Icons
+
+Emotion names and video filenames are configured in:
+
+```text
+config/emotions.json
+```
+
+MP4 emotion files are stored in:
+
+```text
+emotion_dasaimochi/videomp4/
+```
+
+Navigation and menu image assets are stored in:
+
+```text
+emotion_dasaimochi/
+```
+
+After adding a new asset, also add it to the `data_files` section in
+`setup.py`, rebuild `robot_ui`, and source `install/setup.bash` again.
+
+## Stop the Application
+
+- Press `Esc` while the UI is focused.
+- Or press `Ctrl+C` in the terminal that launched it.
+
+## Troubleshooting
+
+### Package `robot_ui` not found
+
+The current terminal has not sourced the workspace overlay. Run:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 pkg prefix robot_ui
+```
+
+If the package is still missing, rebuild it:
+
+```bash
+colcon build --symlink-install --packages-select robot_ui
+source install/setup.bash
+```
+
+### The UI opens but no map is displayed
+
+Check that Nav2 or SLAM is publishing `/map`:
+
+```bash
+ros2 topic info /map
+ros2 topic echo /map --once
+```
+
+For Gazebo, confirm that every related process uses simulation time:
+
+```bash
+ros2 param get /robot_ui_kiosk use_sim_time
+```
+
+### A goal is selected but the robot does not move
+
+Check the Nav2 action and velocity topics:
+
+```bash
+ros2 action list | grep navigate_to_pose
+ros2 topic echo /cmd_vel_smoothed
+ros2 topic echo /cmd_vel
+```
+
+If `/cmd_vel_smoothed` contains commands but `/cmd_vel` is zero or much lower,
+the collision monitor may be stopping or slowing the robot near an obstacle.
+
+### The UI still shows an old version
+
+Stop the current UI, rebuild, source the workspace again and relaunch:
+
+```bash
+colcon build --symlink-install --packages-select robot_ui
+source install/setup.bash
+
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=true \
+  hide_cursor:=false \
+  use_sim_time:=true
+```

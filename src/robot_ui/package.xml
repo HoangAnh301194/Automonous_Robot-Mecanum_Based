@@ -2,7 +2,7 @@
 <package format="3">
   <name>robot_ui</name>
   <version>0.1.0</version>
-  <description>Web-based admin and developer dashboard for the robot.</description>
+  <description>Native touchscreen kiosk and web diagnostics for the robot.</description>
   <maintainer email="orin@todo.todo">orin</maintainer>
   <license>MIT</license>
   <buildtool_depend>ament_python</buildtool_depend>
@@ -13,13 +13,19 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>robot_interfaces</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>yolo_msgs</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-pyqt5</exec_depend>
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>
   <test_depend>python3-pytest</test_depend>

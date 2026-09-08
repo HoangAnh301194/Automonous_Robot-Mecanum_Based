@@ -1,0 +1,17 @@
+{
+  "default": "idle",
+  "display_scale": 0.9,
+  "vertical_offset_px": -30,
+  "emotions": {
+    "idle": "normal.mp4",
+    "welcome": "cell_0_1.mp4",
+    "happy": "laught.mp4",
+    "listening": "omoshiroi.mp4",
+    "thinking": "sleepy.mp4",
+    "navigating": "cell_2_1.mp4",
+    "arrived": "cell_3_0.mp4",
+    "warning": "angry.mp4",
+    "error": "cell_4_0.mp4",
+    "sleeping": "sleeping.mp4"
+  }
+}

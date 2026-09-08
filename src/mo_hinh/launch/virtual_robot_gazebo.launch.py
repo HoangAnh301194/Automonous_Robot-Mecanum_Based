@@ -1,7 +1,12 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetEnvironmentVariable,
+    TimerAction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -24,6 +29,7 @@ def generate_launch_description():
 
     urdf_file = resolve_path('urdf', 'xe.urdf')
     default_world = resolve_path('worlds', 'virtual_lab.world')
+    worlds_dir = os.path.dirname(default_world)
 
     with open(urdf_file, 'r', encoding='utf-8') as urdf:
         robot_description = urdf.read()
@@ -111,6 +117,10 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(
+            'GZ_SIM_RESOURCE_PATH',
+            [worlds_dir, os.pathsep, EnvironmentVariable('GZ_SIM_RESOURCE_PATH', default_value='')],
+        ),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('world', default_value=default_world),
         DeclareLaunchArgument('x_pose', default_value='0.0'),
