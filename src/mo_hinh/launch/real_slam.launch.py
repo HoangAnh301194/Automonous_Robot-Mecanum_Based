@@ -10,16 +10,7 @@ import os
 
 
 def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
-    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
-    if os.path.exists(user_src_path):
-        return user_src_path
-    user_ws_path = os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
-    if os.path.exists(user_ws_path):
-        return user_ws_path
-    try:
-        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
-    except Exception:
-        return user_src_path
+    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
 
 
 def generate_launch_description():

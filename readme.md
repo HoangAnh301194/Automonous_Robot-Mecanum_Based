@@ -1,13 +1,27 @@
 # AUTONOMOUS MECANUM ROBOT WORKFLOW (ROS 2)
 
 ## 0) Build & Source Workspace
+
+Run this from any directory inside the cloned repository. Repeat the workspace
+export and source commands in every new terminal before running the sections below.
+
 ```bash
-WS=~/ros2_ws
-cd ${WS}
-colcon build --symlink-install
+export WS="$(git rev-parse --show-toplevel)"
+cd "$WS"
 source /opt/ros/humble/setup.bash
-source ${WS}/install/setup.bash
+colcon build --symlink-install
+source "$WS/install/setup.bash"
 ```
+
+Launch files resolve packaged maps, URDFs and configs through the sourced ROS
+package share directory, not a fixed workspace location. Rebuild and source the
+workspace after moving it; do not reuse build/install artifacts from the old path.
+For a source archive without Git metadata, open its workspace root and use
+`export WS="$PWD"` instead.
+
+The legacy `config/nav2_params.yaml` uses `$(env WS)` for its custom behavior
+trees; pass it through the Nav2 bringup launch files after exporting `WS`.
+Camera `ground_file_path` entries are relative to their containing YAML file.
 
 ## 1) Launch Files for Hardware Mode
 
@@ -47,12 +61,12 @@ ros2 launch mo_hinh real_slam.launch.py
 # Option 1: AMCL + Nav2 (using YAML map)
 ros2 launch mo_hinh real_localization_nav2.launch.py \
   localization_mode:=amcl \
-  map_yaml:=${WS}/src/mo_hinh/maps/my_map.yaml
+  map_yaml:="$WS/src/mo_hinh/maps/my_map.yaml"
 
 # Option 2: SLAM Toolbox Localization + Nav2 (using PoseGraph)
 ros2 launch mo_hinh real_localization_nav2.launch.py \
   localization_mode:=slam_toolbox \
-  map_graph:=${WS}/src/mo_hinh/maps/my_slam_graph
+  map_graph:="$WS/src/mo_hinh/maps/my_slam_graph"
 ```
 
 ## 2) Recommended Operational Workflow
@@ -65,7 +79,7 @@ ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGrap
 ```
 4. Save 2D Occupancy Grid map (YAML/PGM) for AMCL:
 ```bash
-ros2 run nav2_map_server map_saver_cli -f ${WS}/src/mo_hinh/maps/my_map
+ros2 run nav2_map_server map_saver_cli -f "$WS/src/mo_hinh/maps/my_map"
 ```
 5. Switch to Localization + Nav2 using `real_localization_nav2.launch.py` (keep `real_odom.launch.py` running).
 
@@ -83,21 +97,21 @@ ros2 launch mo_hinh virtual_slam.launch.py
 ## 5) Layer 1 Bringup & Obstacle Detector
 ```bash
 ros2 launch layer1_bringup layer1.launch.py esp_port:=/dev/ttyUSB0 lidar_port:=/dev/ttyUSB1
-ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:=${WS}/my_map/cam.yaml
+ros2 run depth_obstacle_detector obstacle_detector --ros-args -p config_file:="$WS/my_map/cam.yaml"
 ```
 
 ## 6) AI Pipeline (Camera + YOLO11 Tracking + Hand Wave RTMPose)
 
 ### Step 0: Build AI Packages
 ```bash
-cd ~/ros2_ws
+cd "$WS"
 colcon build --symlink-install --packages-select yolo_msgs yolo_ros yolo_bringup hand_wave_detection
-source ~/ros2_ws/install/setup.bash
+source "$WS/install/setup.bash"
 ```
 
 ### Step 1: Launch Camera Driver (Orbbec Astra Pro)
 ```bash
-source ~/ros2_ws/install/setup.bash
+source "$WS/install/setup.bash"
 ros2 launch astra_camera astra_pro.launch.xml
 ```
 *Published topics: `/camera/color/image_raw`, `/camera/depth/image_raw`, `/camera/depth/camera_info`*
@@ -108,7 +122,7 @@ ros2 launch astra_camera astra_pro.launch.xml
 > `yolo export model=yolo11n.pt format=engine imgsz=384,640 half=True device=0`
 
 ```bash
-source ~/ros2_ws/install/setup.bash
+source "$WS/install/setup.bash"
 ros2 launch yolo_bringup yolo.launch.py \
   model:=yolo11n.engine \
   use_tracking:=False \
@@ -126,7 +140,7 @@ ros2 launch yolo_bringup yolo.launch.py \
 
 ### Step 3: Launch Hand Wave Detection (Lightweight RTMPose)
 ```bash
-source ~/ros2_ws/install/setup.bash
+source "$WS/install/setup.bash"
 ros2 launch hand_wave_detection hand_wave_detection.launch.py \
   backend:=rtmpose \
   device:=cpu \
@@ -161,12 +175,12 @@ ros2 run rqt_image_view rqt_image_view /pose/image_debug
 
 ### Step 5: Run Full Automated Pipeline Script
 ```bash
-cd ~/ros2_ws
+cd "$WS"
 PERSON_MODEL=yolo11n.pt HAND_WAVE_BACKEND=rtmpose bash start_person_following.sh
 ```
 
 ## 7) Robot GUI Web Interface
 ```bash
-source ~/ros2_ws/install/setup.bash
+source "$WS/install/setup.bash"
 ros2 launch robot_ui robot_ui.launch.py
 ```

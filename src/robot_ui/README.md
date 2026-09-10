@@ -1,43 +1,28 @@
 # Robot UI
-
-Native ROS 2 touchscreen interface for the robot. The application is built with
-PyQt5 and is intended to run fullscreen on a 7-inch Raspberry Pi touchscreen.
-It does not require a web browser.
-
 The interface contains three screens:
 
 - **Home:** loops the configured Dasai Mochi emotion video.
 - **Navigation:** displays the ROS map, robot pose, planned path and selected
   goal. Press Start to send a `NavigateToPose` goal and Stop to cancel it.
-- **Chat:** provides the native chat layout. LLM integration is not connected
-  yet.
-
-## Workspace Path
-
-The commands below use the current workspace location:
-
-```bash
-cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
-```
+- **Chat:** provides a native chatbot backed by 9router through its
+  OpenAI-compatible API. The client loads `.txt` files from `kiosk/rag_docs/`
+  and includes the current robot status in the prompt.
 
 ## Prepare a Terminal
 
-Run these commands in every new terminal before using ROS 2 packages from this
-workspace:
+Run these commands from any directory inside the cloned repository in every new
+terminal before using ROS 2 packages from this workspace:
 
 ```bash
-cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
-
-source .venv/bin/activate
+export WS="$(git rev-parse --show-toplevel)"
+cd "$WS"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ```
 
-If `.venv` is not being used, omit this command:
-
-```bash
-source .venv/bin/activate
-```
+For a source archive without Git metadata, open the workspace root and use
+`export WS="$PWD"`. After relocating the workspace, rebuild and source it again;
+old build/install artifacts can still contain absolute paths.
 
 ## Install Native UI Dependencies
 
@@ -48,12 +33,52 @@ sudo apt update
 sudo apt install python3-pyqt5 python3-opencv python3-numpy
 ```
 
+## Configure the Kiosk Chatbot
+
+The kiosk chatbot expects a running 9router server with an OpenAI-compatible
+endpoint. By default it connects to:
+
+```text
+http://localhost:20128/v1
+```
+
+Set these variables in the same terminal that will launch the kiosk:
+
+```bash
+export LLM_BASE_URL="http://localhost:20128/v1"
+export LLM_API_KEY="YOUR_9ROUTER_API_KEY"
+export LLM_MODEL="hehe"
+```
+
+If 9router runs on another computer, replace `localhost` with that computer's
+IP address. Do not commit the API key to the repository. The model name must
+match one of the models returned by:
+
+```bash
+curl "$LLM_BASE_URL/models"
+```
+
+Before launching the kiosk, test the endpoint without exposing the key:
+
+```bash
+curl -sS "$LLM_BASE_URL/models" \
+  -H "Authorization: Bearer $LLM_API_KEY"
+```
+
+The chatbot uses the text files in:
+
+```text
+robot_ui/kiosk/rag_docs/
+```
+
+Add or edit `.txt` files there when updating the robot knowledge base. Rebuild
+the `robot_ui` package after changing Python code or RAG documents.
+
 ## Build the UI
 
 Build after modifying Python code, launch files, configuration or assets:
 
 ```bash
-cd /media/hoang_anh/5A1479B014798FAD/PTIT/NCKH/Automonous_Robot-Mecanum_Based
 
 source .venv/bin/activate
 source /opt/ros/humble/setup.bash
@@ -80,6 +105,10 @@ ros2 launch robot_ui kiosk.launch.py \
   use_sim_time:=true
 ```
 
+The Chat screen is available from the same kiosk process. For a complete
+chatbot test, start 9router first, export the three `LLM_*` variables above,
+then launch the kiosk and send a message from the Chat screen.
+
 ## Run Fullscreen with Gazebo
 
 Use the Gazebo clock while displaying the UI fullscreen:
@@ -88,7 +117,7 @@ Use the Gazebo clock while displaying the UI fullscreen:
 ros2 launch robot_ui kiosk.launch.py \
   windowed:=false \
   hide_cursor:=true \
-  use_sim_time:=true
+  use_sim_time:=false
 ```
 
 ## Run Fullscreen on the Real Robot
@@ -134,8 +163,8 @@ saved virtual lab map, start Nav2 from another prepared terminal:
 ```bash
 ros2 launch nav2_bringup bringup_launch.py \
   use_sim_time:=true \
-  map:="$(pwd)/src/mo_hinh/maps/virtual_lab_map.yaml" \
-  params_file:="$(pwd)/src/mo_hinh/config/nav2_params.yaml"
+  map:="$WS/src/mo_hinh/maps/virtual_lab_map.yaml" \
+  params_file:="$WS/src/mo_hinh/config/nav2_params.yaml"
 ```
 
 Start the backend and Robot UI in their own terminals after Gazebo and Nav2 are
@@ -153,6 +182,26 @@ Terminal 4: Robot UI
 ```
 
 Every terminal must source ROS 2 and `install/setup.bash` first.
+
+## Optional Web UI User Service
+
+`deploy/robot-ui.service.example` is a systemd **user** service for the web UI,
+not the native kiosk. It uses a stable symlink in your home directory instead of
+embedding a disk mount or username in the unit. After setting `WS`:
+
+```bash
+mkdir -p "$HOME/.local/share" "$HOME/.config/systemd/user"
+ln -s "$WS" "$HOME/.local/share/robot-workspace"
+cp "$WS/src/robot_ui/deploy/robot-ui.service.example" \
+  "$HOME/.config/systemd/user/robot-ui.service"
+systemctl --user daemon-reload
+systemctl --user enable --now robot-ui.service
+```
+
+Create the symlink only once. If it already exists, check its target before
+changing it. When relocating the workspace, stop the service, rebuild at the new
+location, update the symlink and restart the service. Do not install this example
+as a system-wide service.
 
 ## ROS Interfaces Used by the UI
 
@@ -311,4 +360,33 @@ ros2 launch robot_ui kiosk.launch.py \
   windowed:=true \
   hide_cursor:=false \
   use_sim_time:=true
+```
+
+### The Chat screen shows an LLM error
+
+Check that the API endpoint is reachable from the same machine running the
+kiosk:
+
+```bash
+curl -sS "$LLM_BASE_URL/models" \\
+  -H "Authorization: Bearer $LLM_API_KEY"
+```
+
+Common causes are an unset `LLM_API_KEY`, a wrong `LLM_BASE_URL`, a 9router
+server that is not running, or an `LLM_MODEL` value that is not listed by the
+`/models` endpoint. The kiosk sends requests to:
+
+```text
+$LLM_BASE_URL/chat/completions
+```
+
+### The chatbot responds but does not use RAG
+
+Confirm that the knowledge files are present in the installed package and that
+they have a `.txt` extension. Rebuild and source the workspace after changing
+them:
+
+```bash
+colcon build --symlink-install --packages-select robot_ui
+source install/setup.bash
 ```

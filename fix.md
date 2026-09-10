@@ -1071,7 +1071,8 @@ Trước khi tối ưu tracker internals:
 ### 13.9. Build workspace
 
 ```bash
-cd ~/ros2_ws
+export WS="$(git rev-parse --show-toplevel)"
+cd "$WS"
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install \
   --packages-select yolo_ros yolo_bringup hand_wave_detection

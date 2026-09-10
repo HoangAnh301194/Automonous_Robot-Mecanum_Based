@@ -23,6 +23,8 @@ from cv_bridge import CvBridge
 import tf2_ros
 import tf2_geometry_msgs
 
+from depth_obstacle_detector.config_paths import relative_ground_path, resolve_ground_path
+
 
 class ImageSignalEmitter(QObject):
     """
@@ -769,7 +771,11 @@ class DebuggerGUI(QMainWindow):
                     'min_area': int(self.sld_min_area.value()),
                     'median_filter': int(self.sld_median.value()),
                     'morphology_size': int(self.sld_morph.value()),
-                    'ground_file_path': str(self.ground_file_path) if self.ground_file_path else "None",
+                    'ground_file_path': (
+                        relative_ground_path(filename, self.ground_file_path)
+                        if self.ground_file_path not in (None, "", "None", "Memory (Unsaved)")
+                        else self.ground_file_path or "None"
+                    ),
                     'target_frame': str(self.target_frame),
                     'camera_tilt': int(self.sld_tilt_angle.value()),
                     'distance_offset': float(self.sld_dist_offset.value() / 100.0)
@@ -838,6 +844,7 @@ class DebuggerGUI(QMainWindow):
                 # Attempt to load ground reference if specified
                 g_path = config_data.get('ground_file_path', 'None')
                 if g_path and g_path != "None" and g_path != "Memory (Unsaved)":
+                    g_path = resolve_ground_path(filename, g_path)
                     if os.path.exists(g_path):
                         self.ros_node.get_logger().info(f"Loading ground from config path: {g_path}")
                         loaded = np.load(g_path)

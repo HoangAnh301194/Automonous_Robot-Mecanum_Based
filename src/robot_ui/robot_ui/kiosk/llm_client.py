@@ -22,9 +22,7 @@ from typing import Any
 # Cấu hình mặc định – có thể override bằng biến môi trường
 # ---------------------------------------------------------------------------
 DEFAULT_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:20128/v1")
-DEFAULT_API_KEY = os.environ.get(
-    "LLM_API_KEY", "sk-3cbf1313d8e08dd5-4knd14-ccc4610f"
-)
+DEFAULT_API_KEY = os.environ.get("LLM_API_KEY", "")
 DEFAULT_MODEL = os.environ.get("LLM_MODEL", "hehe")  # combo model trong 9router dashboard
 REQUEST_TIMEOUT = 30  # giây
 
@@ -75,8 +73,6 @@ def _format_robot_context(robot_status: dict[str, Any]) -> str:
         "lidar_ok": "LiDAR OK",
         "localization_ok": "Định vị OK",
         "odom_ok": "Odometry OK",
-        "water_liter": "Nước còn (lít)",
-        "water_low": "Nước thấp",
     }
     for key, label in mapping.items():
         if key in robot_status:
@@ -103,6 +99,9 @@ def call_llm(
     Raises:
         RuntimeError: nếu API trả về lỗi hoặc network error.
     """
+    if not api_key:
+        raise RuntimeError("Thiếu biến môi trường LLM_API_KEY.")
+
     rag_context = _load_rag_docs(RAG_DOCS_DIR)
     robot_context = _format_robot_context(robot_status or {})
 

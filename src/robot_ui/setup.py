@@ -51,11 +51,16 @@ data_files = [
 ]
 data_files.extend(frontend_data_files())
 
+package_data = {
+    package_name: ["kiosk/rag_docs/*.txt"],
+}
+
 
 setup(
     name=package_name,
     version="0.1.0",
     packages=find_packages(exclude=["test"]),
+    package_data=package_data,
     data_files=data_files,
     install_requires=["setuptools"],
     zip_safe=True,

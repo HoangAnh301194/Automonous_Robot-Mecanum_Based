@@ -7,7 +7,7 @@
 # Video hướng dẫn chi tiết (Sơ đồ mạch + Chuyển đổi video sang mảng bytes + Hướng dẫn)
 Kênh Youtube: *MrVocSi* : https://www.youtube.com/@MrVocSi
 
-# File C:\Users\congb\Documents\Arduino\libraries\TFT_eSPI\Processors\User_Setup.h, xóa hết và ghi nội dung sau vào
+# Trong thư mục Sketchbook của Arduino IDE, mở `libraries/TFT_eSPI/Processors/User_Setup.h`, xóa hết và ghi nội dung sau vào
 ```
 //ESP32 C3
 #define ST7735_DRIVER
