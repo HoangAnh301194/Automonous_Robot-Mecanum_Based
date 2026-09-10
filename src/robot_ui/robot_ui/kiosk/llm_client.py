@@ -23,9 +23,9 @@ from typing import Any
 # ---------------------------------------------------------------------------
 DEFAULT_BASE_URL = os.environ.get("LLM_BASE_URL", "http://localhost:20128/v1")
 DEFAULT_API_KEY = os.environ.get(
-    "LLM_API_KEY", "sk-67a7867f2cd97777-xaimwy-96411728"
+    "LLM_API_KEY", "sk-3cbf1313d8e08dd5-4knd14-ccc4610f"
 )
-DEFAULT_MODEL = os.environ.get("LLM_MODEL", "hehehe")  # combo model trong 9router dashboard
+DEFAULT_MODEL = os.environ.get("LLM_MODEL", "hehe")  # combo model trong 9router dashboard
 REQUEST_TIMEOUT = 30  # giây
 
 RAG_DOCS_DIR = Path(__file__).parent / "rag_docs"
