@@ -11,3 +11,6 @@ class KioskSignals(QObject):
     locations_changed = pyqtSignal(list)
     command_status_changed = pyqtSignal(str, str)
     navigation_active_changed = pyqtSignal(bool)
+    # LLM chatbot signals
+    llm_response_ready = pyqtSignal(str)   # phát khi LLM trả về response
+    llm_status_changed = pyqtSignal(str)   # phát khi trạng thái LLM thay đổi ("connecting", "online", "error: ...")

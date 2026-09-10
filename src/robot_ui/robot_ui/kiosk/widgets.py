@@ -575,6 +575,7 @@ class NavigationPage(QWidget):
 
 
 class ChatPage(QWidget):
+    chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     def __init__(self, chat_icon: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("chatPage")
@@ -632,6 +633,10 @@ class ChatPage(QWidget):
         self._messages_layout.setSpacing(8)
         self._messages_layout.addStretch(1)
         self.messages.setWidget(self._message_container)
+        # Auto-scroll: khi content mới thêm vào làm range thay đổi → cuộn xuống cuối
+        self.messages.verticalScrollBar().rangeChanged.connect(
+            lambda _min, _max: self.messages.verticalScrollBar().setValue(_max)
+        )
         conversation_layout.addWidget(self.messages)
         root.addWidget(conversation, 1)
 
@@ -644,16 +649,17 @@ class ChatPage(QWidget):
         self.input.setObjectName("chatInput")
         self.input.setPlaceholderText("Nhập nội dung...")
         self.input.setMinimumHeight(48)
-        send = QPushButton("Gửi")
-        send.setObjectName("primaryButton")
-        send.setMinimumSize(90, 48)
-        send.clicked.connect(self._send_placeholder)
-        self.input.returnPressed.connect(self._send_placeholder)
+        self._send_btn = QPushButton("Gửi")
+        self._send_btn.setObjectName("primaryButton")
+        self._send_btn.setMinimumSize(90, 48)
+        self._send_btn.clicked.connect(self._on_send)
+        self.input.returnPressed.connect(self._on_send)
         input_row.addWidget(self.input, 1)
-        input_row.addWidget(send)
+        input_row.addWidget(self._send_btn)
         root.addWidget(input_bar)
 
-        self._add_message("Robot", "Xin chào! Tôi có thể giúp gì cho bạn?")
+        self._llm_status_label = llm_status  # giữ tham chiếu để cập nhật
+        self._add_message("Souta", "Xin chào! Tôi là Souta. Tôi có thể giúp gì cho bạn?")
 
     def _add_message(self, sender: str, message: str, from_user: bool = False) -> None:
         row = QWidget()
@@ -686,19 +692,42 @@ class ChatPage(QWidget):
             row_layout.addStretch(1)
 
         self._messages_layout.insertWidget(self._messages_layout.count() - 1, row)
-        QTimer.singleShot(0, self._scroll_to_latest)
 
-    def _scroll_to_latest(self) -> None:
-        scrollbar = self.messages.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def _send_placeholder(self) -> None:
+    def _on_send(self) -> None:
         text = self.input.text().strip()
         if not text:
             return
         self.input.clear()
         self._add_message("Bạn", text, from_user=True)
-        self._add_message("Robot", "Tính năng trò chuyện sẽ hoạt động sau khi kết nối LLM.")
+        self.set_busy(True)
+        self.chat_submitted.emit(text)
+
+    # ------------------------------------------------------------------
+    # Public API – được gọi từ KioskWindow để wire LLM
+    # ------------------------------------------------------------------
+
+    def set_llm_status(self, status: str) -> None:
+        """Cập nhật label trạng thái LLM ở header."""
+        self._llm_status_label.setText(status)
+
+    def receive_response(self, response: str) -> None:
+        """Hiển thị response từ LLM và mở khóa input."""
+        self.set_busy(False)
+        self._add_message("Souta", response)
+
+    def receive_error(self, error_msg: str) -> None:
+        """Hiển thị lỗi và mở khóa input."""
+        self.set_busy(False)
+        self._add_message("Souta", f"⚠️ Lỗi: {error_msg}")
+
+    def set_busy(self, busy: bool) -> None:
+        """Khoá/mở input trong khi đang chờ LLM."""
+        self.input.setEnabled(not busy)
+        self._send_btn.setEnabled(not busy)
+        if busy:
+            self._send_btn.setText("...")
+        else:
+            self._send_btn.setText("Gửi")
 
 
 class NavButton(QPushButton):

@@ -7,6 +7,7 @@ from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
+from robot_ui.kiosk.llm_client import LLMWorker
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
 from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, NavigationPage
@@ -344,6 +345,25 @@ class KioskWindow(QMainWindow):
         signals.locations_changed.connect(self.navigation_page.set_locations)
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
+        # LLM signals
+        signals.llm_response_ready.connect(self.chat_page.receive_response)
+        signals.llm_status_changed.connect(self.chat_page.set_llm_status)
+
+        # LLM worker – thread-safe callbacks emit vào signals (an toàn với Qt)
+        def _on_llm_response(text: str) -> None:
+            signals.llm_response_ready.emit(text)
+            signals.llm_status_changed.emit("●  LLM: SẵN SÀNG")
+
+        def _on_llm_error(err: str) -> None:
+            signals.llm_status_changed.emit("●  LLM: LỖI")
+            # emit qua signal để gọi receive_error trên main thread
+            signals.llm_response_ready.emit(f"⚠️ {err}")
+
+        self._llm_worker = LLMWorker(
+            on_response=_on_llm_response,
+            on_error=_on_llm_error,
+        )
+        self.chat_page.chat_submitted.connect(self._on_chat_submitted)
 
         self.home_page.video.set_display_scale(self.emotions.display_scale)
         self.home_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
@@ -398,6 +418,14 @@ class KioskWindow(QMainWindow):
         self._navigation_status = status
         self.navigation_page.set_navigation_status(status)
         self._update_emotion()
+
+    def _on_chat_submitted(self, message: str) -> None:
+        """Nhận tin nhắn từ ChatPage và gửi cho LLM worker."""
+        self.signals.llm_status_changed.emit("●  LLM: ĐANG XỬ LÝ...")
+        sent = self._llm_worker.send(message, robot_status=self._robot_status)
+        if not sent:
+            # Worker bận, trả lời ngay trên UI
+            self.signals.llm_response_ready.emit("⏳ Robot đang xử lý tin nhắn trước, vui lòng chờ giây lát.")
 
     def _update_emotion(self) -> None:
         if self._active_page != "home":
