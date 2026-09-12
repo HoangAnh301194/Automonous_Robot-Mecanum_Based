@@ -29,8 +29,8 @@ REQUEST_TIMEOUT = 30  # giây
 RAG_DOCS_DIR = Path(__file__).parent / "rag_docs"
 
 SYSTEM_PROMPT_TEMPLATE = """\
-Bạn là Souta – trợ lý robot thông minh được phát triển tại PTIT.
-Trả lời ngắn gọn, thân thiện, bằng tiếng Việt (trừ khi người dùng dùng ngôn ngữ khác).
+Bạn tên là Souta, robot phục vụ tự hành thông minh được phát triển bởi đội nghiên cứu OpenWorkShop LAB tại PTIT-FEE1.
+Trả lời ngắn gọn, thân thiện phong thái thân thiết, trẻ trung, ưu tiên sử dụng tiếng Việt (trừ khi người dùng dùng ngôn ngữ khác).
 Không bịa đặt thông tin ngoài tài liệu và dữ liệu được cung cấp.
 
 --- TÀI LIỆU THAM KHẢO ---
@@ -48,7 +48,7 @@ Không bịa đặt thông tin ngoài tài liệu và dữ liệu được cung 
 def _load_rag_docs(docs_dir: Path) -> str:
     """Đọc tất cả file .txt trong thư mục rag_docs và ghép thành 1 chuỗi."""
     if not docs_dir.exists():
-        return "(Không có tài liệu tham khảo)"
+        return "(Không có thông tin về nội dung này)"
     parts: list[str] = []
     for txt_file in sorted(docs_dir.glob("*.txt")):
         try:
@@ -57,7 +57,7 @@ def _load_rag_docs(docs_dir: Path) -> str:
                 parts.append(f"[{txt_file.name}]\n{content}")
         except OSError:
             pass
-    return "\n\n".join(parts) if parts else "(Không có tài liệu tham khảo)"
+    return "\n\n".join(parts) if parts else "(Không có thông tin về nội dung này)"
 
 
 def _format_robot_context(robot_status: dict[str, Any]) -> str:
