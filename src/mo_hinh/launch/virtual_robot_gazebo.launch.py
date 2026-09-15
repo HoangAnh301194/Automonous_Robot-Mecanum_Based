@@ -89,8 +89,11 @@ def generate_launch_description():
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
             '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/camera/color/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
-            '/camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/color/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/rear_camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/depth/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+            '/rear_camera/depth/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
         ],
         remappings=[
             ('/scan', '/scan_raw'),

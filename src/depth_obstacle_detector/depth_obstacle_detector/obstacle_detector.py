@@ -116,6 +116,12 @@ class ObstacleDetectorNode(Node):
     def listener_callback(self, msg):
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+            
+            # If image is float32 (e.g. from Gazebo), convert from meters to millimeters
+            if cv_image.dtype == np.float32 or cv_image.dtype == np.float64:
+                cv_image = np.nan_to_num(cv_image, posinf=0.0, neginf=0.0)
+                cv_image = (cv_image * 1000.0).astype(np.uint16)
+                
             self.process_frame(cv_image)
         except Exception as e:
             self.get_logger().error(f"Failed to process image: {str(e)}")
