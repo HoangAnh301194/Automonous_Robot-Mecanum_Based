@@ -6,12 +6,14 @@ import time
 import threading
 import numpy as np
 import cv2
+import yaml
 
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
     QSlider, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
-    QFileDialog, QStatusBar, QMessageBox, QComboBox, QScrollArea
+    QFileDialog, QStatusBar, QMessageBox, QComboBox, QScrollArea,
+    QTabWidget, QLineEdit, QCheckBox, QFormLayout
 )
 from PyQt5.QtGui import QImage, QPixmap, QFont
 
@@ -23,61 +25,93 @@ from cv_bridge import CvBridge
 import tf2_ros
 import tf2_geometry_msgs
 
-
 class ImageSignalEmitter(QObject):
-    """
-    Thread-safe signal emitter to pass image data and camera info parameters
-    from the ROS 2 background thread to the PyQt5 GUI main thread.
-    """
     image_received = pyqtSignal(np.ndarray, object)
 
+class CameraProfile:
+    def __init__(self, name="front"):
+        self.name = name
+        self.enabled = True
+        if name == "front":
+            self.depth_topic = "/front_camera/depth/image_raw"
+            self.info_topic = "/front_camera/depth/camera_info"
+            self.output_topic = "/scan_obstacles"
+            self.min_range = 0.20
+            self.max_range = 2.50
+        else:
+            self.depth_topic = "/rear_camera/depth/image_raw"
+            self.info_topic = "/rear_camera/depth/camera_info"
+            self.output_topic = "/rear_scan"
+            self.min_range = 0.15
+            self.max_range = 1.50
+            
+        self.target_frame = "base_footprint"
+        self.pitch_deg = 50.0
+        self.dist_offset = 0.0
+        
+        self.roi_x = 0
+        self.roi_y = 0
+        self.roi_w = 320
+        self.roi_h = 240
+        
+        self.threshold = 80
+        self.min_area = 150
+        self.median_filter = 3
+        self.morph_size = 3
+        
+        self.ground_frame = None
+        self.ground_file_path = "None"
+        
+        self.raw_width = 0
+        self.raw_height = 0
 
 class DepthSubscriberNode(Node):
-    """
-    ROS 2 Node that subscribes to the depth camera stream and camera info topics,
-    and publishes the filtered obstacle LaserScan.
-    """
     def __init__(self, signal_emitter):
         super().__init__('depth_obstacle_debugger_node')
         self.signal_emitter = signal_emitter
         self.camera_info = None
         
-        # TF2 buffer and listener
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         
-        # Subscribe to camera info
-        self.info_sub = self.create_subscription(
-            CameraInfo,
-            '/camera/depth/camera_info',
-            self.info_callback,
-            10
-        )
-        
-        # Subscribe to depth raw topic (typically 16-bit unsigned in millimeters)
-        self.subscription = self.create_subscription(
-            Image,
-            '/camera/depth/image_raw',
-            self.listener_callback,
-            10
-        )
-        
-        # LaserScan publisher for detected obstacles
-        self.laser_pub = self.create_publisher(LaserScan, '/scan_obstacles', 10)
+        self.info_sub = None
+        self.image_sub = None
+        self.laser_pub = None
         
         self.bridge = CvBridge()
-        self.get_logger().info("Depth Obstacle Debugger ROS 2 Node initialized.")
-        self.get_logger().info("Subscribed to /camera/depth/image_raw & /camera/depth/camera_info")
-        self.get_logger().info("Publishing LaserScan on /scan_obstacles")
+        
+        # Default empty
+        self.current_depth_topic = ""
+        self.current_info_topic = ""
+        self.current_output_topic = ""
+        
+        self.get_logger().info("Dual-Camera Debugger ROS 2 Node initialized.")
+
+    def switch_camera(self, depth_topic, info_topic, output_topic):
+        self.get_logger().info(f"Switching topics -> Depth: {depth_topic}, Info: {info_topic}, Scan: {output_topic}")
+        
+        if self.info_sub:
+            self.destroy_subscription(self.info_sub)
+        if self.image_sub:
+            self.destroy_subscription(self.image_sub)
+        if self.laser_pub:
+            self.destroy_publisher(self.laser_pub)
+            
+        self.camera_info = None
+        self.current_depth_topic = depth_topic
+        self.current_info_topic = info_topic
+        self.current_output_topic = output_topic
+        
+        self.info_sub = self.create_subscription(CameraInfo, info_topic, self.info_callback, 10)
+        self.image_sub = self.create_subscription(Image, depth_topic, self.listener_callback, 10)
+        self.laser_pub = self.create_publisher(LaserScan, output_topic, 10)
 
     def info_callback(self, msg):
         self.camera_info = msg
 
     def listener_callback(self, msg):
         try:
-            # Convert depth image (passthrough retains 16-bit depth values)
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-            
             info_dict = None
             if self.camera_info is not None:
                 info_dict = {
@@ -87,24 +121,20 @@ class DepthSubscriberNode(Node):
                     'cy': float(self.camera_info.k[5]),
                     'frame_id': str(self.camera_info.header.frame_id)
                 }
-            
             self.signal_emitter.image_received.emit(cv_image, info_dict)
         except Exception as e:
             self.get_logger().error(f"Failed to convert image: {str(e)}")
 
     def publish_scan(self, scan_msg):
-        self.laser_pub.publish(scan_msg)
+        if self.laser_pub:
+            self.laser_pub.publish(scan_msg)
 
 
 class ClickableLabel(QLabel):
-    """
-    Custom QLabel supporting mouse tracking, click-and-drag for ROI selection,
-    and hover events for the Pixel Inspector.
-    """
     mouse_moved = pyqtSignal(int, int)
     mouse_pressed = pyqtSignal(int, int)
-    mouse_dragged = pyqtSignal(int, int, int, int)  # start_x, start_y, current_x, current_y
-    mouse_released = pyqtSignal(int, int, int, int) # start_x, start_y, end_x, end_y
+    mouse_dragged = pyqtSignal(int, int, int, int)
+    mouse_released = pyqtSignal(int, int, int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -133,1279 +163,714 @@ class ClickableLabel(QLabel):
         super().mouseReleaseEvent(event)
 
 
+class ProfileWidget(QWidget):
+    param_changed = pyqtSignal()
+    preview_requested = pyqtSignal()
+    
+    def __init__(self, profile: CameraProfile):
+        super().__init__()
+        self.profile = profile
+        self.init_ui()
+        self.update_ui_from_profile()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        
+        # 1. Topics Config
+        grp_topics = QGroupBox(f"{self.profile.name.capitalize()} Topics")
+        form_topics = QFormLayout(grp_topics)
+        
+        self.chk_enable = QCheckBox("Enable Camera in Pipeline")
+        self.chk_enable.stateChanged.connect(self.on_change)
+        form_topics.addRow(self.chk_enable)
+        
+        self.edit_depth = QLineEdit()
+        self.edit_depth.textChanged.connect(self.on_change)
+        form_topics.addRow("Depth Topic:", self.edit_depth)
+        
+        self.edit_info = QLineEdit()
+        self.edit_info.textChanged.connect(self.on_change)
+        form_topics.addRow("Camera Info:", self.edit_info)
+        
+        self.edit_output = QLineEdit()
+        self.edit_output.textChanged.connect(self.on_change)
+        form_topics.addRow("Output Scan:", self.edit_output)
+        
+        self.cmb_frame = QComboBox()
+        self.cmb_frame.setEditable(True)
+        self.cmb_frame.addItems([
+            'base_footprint',
+            'base_link',
+            'camera_link',
+            'camera_depth_optical_frame',
+            'front_camera_link',
+            'rear_camera_link'
+        ])
+        self.cmb_frame.currentTextChanged.connect(self.on_change)
+        form_topics.addRow("Target Frame:", self.cmb_frame)
+        
+        layout.addWidget(grp_topics)
+        
+        # 2. ROI Config
+        grp_roi = QGroupBox("Region of Interest (ROI)")
+        grid_roi = QGridLayout(grp_roi)
+        
+        self.sld_roi_x, self.lbl_rx = self.add_slider(grid_roi, 0, "ROI X:", 0, 1000)
+        self.sld_roi_y, self.lbl_ry = self.add_slider(grid_roi, 1, "ROI Y:", 0, 1000)
+        self.sld_roi_w, self.lbl_rw = self.add_slider(grid_roi, 2, "Width:", 1, 1000)
+        self.sld_roi_h, self.lbl_rh = self.add_slider(grid_roi, 3, "Height:", 1, 1000)
+        layout.addWidget(grp_roi)
+        
+        # 3. Tuning Parameters
+        grp_tune = QGroupBox("Parameters")
+        grid_tune = QGridLayout(grp_tune)
+        
+        self.sld_min_range, self.lbl_min_r = self.add_slider(grid_tune, 0, "Min Range(cm):", 0, 1000)
+        self.sld_max_range, self.lbl_max_r = self.add_slider(grid_tune, 1, "Max Range(cm):", 10, 1000)
+        self.sld_thresh, self.lbl_thresh = self.add_slider(grid_tune, 2, "Threshold(mm):", 5, 500)
+        self.sld_min_area, self.lbl_area = self.add_slider(grid_tune, 3, "Min Area(px):", 10, 5000)
+        self.sld_median, self.lbl_median = self.add_slider(grid_tune, 4, "Median Filter:", 1, 15, step=2)
+        self.sld_morph, self.lbl_morph = self.add_slider(grid_tune, 5, "Morph Size:", 0, 15)
+        self.sld_pitch, self.lbl_pitch = self.add_slider(grid_tune, 6, "Pitch (deg):", -90, 90)
+        layout.addWidget(grp_tune)
+        
+        # 4. Actions
+        grp_actions = QGroupBox("Actions")
+        vbox = QVBoxLayout(grp_actions)
+        
+        self.lbl_ground = QLabel("Ground Loaded: No")
+        self.lbl_ground.setStyleSheet("color: #ff5555; font-weight: bold;")
+        vbox.addWidget(self.lbl_ground)
+        
+        self.btn_capture = QPushButton("Capture Ground Reference")
+        self.btn_load_ground = QPushButton("Load Ground from File")
+        self.btn_preview = QPushButton(f"Preview {self.profile.name.upper()} Camera")
+        self.btn_save_yaml = QPushButton("Save Config (YAML)")
+        self.btn_load_yaml = QPushButton("Load Config (YAML)")
+        
+        self.btn_preview.setStyleSheet("background-color: #f39c12; color: #fff;")
+        
+        vbox.addWidget(self.btn_capture)
+        vbox.addWidget(self.btn_load_ground)
+        vbox.addWidget(self.btn_preview)
+        vbox.addWidget(self.btn_save_yaml)
+        vbox.addWidget(self.btn_load_yaml)
+        
+        layout.addWidget(grp_actions)
+        layout.addStretch()
+        
+    def add_slider(self, grid, row, label, vmin, vmax, step=1):
+        grid.addWidget(QLabel(label), row, 0)
+        sld = QSlider(Qt.Horizontal)
+        sld.setRange(vmin, vmax)
+        sld.setSingleStep(step)
+        sld.valueChanged.connect(self.on_change)
+        grid.addWidget(sld, row, 1)
+        lbl = QLabel(str(vmin))
+        grid.addWidget(lbl, row, 2)
+        return sld, lbl
+
+    def on_change(self):
+        # Force odd median
+        if self.sld_median.value() > 1 and self.sld_median.value() % 2 == 0:
+            self.sld_median.blockSignals(True)
+            self.sld_median.setValue(self.sld_median.value() + 1)
+            self.sld_median.blockSignals(False)
+            
+        self.lbl_rx.setText(str(self.sld_roi_x.value()))
+        self.lbl_ry.setText(str(self.sld_roi_y.value()))
+        self.lbl_rw.setText(str(self.sld_roi_w.value()))
+        self.lbl_rh.setText(str(self.sld_roi_h.value()))
+        
+        self.lbl_min_r.setText(f"{self.sld_min_range.value()/100.0:.2f}m")
+        self.lbl_max_r.setText(f"{self.sld_max_range.value()/100.0:.2f}m")
+        self.lbl_thresh.setText(str(self.sld_thresh.value()))
+        self.lbl_area.setText(str(self.sld_min_area.value()))
+        self.lbl_median.setText(str(self.sld_median.value()))
+        self.lbl_morph.setText(str(self.sld_morph.value()))
+        self.lbl_pitch.setText(str(self.sld_pitch.value()))
+        
+        self.commit_to_profile()
+        self.param_changed.emit()
+
+    def commit_to_profile(self):
+        self.profile.enabled = self.chk_enable.isChecked()
+        self.profile.depth_topic = self.edit_depth.text()
+        self.profile.info_topic = self.edit_info.text()
+        self.profile.output_topic = self.edit_output.text()
+        self.profile.target_frame = self.cmb_frame.currentText()
+        
+        self.profile.roi_x = self.sld_roi_x.value()
+        self.profile.roi_y = self.sld_roi_y.value()
+        self.profile.roi_w = self.sld_roi_w.value()
+        self.profile.roi_h = self.sld_roi_h.value()
+        
+        self.profile.min_range = self.sld_min_range.value() / 100.0
+        self.profile.max_range = self.sld_max_range.value() / 100.0
+        
+        self.profile.threshold = self.sld_thresh.value()
+        self.profile.min_area = self.sld_min_area.value()
+        self.profile.median_filter = self.sld_median.value()
+        self.profile.morph_size = self.sld_morph.value()
+        self.profile.pitch_deg = self.sld_pitch.value()
+
+    def update_ui_from_profile(self):
+        self.chk_enable.blockSignals(True)
+        self.edit_depth.blockSignals(True)
+        self.edit_info.blockSignals(True)
+        self.edit_output.blockSignals(True)
+        self.cmb_frame.blockSignals(True)
+        
+        self.sld_roi_x.blockSignals(True)
+        self.sld_roi_y.blockSignals(True)
+        self.sld_roi_w.blockSignals(True)
+        self.sld_roi_h.blockSignals(True)
+        self.sld_min_range.blockSignals(True)
+        self.sld_max_range.blockSignals(True)
+        self.sld_thresh.blockSignals(True)
+        self.sld_min_area.blockSignals(True)
+        self.sld_median.blockSignals(True)
+        self.sld_morph.blockSignals(True)
+        self.sld_pitch.blockSignals(True)
+
+        self.chk_enable.setChecked(self.profile.enabled)
+        self.edit_depth.setText(self.profile.depth_topic)
+        self.edit_info.setText(self.profile.info_topic)
+        self.edit_output.setText(self.profile.output_topic)
+        self.cmb_frame.setCurrentText(self.profile.target_frame)
+        
+        if self.profile.raw_width > 0:
+            self.sld_roi_x.setRange(0, self.profile.raw_width - 1)
+            self.sld_roi_w.setRange(1, self.profile.raw_width)
+            self.sld_roi_y.setRange(0, self.profile.raw_height - 1)
+            self.sld_roi_h.setRange(1, self.profile.raw_height)
+            
+        self.sld_roi_x.setValue(int(self.profile.roi_x))
+        self.sld_roi_y.setValue(int(self.profile.roi_y))
+        self.sld_roi_w.setValue(int(self.profile.roi_w))
+        self.sld_roi_h.setValue(int(self.profile.roi_h))
+        
+        self.sld_min_range.setValue(int(self.profile.min_range * 100))
+        self.sld_max_range.setValue(int(self.profile.max_range * 100))
+        self.sld_thresh.setValue(int(self.profile.threshold))
+        self.sld_min_area.setValue(int(self.profile.min_area))
+        self.sld_median.setValue(int(self.profile.median_filter))
+        self.sld_morph.setValue(int(self.profile.morph_size))
+        self.sld_pitch.setValue(int(self.profile.pitch_deg))
+
+        self.chk_enable.blockSignals(False)
+        self.edit_depth.blockSignals(False)
+        self.edit_info.blockSignals(False)
+        self.edit_output.blockSignals(False)
+        self.cmb_frame.blockSignals(False)
+        
+        self.sld_roi_x.blockSignals(False)
+        self.sld_roi_y.blockSignals(False)
+        self.sld_roi_w.blockSignals(False)
+        self.sld_roi_h.blockSignals(False)
+        self.sld_min_range.blockSignals(False)
+        self.sld_max_range.blockSignals(False)
+        self.sld_thresh.blockSignals(False)
+        self.sld_min_area.blockSignals(False)
+        self.sld_median.blockSignals(False)
+        self.sld_morph.blockSignals(False)
+        self.sld_pitch.blockSignals(False)
+        
+        self.on_change()
+        self.update_ground_label()
+        
+    def update_ground_label(self):
+        if self.profile.ground_frame is not None:
+            self.lbl_ground.setText(f"Ground Loaded: Yes ({os.path.basename(self.profile.ground_file_path)})")
+            self.lbl_ground.setStyleSheet("color: #00ff66; font-weight: bold;")
+        else:
+            self.lbl_ground.setText("Ground Loaded: No")
+            self.lbl_ground.setStyleSheet("color: #ff5555; font-weight: bold;")
+
+
 class DebuggerGUI(QMainWindow):
     def __init__(self, ros_node):
         super().__init__()
         self.ros_node = ros_node
-        self.setWindowTitle("Depth Obstacle Debugger GUI")
-        self.resize(1400, 850)
+        self.setWindowTitle("Dual-Camera Obstacle Debugger GUI")
+        self.resize(1500, 900)
 
-        # Core Data State
+        # Profiles
+        self.profiles = {
+            "front": CameraProfile("front"),
+            "rear": CameraProfile("rear")
+        }
+        self.active_profile_key = "front"
+        
+        # State
         self.current_frame = None
-        self.ground_frame = None
         self.camera_intrinsics = None
-        self.ground_file_path = "None"
-        self.target_frame = "base_link"
-        
-        # Last known resolution
-        self.raw_width = 0
-        self.raw_height = 0
-        
-        # GUI Settings
         self.zoom = 1.0
+        self.temp_drag_roi = None
         
-        # Statistics
+        # Stats
         self.fps = 0.0
         self.last_frame_time = time.time()
         self.processing_time_ms = 0.0
-        self.obstacle_count = 0
-        self.nearest_obstacle_dist = 0.0
-
-        # Click-and-drag temp ROI state
-        self.temp_drag_roi = None  # (start_x, start_y, current_x, current_y)
-
-        # Setup GUI layout
+        
         self.init_ui()
         self.apply_stylesheet()
+        
+        # Initial ROS bind
+        self.switch_to_profile("front")
 
     def init_ui(self):
-        # Central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QHBoxLayout(central)
         
-        # Main Layout (Vertical)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
-
-        # Upper row Layout (Horizontal): Main Viewer + Controls
-        upper_layout = QHBoxLayout()
-        upper_layout.setSpacing(15)
-
-        # 1. Left Section: Main Depth Viewer
-        viewer_group = QGroupBox("Depth Viewer (Color Map)")
-        viewer_layout = QVBoxLayout(viewer_group)
-        viewer_layout.setContentsMargins(5, 5, 5, 5)
+        # Left: Preview Panels
+        left_layout = QVBoxLayout()
         
-        # Scroll area for zooming
+        self.lbl_status_overlay = QLabel("PREVIEW: FRONT")
+        self.lbl_status_overlay.setFont(QFont("Arial", 16, QFont.Bold))
+        self.lbl_status_overlay.setStyleSheet("color: #f39c12; background: transparent;")
+        self.lbl_status_overlay.setAlignment(Qt.AlignCenter)
+        left_layout.addWidget(self.lbl_status_overlay)
+        
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setAlignment(Qt.AlignCenter)
-        
         self.lbl_depth_viewer = ClickableLabel()
         self.lbl_depth_viewer.setAlignment(Qt.AlignCenter)
         self.lbl_depth_viewer.setText("Waiting for Camera Stream...")
-        self.lbl_depth_viewer.setFont(QFont("Arial", 14, QFont.Bold))
-        self.lbl_depth_viewer.setStyleSheet("color: #888888; background-color: #1e1e24;")
         self.scroll_area.setWidget(self.lbl_depth_viewer)
-        viewer_layout.addWidget(self.scroll_area)
+        left_layout.addWidget(self.scroll_area, stretch=3)
         
-        # Depth zoom controls
         zoom_layout = QHBoxLayout()
-        lbl_zoom = QLabel("Zoom:")
+        zoom_layout.addWidget(QLabel("Zoom:"))
         self.cmb_zoom = QComboBox()
         self.cmb_zoom.addItems(["50%", "75%", "100%", "125%", "150%", "200%"])
         self.cmb_zoom.setCurrentText("100%")
         self.cmb_zoom.currentIndexChanged.connect(self.on_zoom_changed)
-        zoom_layout.addWidget(lbl_zoom)
         zoom_layout.addWidget(self.cmb_zoom)
         zoom_layout.addStretch()
-        viewer_layout.addLayout(zoom_layout)
-
-        upper_layout.addWidget(viewer_group, stretch=3)
-
-        # 2. Right Section: Scrollable Controls Panel to prevent cutoff
-        self.controls_scroll = QScrollArea()
-        self.controls_scroll.setWidgetResizable(True)
-        self.controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.controls_scroll.setMinimumWidth(320)
-        self.controls_scroll.setMaximumWidth(420)
-        self.controls_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
-
-        controls_panel = QWidget()
-        controls_layout = QVBoxLayout(controls_panel)
-        controls_layout.setContentsMargins(0, 0, 5, 0)
-        controls_layout.setSpacing(10)
-
-        # Group 2.1: Pixel Inspector (With 3D coordinates!)
-        grp_inspector = QGroupBox("Pixel Inspector (3D)")
-        inspector_grid = QGridLayout(grp_inspector)
-        inspector_grid.setSpacing(8)
+        left_layout.addLayout(zoom_layout)
         
-        inspector_grid.addWidget(QLabel("Cursor X, Y:"), 0, 0)
-        self.lbl_inspect_xy = QLabel("-")
-        inspector_grid.addWidget(self.lbl_inspect_xy, 0, 1)
-
-        inspector_grid.addWidget(QLabel("Depth (mm):"), 1, 0)
-        self.lbl_inspect_depth_mm = QLabel("-")
-        inspector_grid.addWidget(self.lbl_inspect_depth_mm, 1, 1)
-
-        inspector_grid.addWidget(QLabel("Point X (m):"), 2, 0)
-        self.lbl_inspect_3dx = QLabel("-")
-        inspector_grid.addWidget(self.lbl_inspect_3dx, 2, 1)
-
-        inspector_grid.addWidget(QLabel("Point Y (m):"), 3, 0)
-        self.lbl_inspect_3dy = QLabel("-")
-        inspector_grid.addWidget(self.lbl_inspect_3dy, 3, 1)
-
-        inspector_grid.addWidget(QLabel("Point Z (m):"), 4, 0)
-        self.lbl_inspect_3dz = QLabel("-")
-        inspector_grid.addWidget(self.lbl_inspect_3dz, 4, 1)
-
-        controls_layout.addWidget(grp_inspector)
-
-        # Group 2.2: ROI Config
-        grp_roi = QGroupBox("Region of Interest (ROI)")
-        roi_grid = QGridLayout(grp_roi)
-        roi_grid.setSpacing(6)
-
-        # X
-        roi_grid.addWidget(QLabel("ROI X:"), 0, 0)
-        self.sld_roi_x = QSlider(Qt.Horizontal)
-        self.sld_roi_x.setRange(0, 100)
-        self.sld_roi_x.valueChanged.connect(self.on_param_changed)
-        roi_grid.addWidget(self.sld_roi_x, 0, 1)
-        self.lbl_roi_x_val = QLabel("0")
-        roi_grid.addWidget(self.lbl_roi_x_val, 0, 2)
-
-        # Y
-        roi_grid.addWidget(QLabel("ROI Y:"), 1, 0)
-        self.sld_roi_y = QSlider(Qt.Horizontal)
-        self.sld_roi_y.setRange(0, 100)
-        self.sld_roi_y.valueChanged.connect(self.on_param_changed)
-        roi_grid.addWidget(self.sld_roi_y, 1, 1)
-        self.lbl_roi_y_val = QLabel("0")
-        roi_grid.addWidget(self.lbl_roi_y_val, 1, 2)
-
-        # Width
-        roi_grid.addWidget(QLabel("ROI Width:"), 2, 0)
-        self.sld_roi_w = QSlider(Qt.Horizontal)
-        self.sld_roi_w.setRange(1, 100)
-        self.sld_roi_w.setValue(50)
-        self.sld_roi_w.valueChanged.connect(self.on_param_changed)
-        roi_grid.addWidget(self.sld_roi_w, 2, 1)
-        self.lbl_roi_w_val = QLabel("50")
-        roi_grid.addWidget(self.lbl_roi_w_val, 2, 2)
-
-        # Height
-        roi_grid.addWidget(QLabel("ROI Height:"), 3, 0)
-        self.sld_roi_h = QSlider(Qt.Horizontal)
-        self.sld_roi_h.setRange(1, 100)
-        self.sld_roi_h.setValue(50)
-        self.sld_roi_h.valueChanged.connect(self.on_param_changed)
-        roi_grid.addWidget(self.sld_roi_h, 3, 1)
-        self.lbl_roi_h_val = QLabel("50")
-        roi_grid.addWidget(self.lbl_roi_h_val, 3, 2)
-
-        controls_layout.addWidget(grp_roi)
-
-        # Group 2.3: Algorithmic Parameters
-        grp_params = QGroupBox("Algorithmic Parameters")
-        params_grid = QGridLayout(grp_params)
-        params_grid.setSpacing(6)
-
-        # Threshold
-        params_grid.addWidget(QLabel("Threshold (mm):"), 0, 0)
-        self.sld_threshold = QSlider(Qt.Horizontal)
-        self.sld_threshold.setRange(5, 500)
-        self.sld_threshold.setValue(80)
-        self.sld_threshold.valueChanged.connect(self.on_param_changed)
-        params_grid.addWidget(self.sld_threshold, 0, 1)
-        self.lbl_threshold_val = QLabel("80")
-        params_grid.addWidget(self.lbl_threshold_val, 0, 2)
-
-        # Min Area
-        params_grid.addWidget(QLabel("Min Area (px):"), 1, 0)
-        self.sld_min_area = QSlider(Qt.Horizontal)
-        self.sld_min_area.setRange(10, 5000)
-        self.sld_min_area.setValue(150)
-        self.sld_min_area.valueChanged.connect(self.on_param_changed)
-        params_grid.addWidget(self.sld_min_area, 1, 1)
-        self.lbl_min_area_val = QLabel("150")
-        params_grid.addWidget(self.lbl_min_area_val, 1, 2)
-
-        # Median Filter Size
-        params_grid.addWidget(QLabel("Median Filter:"), 2, 0)
-        self.sld_median = QSlider(Qt.Horizontal)
-        self.sld_median.setRange(1, 15)
-        self.sld_median.setValue(3)
-        self.sld_median.setSingleStep(2)
-        self.sld_median.valueChanged.connect(self.on_param_changed)
-        params_grid.addWidget(self.sld_median, 2, 1)
-        self.lbl_median_val = QLabel("3")
-        params_grid.addWidget(self.lbl_median_val, 2, 2)
-
-        # Morphological Operations Kernel Size
-        params_grid.addWidget(QLabel("Morphology Size:"), 3, 0)
-        self.sld_morph = QSlider(Qt.Horizontal)
-        self.sld_morph.setRange(0, 15)
-        self.sld_morph.setValue(3)
-        self.sld_morph.valueChanged.connect(self.on_param_changed)
-        params_grid.addWidget(self.sld_morph, 3, 1)
-        self.lbl_morph_val = QLabel("3")
-        params_grid.addWidget(self.lbl_morph_val, 3, 2)
-
-        controls_layout.addWidget(grp_params)
-
-        # Group 2.4: Configuration & Ground Reference Controls
-        grp_ground = QGroupBox("Config & Ground Reference")
-        ground_layout = QVBoxLayout(grp_ground)
-        ground_layout.setSpacing(8)
-
-        # Target Frame selection dropdown (editable to allow custom TF names)
-        tf_layout = QHBoxLayout()
-        tf_layout.addWidget(QLabel("Target Frame:"))
-        self.cmb_target_frame = QComboBox()
-        self.cmb_target_frame.setEditable(True)
-        self.cmb_target_frame.addItems([
-            'camera_depth_optical_frame',
-            'camera_link',
-            'base_link',
-            'base_footprint'
-        ])
-        self.cmb_target_frame.setCurrentText("base_link")
-        self.cmb_target_frame.currentTextChanged.connect(self.on_target_frame_changed)
-        tf_layout.addWidget(self.cmb_target_frame)
-        ground_layout.addLayout(tf_layout)
-
-        # Manual Tilt Angle Slider
-        tilt_layout = QHBoxLayout()
-        tilt_layout.addWidget(QLabel("Camera Tilt (deg):"))
-        self.sld_tilt_angle = QSlider(Qt.Horizontal)
-        self.sld_tilt_angle.setRange(-45, 45)
-        self.sld_tilt_angle.setValue(0)
-        self.sld_tilt_angle.valueChanged.connect(self.on_param_changed)
-        tilt_layout.addWidget(self.sld_tilt_angle)
-        self.lbl_tilt_val = QLabel("0°")
-        tilt_layout.addWidget(self.lbl_tilt_val)
-        ground_layout.addLayout(tilt_layout)
-
-        # LaserScan Distance Calibration Offset Slider
-        offset_layout = QHBoxLayout()
-        offset_layout.addWidget(QLabel("Distance Offset (m):"))
-        self.sld_dist_offset = QSlider(Qt.Horizontal)
-        self.sld_dist_offset.setRange(-100, 100)  # -1.00m to +1.00m (-100cm to +100cm)
-        self.sld_dist_offset.setValue(0)
-        self.sld_dist_offset.valueChanged.connect(self.on_param_changed)
-        offset_layout.addWidget(self.sld_dist_offset)
-        self.lbl_dist_offset_val = QLabel("+0.00 m")
-        offset_layout.addWidget(self.lbl_dist_offset_val)
-        ground_layout.addLayout(offset_layout)
-
-        self.btn_capture_ground = QPushButton("Capture Ground")
-        self.btn_capture_ground.clicked.connect(self.on_capture_ground)
-        ground_layout.addWidget(self.btn_capture_ground)
-
-        btn_files_layout = QHBoxLayout()
-        self.btn_save_ground = QPushButton("Save Ground")
-        self.btn_save_ground.clicked.connect(self.on_save_ground)
-        btn_files_layout.addWidget(self.btn_save_ground)
-
-        self.btn_load_ground = QPushButton("Load Ground")
-        self.btn_load_ground.clicked.connect(self.on_load_ground)
-        btn_files_layout.addWidget(self.btn_load_ground)
-        ground_layout.addLayout(btn_files_layout)
-
-        self.lbl_ground_status = QLabel("Ground Loaded: No")
-        self.lbl_ground_status.setStyleSheet("color: #ff5555; font-weight: bold;")
-        ground_layout.addWidget(self.lbl_ground_status)
-
-        # Config YAML Buttons
-        btn_config_layout = QHBoxLayout()
-        self.btn_save_config = QPushButton("Save Config")
-        self.btn_save_config.clicked.connect(self.on_save_config)
-        btn_config_layout.addWidget(self.btn_save_config)
-
-        self.btn_load_config = QPushButton("Load Config")
-        self.btn_load_config.clicked.connect(self.on_load_config)
-        btn_config_layout.addWidget(self.btn_load_config)
-        ground_layout.addLayout(btn_config_layout)
-
-        controls_layout.addWidget(grp_ground)
-
-        # Set panel inside the scrollable area
-        self.controls_scroll.setWidget(controls_panel)
-        upper_layout.addWidget(self.controls_scroll)
-
-        main_layout.addLayout(upper_layout, stretch=3)
-
-        # 3. Lower Row Layout (Horizontal): Difference, Binary Mask, Detection Overlay
-        lower_layout = QHBoxLayout()
-        lower_layout.setSpacing(10)
-
-        # 3.1 Difference
-        grp_diff = QGroupBox("Difference (Current - Ground)")
-        layout_diff = QVBoxLayout(grp_diff)
-        self.lbl_diff_viewer = QLabel()
-        self.lbl_diff_viewer.setAlignment(Qt.AlignCenter)
-        self.lbl_diff_viewer.setStyleSheet("background-color: #1a1a1f;")
-        self.lbl_diff_viewer.setText("N/A")
-        layout_diff.addWidget(self.lbl_diff_viewer)
-        lower_layout.addWidget(grp_diff)
-
-        # 3.2 Binary Mask
-        grp_mask = QGroupBox("Binary Mask (Thresholded)")
-        layout_mask = QVBoxLayout(grp_mask)
-        self.lbl_mask_viewer = QLabel()
-        self.lbl_mask_viewer.setAlignment(Qt.AlignCenter)
-        self.lbl_mask_viewer.setStyleSheet("background-color: #1a1a1f;")
-        self.lbl_mask_viewer.setText("N/A")
-        layout_mask.addWidget(self.lbl_mask_viewer)
-        lower_layout.addWidget(grp_mask)
-
-        # 3.3 Detection Overlay
-        grp_overlay = QGroupBox("Detection Overlay (Output)")
-        layout_overlay = QVBoxLayout(grp_overlay)
-        self.lbl_overlay_viewer = QLabel()
-        self.lbl_overlay_viewer.setAlignment(Qt.AlignCenter)
-        self.lbl_overlay_viewer.setStyleSheet("background-color: #1a1a1f;")
-        self.lbl_overlay_viewer.setText("N/A")
-        layout_overlay.addWidget(self.lbl_overlay_viewer)
-        lower_layout.addWidget(grp_overlay)
-
-        main_layout.addLayout(lower_layout, stretch=2)
-
-        # 4. Status Bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.update_status_bar()
-
-        # Wire up mouse interactions
-        self.lbl_depth_viewer.mouse_moved.connect(self.on_mouse_moved)
+        # Lower monitors
+        lower_monitors = QHBoxLayout()
+        self.lbl_diff_viewer = QLabel("Diff")
+        self.lbl_mask_viewer = QLabel("Mask")
+        self.lbl_overlay_viewer = QLabel("Overlay")
+        for lbl in (self.lbl_diff_viewer, self.lbl_mask_viewer, self.lbl_overlay_viewer):
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet("background-color: #1a1a1f;")
+            lower_monitors.addWidget(lbl)
+            
+        left_layout.addLayout(lower_monitors, stretch=2)
+        main_layout.addLayout(left_layout, stretch=3)
+        
+        # Right: Tabs for Front/Rear controls
+        self.tabs = QTabWidget()
+        self.tabs.setMinimumWidth(400)
+        
+        self.tab_front = ProfileWidget(self.profiles["front"])
+        self.tab_rear = ProfileWidget(self.profiles["rear"])
+        
+        self.tabs.addTab(self.tab_front, "Front Camera")
+        self.tabs.addTab(self.tab_rear, "Rear Camera")
+        
+        main_layout.addWidget(self.tabs, stretch=1)
+        
+        # Connect signals
+        for tab in (self.tab_front, self.tab_rear):
+            tab.param_changed.connect(self.process_pipeline)
+            tab.btn_capture.clicked.connect(lambda t=tab: self.on_capture_ground(t))
+            tab.btn_save_yaml.clicked.connect(lambda t=tab: self.on_save_yaml(t))
+            tab.btn_load_yaml.clicked.connect(lambda t=tab: self.on_load_yaml(t))
+            tab.btn_load_ground.clicked.connect(lambda t=tab: self.on_load_ground(t))
+            
+        self.tab_front.btn_preview.clicked.connect(lambda: self.switch_to_profile("front"))
+        self.tab_rear.btn_preview.clicked.connect(lambda: self.switch_to_profile("rear"))
+        
         self.lbl_depth_viewer.mouse_pressed.connect(self.on_mouse_pressed)
         self.lbl_depth_viewer.mouse_dragged.connect(self.on_mouse_dragged)
         self.lbl_depth_viewer.mouse_released.connect(self.on_mouse_released)
+        
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
 
     def apply_stylesheet(self):
-        """
-        Applies a modern, premium Dark Theme stylesheet.
-        """
         stylesheet = """
-        QMainWindow {
-            background-color: #121214;
-        }
-        QWidget {
-            color: #e0e0e6;
-            font-family: 'Segoe UI', Arial, sans-serif;
-            font-size: 13px;
-        }
-        QGroupBox {
-            border: 2px solid #2d2d35;
-            border-radius: 8px;
-            margin-top: 10px;
-            font-weight: bold;
-            color: #00adb5;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            left: 10px;
-            padding: 0 5px 0 5px;
-        }
-        QLabel {
-            color: #b0b0ba;
-        }
-        QPushButton {
-            background-color: #00adb5;
-            color: #ffffff;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-weight: bold;
-        }
-        QPushButton:hover {
-            background-color: #00cfd8;
-        }
-        QPushButton:pressed {
-            background-color: #008a90;
-        }
-        QSlider::groove:horizontal {
-            border: 1px solid #2c2c35;
-            height: 6px;
-            background: #1e1e24;
-            border-radius: 3px;
-        }
-        QSlider::handle:horizontal {
-            background: #00adb5;
-            border: 1px solid #00adb5;
-            width: 14px;
-            height: 14px;
-            margin: -4px 0;
-            border-radius: 7px;
-        }
-        QSlider::handle:horizontal:hover {
-            background: #00cfd8;
-            border-color: #00cfd8;
-        }
-        QComboBox {
-            background-color: #1e1e24;
-            border: 1px solid #2d2d35;
-            border-radius: 4px;
-            padding: 4px 8px;
-            color: #e0e0e6;
-        }
-        QComboBox::drop-down {
-            subcontrol-origin: padding;
-            subcontrol-position: top right;
-            width: 15px;
-            border-left-width: 1px;
-            border-left-color: #2d2d35;
-            border-left-style: solid;
-        }
-        QStatusBar {
-            background-color: #1a1a1f;
-            color: #88888e;
-            font-size: 12px;
-        }
-        QScrollArea {
-            border: 1px solid #2d2d35;
-            border-radius: 6px;
-            background-color: #1a1a1f;
-        }
+        QMainWindow { background-color: #121214; color: #e0e0e6; }
+        QWidget { color: #e0e0e6; font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }
+        QGroupBox { border: 2px solid #2d2d35; border-radius: 8px; margin-top: 10px; font-weight: bold; color: #00adb5; }
+        QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }
+        QPushButton { background-color: #00adb5; color: #ffffff; border: none; border-radius: 4px; padding: 6px; font-weight: bold; }
+        QPushButton:hover { background-color: #00cfd8; }
+        QSlider::groove:horizontal { border: 1px solid #2c2c35; height: 6px; background: #1e1e24; border-radius: 3px; }
+        QSlider::handle:horizontal { background: #00adb5; width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; }
+        QComboBox, QLineEdit { background-color: #1e1e24; border: 1px solid #2d2d35; border-radius: 4px; padding: 4px; color: #e0e0e6; }
+        QTabWidget::pane { border: 1px solid #2d2d35; background: #121214; }
+        QTabBar::tab { background: #1a1a1f; color: #888; padding: 8px 20px; border: 1px solid #2d2d35; }
+        QTabBar::tab:selected { background: #00adb5; color: #fff; }
         """
         self.setStyleSheet(stylesheet)
 
-    # ==========================================
-    # Callbacks & Events
-    # ==========================================
+    def switch_to_profile(self, key):
+        self.active_profile_key = key
+        prof = self.profiles[key]
+        self.lbl_status_overlay.setText(f"PREVIEW: {key.upper()} CAMERA")
+        self.tabs.setCurrentIndex(0 if key == "front" else 1)
+        self.current_frame = None
+        self.ros_node.switch_camera(prof.depth_topic, prof.info_topic, prof.output_topic)
+
+    def get_active_tab(self):
+        return self.tab_front if self.active_profile_key == "front" else self.tab_rear
 
     @pyqtSlot(np.ndarray, object)
     def handle_new_frame(self, cv_image, info_dict):
-        """
-        Invoked on the GUI thread whenever a new frame arrives via the ROS 2 subscriber.
-        """
         self.current_frame = cv_image
         self.camera_intrinsics = info_dict
-        self.raw_height, self.raw_width = cv_image.shape
-
-        # Reset loaded ground frame if resolution differs
-        if self.ground_frame is not None and self.ground_frame.shape != cv_image.shape:
-            self.ros_node.get_logger().warn(
-                f"Resetting ground reference because shape {self.ground_frame.shape} "
-                f"does not match new stream resolution {cv_image.shape}!"
-            )
-            self.ground_frame = None
-            self.ground_file_path = "None"
-            self.lbl_ground_status.setText("Ground Loaded: No (Res Mismatch)")
-            self.lbl_ground_status.setStyleSheet("color: #ff5555; font-weight: bold;")
-
-        # Initialize sliders boundaries on first frame
-        self.initialize_sliders_boundaries()
-
-        # Calculate FPS
+        
+        prof = self.profiles[self.active_profile_key]
+        h, w = cv_image.shape
+        
+        if prof.raw_width != w or prof.raw_height != h:
+            prof.raw_width = w
+            prof.raw_height = h
+            self.get_active_tab().update_ui_from_profile()
+            
         t_now = time.time()
         self.fps = 1.0 / max(1e-5, (t_now - self.last_frame_time))
         self.last_frame_time = t_now
-
-        # Execute processing pipeline
+        
         t_start = time.time()
         self.process_pipeline()
         self.processing_time_ms = (time.time() - t_start) * 1000.0
-
-        # Update stats on status bar
+        
         self.update_status_bar()
 
-    def initialize_sliders_boundaries(self):
-        """
-        Dynamically adjusts the ranges of ROI sliders to fit the received image resolution.
-        """
-        if self.sld_roi_x.maximum() != self.raw_width - 1:
-            # Block signals temporarily to prevent infinite loop of updates
-            self.sld_roi_x.blockSignals(True)
-            self.sld_roi_y.blockSignals(True)
-            self.sld_roi_w.blockSignals(True)
-            self.sld_roi_h.blockSignals(True)
-
-            self.sld_roi_x.setRange(0, self.raw_width - 1)
-            self.sld_roi_y.setRange(0, self.raw_height - 1)
-            self.sld_roi_w.setRange(1, self.raw_width)
-            self.sld_roi_h.setRange(1, self.raw_height)
-
-            # Set defaults (middle 50% ROI)
-            self.sld_roi_x.setValue(self.raw_width // 4)
-            self.sld_roi_y.setValue(self.raw_height // 4)
-            self.sld_roi_w.setValue(self.raw_width // 2)
-            self.sld_roi_h.setValue(self.raw_height // 2)
-
-            self.sld_roi_x.blockSignals(False)
-            self.sld_roi_y.blockSignals(False)
-            self.sld_roi_w.blockSignals(False)
-            self.sld_roi_h.blockSignals(False)
-
-            self.update_slider_labels()
-
-    def update_slider_labels(self):
-        self.lbl_roi_x_val.setText(str(self.sld_roi_x.value()))
-        self.lbl_roi_y_val.setText(str(self.sld_roi_y.value()))
-        self.lbl_roi_w_val.setText(str(self.sld_roi_w.value()))
-        self.lbl_roi_h_val.setText(str(self.sld_roi_h.value()))
-        self.lbl_threshold_val.setText(str(self.sld_threshold.value()))
-        self.lbl_min_area_val.setText(str(self.sld_min_area.value()))
-        self.lbl_median_val.setText(str(self.sld_median.value()))
-        self.lbl_morph_val.setText(str(self.sld_morph.value()))
-        self.lbl_tilt_val.setText(f"{self.sld_tilt_angle.value()}°")
-        offset_m = self.sld_dist_offset.value() / 100.0
-        self.lbl_dist_offset_val.setText(f"{offset_m:+.2f} m")
-
-    def on_param_changed(self):
-        # Force odd median kernel size
-        val = self.sld_median.value()
-        if val > 1 and val % 2 == 0:
-            self.sld_median.setValue(val + 1)
-            
-        self.update_slider_labels()
-        if self.current_frame is not None:
-            # Force reprocessing of last frame with new parameters
-            self.process_pipeline()
+    def update_status_bar(self):
+        prof = self.profiles[self.active_profile_key]
+        stat_text = (f"[{prof.name.upper()}] FPS: {self.fps:.1f} | Res: {prof.raw_width}x{prof.raw_height} | "
+                     f"Proc: {self.processing_time_ms:.1f} ms | Target: {prof.target_frame}")
+        self.status_bar.showMessage(stat_text)
 
     def on_zoom_changed(self):
         txt = self.cmb_zoom.currentText().replace("%", "")
         self.zoom = float(txt) / 100.0
-        if self.current_frame is not None:
-            self.process_pipeline()
-
-    def on_target_frame_changed(self, text):
-        self.target_frame = text.strip()
-        if self.current_frame is not None:
-            self.process_pipeline()
-
-    def update_status_bar(self):
-        stat_text = (
-            f"FPS: {self.fps:.1f}  |  "
-            f"Resolution: {self.raw_width}x{self.raw_height}  |  "
-            f"Obstacles: {self.obstacle_count}  |  "
-            f"Nearest: {self.nearest_obstacle_dist:.2f}m  |  "
-            f"Processing: {self.processing_time_ms:.1f} ms  |  "
-            f"Ground Ref: {self.ground_file_path}"
-        )
-        self.status_bar.showMessage(stat_text)
-
-    # ==========================================
-    # Ground Reference & Config Actions
-    # ==========================================
-
-    def on_capture_ground(self):
-        if self.current_frame is None:
-            QMessageBox.warning(self, "Warning", "No active camera stream to capture ground reference!")
-            return
-        self.ground_frame = self.current_frame.copy()
-        self.ground_file_path = "Memory (Unsaved)"
-        self.lbl_ground_status.setText("Ground Loaded: Yes (Memory)")
-        self.lbl_ground_status.setStyleSheet("color: #00ff66; font-weight: bold;")
-        self.update_status_bar()
         self.process_pipeline()
 
-    def on_save_ground(self):
-        if self.ground_frame is None:
-            QMessageBox.warning(self, "Warning", "No ground reference captured to save!")
-            return
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Save Ground Reference", "ground_reference.npy", "Numpy Files (*.npy);;All Files (*)"
-        )
-        if filename:
-            # Auto-append .npy if no extension is present in name
-            if not filename.endswith('.npy') and '.' not in os.path.basename(filename):
-                filename += '.npy'
-            try:
-                np.save(filename, self.ground_frame)
-                self.ground_file_path = os.path.abspath(filename)
-                self.lbl_ground_status.setText(f"Ground Loaded: Yes ({os.path.basename(filename)})")
-                self.lbl_ground_status.setStyleSheet("color: #00ff66; font-weight: bold;")
-                self.update_status_bar()
-                self.process_pipeline()
-                QMessageBox.information(self, "Success", f"Ground reference saved to {self.ground_file_path} successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save ground reference: {str(e)}")
-
-    def on_load_ground(self):
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Load Ground Reference", "", "Numpy Files (*.npy);;All Files (*)"
-        )
-        if filename:
-            try:
-                self.ros_node.get_logger().info(f"Attempting to load ground reference from: {filename}")
-                loaded = np.load(filename)
-                
-                # Check shape compatibility
-                self.ros_node.get_logger().info(f"Loaded array shape: {loaded.shape}, dtype: {loaded.dtype}")
-                
-                if self.current_frame is not None and loaded.shape != self.current_frame.shape:
-                    QMessageBox.critical(
-                        self, "Error", 
-                        f"Ground frame resolution {loaded.shape} does not match camera stream {self.current_frame.shape}!"
-                    )
-                    return
-                
-                # Copy array safely to prevent memory access issues
-                self.ground_frame = loaded.copy()
-                self.ground_file_path = os.path.abspath(filename)
-                
-                self.lbl_ground_status.setText(f"Ground Loaded: Yes ({os.path.basename(filename)})")
-                self.lbl_ground_status.setStyleSheet("color: #00ff66; font-weight: bold;")
-                self.update_status_bar()
-                
-                # Update processing pipeline immediately
-                self.process_pipeline()
-                QMessageBox.information(self, "Success", "Ground reference loaded successfully!")
-            except Exception as e:
-                self.ros_node.get_logger().error(f"Failed to load ground: {str(e)}")
-                QMessageBox.critical(self, "Error", f"Failed to load ground reference: {str(e)}")
-
-    def on_save_config(self):
-        filename, _ = QFileDialog.getSaveFileName(
-            self, "Save Configuration", "obstacle_config.yaml", "YAML Files (*.yaml *.yml);;All Files (*)"
-        )
-        if filename:
-            if not filename.endswith('.yaml') and not filename.endswith('.yml') and '.' not in os.path.basename(filename):
-                filename += '.yaml'
-            try:
-                import yaml
-                config_data = {
-                    'roi_x': int(self.sld_roi_x.value()),
-                    'roi_y': int(self.sld_roi_y.value()),
-                    'roi_width': int(self.sld_roi_w.value()),
-                    'roi_height': int(self.sld_roi_h.value()),
-                    'threshold': int(self.sld_threshold.value()),
-                    'min_area': int(self.sld_min_area.value()),
-                    'median_filter': int(self.sld_median.value()),
-                    'morphology_size': int(self.sld_morph.value()),
-                    'ground_file_path': str(self.ground_file_path) if self.ground_file_path else "None",
-                    'target_frame': str(self.target_frame),
-                    'camera_tilt': int(self.sld_tilt_angle.value()),
-                    'distance_offset': float(self.sld_dist_offset.value() / 100.0)
-                }
-                with open(filename, 'w') as f:
-                    yaml.dump(config_data, f, default_flow_style=False)
-                QMessageBox.information(self, "Success", f"Configuration saved successfully to {os.path.basename(filename)}!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to save configuration: {str(e)}")
-
-    def on_load_config(self):
-        filename, _ = QFileDialog.getOpenFileName(
-            self, "Load Configuration", "", "YAML Files (*.yaml *.yml);;All Files (*)"
-        )
-        if filename:
-            try:
-                import yaml
-                with open(filename, 'r') as f:
-                    config_data = yaml.safe_load(f)
-                
-                # Update GUI parameters (Block signals to update without multiple refreshes)
-                self.sld_roi_x.blockSignals(True)
-                self.sld_roi_y.blockSignals(True)
-                self.sld_roi_w.blockSignals(True)
-                self.sld_roi_h.blockSignals(True)
-                self.sld_threshold.blockSignals(True)
-                self.sld_min_area.blockSignals(True)
-                self.sld_median.blockSignals(True)
-                self.sld_morph.blockSignals(True)
-                self.sld_tilt_angle.blockSignals(True)
-                self.sld_dist_offset.blockSignals(True)
-
-                self.sld_roi_x.setValue(config_data.get('roi_x', 0))
-                self.sld_roi_y.setValue(config_data.get('roi_y', 0))
-                self.sld_roi_w.setValue(config_data.get('roi_width', 100))
-                self.sld_roi_h.setValue(config_data.get('roi_height', 100))
-                self.sld_threshold.setValue(config_data.get('threshold', 80))
-                self.sld_min_area.setValue(config_data.get('min_area', 150))
-                self.sld_median.setValue(config_data.get('median_filter', 3))
-                self.sld_morph.setValue(config_data.get('morphology_size', 3))
-                self.sld_tilt_angle.setValue(config_data.get('camera_tilt', 0))
-                
-                dist_off = config_data.get('distance_offset', 0.0)
-                self.sld_dist_offset.setValue(int(round(dist_off * 100)))
-
-                self.sld_roi_x.blockSignals(False)
-                self.sld_roi_y.blockSignals(False)
-                self.sld_roi_w.blockSignals(False)
-                self.sld_roi_h.blockSignals(False)
-                self.sld_threshold.blockSignals(False)
-                self.sld_min_area.blockSignals(False)
-                self.sld_median.blockSignals(False)
-                self.sld_morph.blockSignals(False)
-                self.sld_tilt_angle.blockSignals(False)
-                self.sld_dist_offset.blockSignals(False)
-
-                self.update_slider_labels()
-
-                # Update target frame dropdown
-                loaded_tf = config_data.get('target_frame', 'base_link')
-                self.cmb_target_frame.blockSignals(True)
-                self.cmb_target_frame.setCurrentText(loaded_tf)
-                self.target_frame = loaded_tf
-                self.cmb_target_frame.blockSignals(False)
-
-                # Attempt to load ground reference if specified
-                g_path = config_data.get('ground_file_path', 'None')
-                if g_path and g_path != "None" and g_path != "Memory (Unsaved)":
-                    if os.path.exists(g_path):
-                        self.ros_node.get_logger().info(f"Loading ground from config path: {g_path}")
-                        loaded = np.load(g_path)
-                        self.ground_frame = loaded.copy()
-                        self.ground_file_path = g_path
-                        self.lbl_ground_status.setText(f"Ground Loaded: Yes ({os.path.basename(g_path)})")
-                        self.lbl_ground_status.setStyleSheet("color: #00ff66; font-weight: bold;")
-                    else:
-                        # Try relative to the yaml file location
-                        yaml_dir = os.path.dirname(filename)
-                        rel_path = os.path.abspath(os.path.join(yaml_dir, os.path.basename(g_path)))
-                        if os.path.exists(rel_path):
-                            self.ros_node.get_logger().info(f"Loading ground from relative config path: {rel_path}")
-                            loaded = np.load(rel_path)
-                            self.ground_frame = loaded.copy()
-                            self.ground_file_path = rel_path
-                            self.lbl_ground_status.setText(f"Ground Loaded: Yes ({os.path.basename(rel_path)})")
-                            self.lbl_ground_status.setStyleSheet("color: #00ff66; font-weight: bold;")
-                        else:
-                            self.ros_node.get_logger().warn(f"Ground reference file not found: {g_path}")
-                            QMessageBox.warning(self, "Warning", f"Ground reference file not found at: {g_path}")
-                
-                self.update_status_bar()
-                self.process_pipeline()
-                QMessageBox.information(self, "Success", "Configuration loaded successfully!")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load configuration: {str(e)}")
-
-    # ==========================================
-    # Mouse Event Responders & 3D Projection
-    # ==========================================
-
+    # --- Mouse Events for ROI Drawing ---
     def map_to_raw(self, lbl_x, lbl_y):
-        """
-        Maps GUI coordinate (scaled) back to raw depth image coordinates.
-        """
-        if self.zoom <= 0 or self.raw_width == 0 or self.raw_height == 0:
+        prof = self.profiles[self.active_profile_key]
+        if self.zoom <= 0 or prof.raw_width == 0:
             return 0, 0
-        raw_x = int(lbl_x / self.zoom)
-        raw_y = int(lbl_y / self.zoom)
-        raw_x = max(0, min(raw_x, self.raw_width - 1))
-        raw_y = max(0, min(raw_y, self.raw_height - 1))
-        return raw_x, raw_y
-
-    def on_mouse_moved(self, x, y):
-        raw_x, raw_y = self.map_to_raw(x, y)
-        self.lbl_inspect_xy.setText(f"{raw_x}, {raw_y}")
-        
-        if self.current_frame is not None:
-            depth_val = self.current_frame[raw_y, raw_x]
-            if depth_val > 0:
-                self.lbl_inspect_depth_mm.setText(f"{depth_val} mm")
-                
-                # Retrieve camera intrinsics for 3D projection
-                if self.camera_intrinsics is not None:
-                    fx = self.camera_intrinsics['fx']
-                    fy = self.camera_intrinsics['fy']
-                    cx = self.camera_intrinsics['cx']
-                    cy = self.camera_intrinsics['cy']
-                else:
-                    # Fallback default values (approximate)
-                    fx = 570.0
-                    fy = 570.0
-                    cx = self.raw_width / 2.0
-                    cy = self.raw_height / 2.0
-                
-                # Compute 3D Coordinates in Camera Optical Frame
-                z_m = depth_val / 1000.0
-                x_m = (raw_x - cx) * z_m / fx
-                y_m = (raw_y - cy) * z_m / fy
-                
-                self.lbl_inspect_3dx.setText(f"{x_m:.3f} m")
-                self.lbl_inspect_3dy.setText(f"{y_m:.3f} m")
-                self.lbl_inspect_3dz.setText(f"{z_m:.3f} m")
-            else:
-                self.lbl_inspect_depth_mm.setText("0 (Invalid)")
-                self.lbl_inspect_3dx.setText("N/A")
-                self.lbl_inspect_3dy.setText("N/A")
-                self.lbl_inspect_3dz.setText("N/A")
+        rx = int(lbl_x / self.zoom)
+        ry = int(lbl_y / self.zoom)
+        return max(0, min(rx, prof.raw_width - 1)), max(0, min(ry, prof.raw_height - 1))
 
     def on_mouse_pressed(self, x, y):
-        raw_x, raw_y = self.map_to_raw(x, y)
-        self.temp_drag_roi = (raw_x, raw_y, raw_x, raw_y)
+        rx, ry = self.map_to_raw(x, y)
+        self.temp_drag_roi = (rx, ry, rx, ry)
 
     def on_mouse_dragged(self, sx, sy, cx, cy):
-        raw_sx, raw_sy = self.map_to_raw(sx, sy)
-        raw_cx, raw_cy = self.map_to_raw(cx, cy)
-        self.temp_drag_roi = (raw_sx, raw_sy, raw_cx, raw_cy)
-        # Update display dynamically while dragging
+        rsx, rsy = self.map_to_raw(sx, sy)
+        rcx, rcy = self.map_to_raw(cx, cy)
+        self.temp_drag_roi = (rsx, rsy, rcx, rcy)
         self.process_pipeline()
 
     def on_mouse_released(self, sx, sy, ex, ey):
-        raw_sx, raw_sy = self.map_to_raw(sx, sy)
-        raw_ex, raw_ey = self.map_to_raw(ex, ey)
+        rsx, rsy = self.map_to_raw(sx, sy)
+        rex, rey = self.map_to_raw(ex, ey)
+        rx, ry = min(rsx, rex), min(rsy, rey)
+        rw, rh = abs(rsx - rex), abs(rsy - rey)
         
-        # Calculate new ROI parameters
-        rx = min(raw_sx, raw_ex)
-        ry = min(raw_sy, raw_ey)
-        rw = abs(raw_sx - raw_ex)
-        rh = abs(raw_sy - raw_ey)
-
-        # Minimum size requirement for mouse ROI selection
         if rw > 5 and rh > 5:
-            # Temporarily block signals to update all sliders together
-            self.sld_roi_x.blockSignals(True)
-            self.sld_roi_y.blockSignals(True)
-            self.sld_roi_w.blockSignals(True)
-            self.sld_roi_h.blockSignals(True)
-
-            self.sld_roi_x.setValue(rx)
-            self.sld_roi_y.setValue(ry)
-            self.sld_roi_w.setValue(rw)
-            self.sld_roi_h.setValue(rh)
-
-            self.sld_roi_x.blockSignals(False)
-            self.sld_roi_y.blockSignals(False)
-            self.sld_roi_w.blockSignals(False)
-            self.sld_roi_h.blockSignals(False)
-
-            self.update_slider_labels()
+            tab = self.get_active_tab()
+            tab.sld_roi_x.setValue(rx)
+            tab.sld_roi_y.setValue(ry)
+            tab.sld_roi_w.setValue(rw)
+            tab.sld_roi_h.setValue(rh)
             
         self.temp_drag_roi = None
         self.process_pipeline()
 
-    # ==========================================
-    # Algorithmic Pipeline & LaserScan Generation
-    # ==========================================
-
-    def process_pipeline(self):
+    # --- Config / Ground Actions ---
+    def on_capture_ground(self, tab: ProfileWidget):
         if self.current_frame is None:
+            QMessageBox.warning(self, "Warning", "No active camera stream!")
             return
+        tab.profile.ground_frame = self.current_frame.copy()
+        tab.profile.ground_file_path = "Memory"
+        tab.update_ground_label()
+        self.process_pipeline()
 
-        try:
-            # 1. Fetch current control parameters
-            rx = self.sld_roi_x.value()
-            ry = self.sld_roi_y.value()
-            rw = self.sld_roi_w.value()
-            rh = self.sld_roi_h.value()
-            
-            # Clamp parameters to current resolution bounds
-            rx = max(0, min(rx, self.raw_width - 1))
-            ry = max(0, min(ry, self.raw_height - 1))
-            rw = max(1, min(rw, self.raw_width - rx))
-            rh = max(1, min(rh, self.raw_height - ry))
+    def on_load_ground(self, tab: ProfileWidget):
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Ground", "", "Numpy (*.npy)")
+        if filename:
+            try:
+                tab.profile.ground_frame = np.load(filename).copy()
+                tab.profile.ground_file_path = filename
+                tab.update_ground_label()
+                self.process_pipeline()
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
-            thresh_val = self.sld_threshold.value()
-            min_area = self.sld_min_area.value()
-            k_median = self.sld_median.value()
-            k_morph = self.sld_morph.value()
+    def on_save_yaml(self, tab: ProfileWidget):
+        name = tab.profile.name
+        filename, _ = QFileDialog.getSaveFileName(self, f"Save {name.upper()} Config", f"{name}_camera.yaml", "YAML (*.yaml)")
+        if filename:
+            if not filename.endswith('.yaml'): filename += '.yaml'
+            p = tab.profile
+            data = {
+                f'{name}_camera': {
+                    'enabled': p.enabled,
+                    'depth_topic': p.depth_topic,
+                    'camera_info_topic': p.info_topic,
+                    'output_scan_topic': p.output_topic,
+                    'target_frame': p.target_frame,
+                    'width': p.raw_width,
+                    'height': p.raw_height,
+                    'pitch_deg': p.pitch_deg,
+                    'min_range': p.min_range,
+                    'max_range': p.max_range,
+                    'roi_top': p.roi_y,
+                    'roi_bottom': p.roi_y + p.roi_h,
+                    'roi_left': p.roi_x,
+                    'roi_right': p.roi_x + p.roi_w,
+                    'threshold': p.threshold,
+                    'min_area': p.min_area,
+                    'median_filter': p.median_filter,
+                    'morphology_size': p.morph_size,
+                    'ground_file_path': p.ground_file_path
+                }
+            }
+            try:
+                with open(filename, 'w') as f:
+                    yaml.dump(data, f, default_flow_style=False)
+                QMessageBox.information(self, "Saved", f"Config saved to {filename}")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
-            # 2. Extract ROI from Current Frame
-            current_roi = self.current_frame[ry:ry+rh, rx:rx+rw]
-
-            # 3. Create Colorized Raw Depth Viewer base
-            # 16-bit to 8-bit mapping (max distance 4.0 meters / 4000 mm)
-            depth_8u = np.clip(self.current_frame, 0, 4000) / 4000.0 * 255.0
-            depth_8u = depth_8u.astype(np.uint8)
-            # Apply Jet Color Map
-            depth_color = cv2.applyColorMap(depth_8u, cv2.COLORMAP_JET)
-            # Force invalid pixels (0 depth value) to black color
-            depth_color[self.current_frame == 0] = [0, 0, 0]
-
-            # Initialize default lower view placeholders
-            diff_disp = np.zeros((rh, rw), dtype=np.uint8)
-            mask_disp = np.zeros((rh, rw), dtype=np.uint8)
-            overlay_color = depth_color.copy()
-
-            obstacles = []
-            self.obstacle_count = 0
-            self.nearest_obstacle_dist = 0.0
-
-            if self.ground_frame is not None:
-                # 4. Compare with Ground Reference inside ROI
-                ground_roi = self.ground_frame[ry:ry+rh, rx:rx+rw]
-                
-                # Mask representing pixels that are non-zero in both current and ground frame
-                valid_mask = (current_roi > 0) & (ground_roi > 0)
-                
-                # Subtract (Ground - Current). If current is smaller, object is closer.
-                # Convert to int32 to prevent overflow wrapping in uint16 math
-                diff = ground_roi.astype(np.int32) - current_roi.astype(np.int32)
-                
-                # Difference visualization (positive values up to 1000mm mapped to 0-255 grayscale)
-                diff_vis = np.clip(diff, 0, 1000) / 1000.0 * 255.0
-                diff_disp = diff_vis.astype(np.uint8)
-                # Fill invalid pixels with black in visualization
-                diff_disp[~valid_mask] = 0
-
-                # 5. Threshold to create Binary Mask
-                obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
-                obstacle_mask[valid_mask & (diff > thresh_val)] = 255
-
-                # 6. Apply Morphology Filters (Noise Reduction)
-                # A. Median filter (must be odd size)
-                if k_median > 1:
-                    obstacle_mask = cv2.medianBlur(obstacle_mask, k_median)
-                
-                # B. Opening and Closing Morphology operations
-                if k_morph > 0:
-                    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (k_morph, k_morph))
-                    obstacle_mask = cv2.morphologyEx(obstacle_mask, cv2.MORPH_OPEN, kernel)
-                    obstacle_mask = cv2.morphologyEx(obstacle_mask, cv2.MORPH_CLOSE, kernel)
-
-                mask_disp = obstacle_mask.copy()
-
-                # 7. Contour/Connected Components Detection
-                contours, _ = cv2.findContours(obstacle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                min_dist_overall = float('inf')
-                
-                for cnt in contours:
-                    area = cv2.contourArea(cnt)
-                    if area >= min_area:
-                        # Obstacle is qualified
-                        bx, by, bw, bh = cv2.boundingRect(cnt)
-                        
-                        # Compute nearest distance to this obstacle
-                        # Mask the depth frame within bounding box using the contour shape
-                        mask_box = np.zeros((bh, bw), dtype=np.uint8)
-                        # Adjust contour coordinates to box coordinates
-                        cnt_adjusted = cnt - np.array([bx, by])
-                        cv2.drawContours(mask_box, [cnt_adjusted], -1, 255, -1)
-                        
-                        # Extract depth values belonging to this obstacle
-                        box_depth = current_roi[by:by+bh, bx:bx+bw]
-                        obstacle_depths = box_depth[mask_box > 0]
-                        
-                        # Filter invalid (0) depth values
-                        valid_depths = obstacle_depths[obstacle_depths > 0]
-                        if len(valid_depths) > 0:
-                            min_depth_mm = np.min(valid_depths)
-                            dist_m = min_depth_mm / 1000.0
+    def on_load_yaml(self, tab: ProfileWidget):
+        filename, _ = QFileDialog.getOpenFileName(self, "Load Config", "", "YAML (*.yaml)")
+        if filename:
+            try:
+                with open(filename, 'r') as f:
+                    d = yaml.safe_load(f)
+                name = tab.profile.name
+                if f'{name}_camera' in d:
+                    cfg = d[f'{name}_camera']
+                    p = tab.profile
+                    p.enabled = cfg.get('enabled', p.enabled)
+                    p.depth_topic = cfg.get('depth_topic', p.depth_topic)
+                    p.info_topic = cfg.get('camera_info_topic', p.info_topic)
+                    p.output_topic = cfg.get('output_scan_topic', p.output_topic)
+                    p.target_frame = cfg.get('target_frame', p.target_frame)
+                    p.pitch_deg = cfg.get('pitch_deg', p.pitch_deg)
+                    p.min_range = cfg.get('min_range', p.min_range)
+                    p.max_range = cfg.get('max_range', p.max_range)
+                    
+                    p.roi_x = cfg.get('roi_left', p.roi_x)
+                    p.roi_y = cfg.get('roi_top', p.roi_y)
+                    p.roi_w = cfg.get('roi_right', p.roi_x + p.roi_w) - p.roi_x
+                    p.roi_h = cfg.get('roi_bottom', p.roi_y + p.roi_h) - p.roi_y
+                    
+                    p.threshold = cfg.get('threshold', p.threshold)
+                    p.min_area = cfg.get('min_area', p.min_area)
+                    p.median_filter = cfg.get('median_filter', p.median_filter)
+                    p.morph_size = cfg.get('morphology_size', p.morph_size)
+                    
+                    g_path = cfg.get('ground_file_path', 'None')
+                    if g_path != "None" and g_path != "Memory":
+                        if os.path.exists(g_path):
+                            p.ground_frame = np.load(g_path).copy()
+                            p.ground_file_path = g_path
                         else:
-                            dist_m = 0.0
-
-                        if dist_m > 0 and dist_m < min_dist_overall:
-                            min_dist_overall = dist_m
-
-                        # Store obstacles relative to full frame coordinates
-                        obstacles.append({
-                            'x': bx + rx,
-                            'y': by + ry,
-                            'w': bw,
-                            'h': bh,
-                            'dist': dist_m
-                        })
-
-                self.obstacle_count = len(obstacles)
-                if min_dist_overall != float('inf'):
-                    self.nearest_obstacle_dist = min_dist_overall
-
-                # 8. Render bounding boxes and distances on Overlay
-                for obs in obstacles:
-                    ox, oy, ow, oh = obs['x'], obs['y'], obs['w'], obs['h']
-                    d_val = obs['dist']
+                            # Try relative
+                            rel_path = os.path.join(os.path.dirname(filename), os.path.basename(g_path))
+                            if os.path.exists(rel_path):
+                                p.ground_frame = np.load(rel_path).copy()
+                                p.ground_file_path = rel_path
                     
-                    # Check if this is the nearest obstacle
-                    is_nearest = (d_val == self.nearest_obstacle_dist)
-                    color = (0, 0, 255) if is_nearest else (0, 255, 255) # Red for nearest, Yellow for others
-                    thickness = 3 if is_nearest else 2
+                    tab.update_ui_from_profile()
                     
-                    # Draw bounding box
-                    cv2.rectangle(overlay_color, (ox, oy), (ox+ow, oy+oh), color, thickness)
-                    
-                    # Draw distance text
-                    txt = f"{d_val:.2f}m"
-                    cv2.putText(overlay_color, txt, (ox, max(oy - 5, 15)),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
+                    # If this is the active tab, resubscribe if topics changed
+                    if self.active_profile_key == name:
+                        self.switch_to_profile(name)
+                        
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
 
-            # 9. Draw current ROI rectangle on the Main Depth colorized stream
-            cv2.rectangle(depth_color, (rx, ry), (rx+rw, ry+rh), (0, 255, 0), 2) # Green ROI box
+    # --- Core Pipeline ---
+    def process_pipeline(self):
+        if self.current_frame is None: return
+        p = self.profiles[self.active_profile_key]
+        
+        rx, ry, rw, rh = int(p.roi_x), int(p.roi_y), int(p.roi_w), int(p.roi_h)
+        rx = max(0, min(rx, p.raw_width - 1))
+        ry = max(0, min(ry, p.raw_height - 1))
+        rw = max(1, min(rw, p.raw_width - rx))
+        rh = max(1, min(rh, p.raw_height - ry))
+        
+        current_roi = self.current_frame[ry:ry+rh, rx:rx+rw]
+        
+        depth_8u = np.clip(self.current_frame, 0, 4000) / 4000.0 * 255.0
+        depth_color = cv2.applyColorMap(depth_8u.astype(np.uint8), cv2.COLORMAP_JET)
+        depth_color[self.current_frame == 0] = [0, 0, 0]
+        
+        diff_disp = np.zeros((rh, rw), dtype=np.uint8)
+        mask_disp = np.zeros((rh, rw), dtype=np.uint8)
+        overlay_color = depth_color.copy()
+        
+        if p.ground_frame is not None and p.ground_frame.shape == self.current_frame.shape:
+            ground_roi = p.ground_frame[ry:ry+rh, rx:rx+rw]
+            valid_mask = (current_roi > 0) & (ground_roi > 0)
+            diff = ground_roi.astype(np.int32) - current_roi.astype(np.int32)
+            
+            diff_vis = np.clip(diff, 0, 1000) / 1000.0 * 255.0
+            diff_disp = diff_vis.astype(np.uint8)
+            diff_disp[~valid_mask] = 0
+            
+            obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
+            obstacle_mask[valid_mask & (diff > p.threshold)] = 255
+            
+            if p.median_filter > 1:
+                obstacle_mask = cv2.medianBlur(obstacle_mask, p.median_filter)
+            if p.morph_size > 0:
+                kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (p.morph_size, p.morph_size))
+                obstacle_mask = cv2.morphologyEx(obstacle_mask, cv2.MORPH_OPEN, kernel)
+                obstacle_mask = cv2.morphologyEx(obstacle_mask, cv2.MORPH_CLOSE, kernel)
+                
+            mask_disp = obstacle_mask.copy()
+            contours, _ = cv2.findContours(obstacle_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for cnt in contours:
+                if cv2.contourArea(cnt) >= p.min_area:
+                    bx, by, bw, bh = cv2.boundingRect(cnt)
+                    ox, oy = bx + rx, by + ry
+                    cv2.rectangle(overlay_color, (ox, oy), (ox+bw, oy+bh), (0, 255, 255), 2)
+            
+            # Generate LaserScan
+            if p.enabled:
+                self.generate_scan(obstacle_mask, rx, ry, current_roi, p)
+                
+        cv2.rectangle(depth_color, (rx, ry), (rx+rw, ry+rh), (0, 255, 0), 2)
+        if self.temp_drag_roi:
+            tsx, tsy, tcx, tcy = self.temp_drag_roi
+            tx, ty = min(tsx, tcx), min(tsy, tcy)
+            tw, th = abs(tsx - tcx), abs(tsy - tcy)
+            cv2.rectangle(depth_color, (tx, ty), (tx+tw, ty+th), (255, 255, 255), 1)
+            
+        self.display_main_depth(depth_color)
+        self.display_bottom_images(diff_disp, mask_disp, overlay_color)
 
-            # If user is currently dragging a new ROI rectangle, draw it in dashed/white
-            if self.temp_drag_roi is not None:
-                tsx, tsy, tcx, tcy = self.temp_drag_roi
-                tx = min(tsx, tcx)
-                ty = min(tsy, tcy)
-                tw = abs(tsx - tcx)
-                th = abs(tsy - tcy)
-                cv2.rectangle(depth_color, (tx, ty), (tx+tw, ty+th), (255, 255, 255), 1, cv2.LINE_4)
-
-            # 10. Generate and Publish LaserScan
-            self.generate_and_publish_laserscan(mask_disp, rx, ry, current_roi)
-
-            # 11. Display Image conversions and resizing
-            self.display_main_depth(depth_color)
-            self.display_bottom_images(diff_disp, mask_disp, overlay_color)
-
-        except Exception as e:
-            self.ros_node.get_logger().error(f"Error in image processing pipeline: {str(e)}")
-
-    def generate_and_publish_laserscan(self, obstacle_mask, rx, ry, current_roi):
-        """
-        Performs high-performance vectorized conversion from the 2D obstacle binary mask 
-        into a 2D LaserScan message, publishing it for Nav2/RViz consumption.
-        Optionally uses TF2 to project coordinates to a target frame (e.g. camera_link)
-        or falls back to manual pitch angle rotation.
-        """
-        # Fetch or fallback camera intrinsic parameters
-        if self.camera_intrinsics is not None:
-            fx = self.camera_intrinsics['fx']
-            fy = self.camera_intrinsics['fy']
-            cx = self.camera_intrinsics['cx']
-            cy = self.camera_intrinsics['cy']
+    def generate_scan(self, mask, rx, ry, current_roi, p: CameraProfile):
+        if self.camera_intrinsics:
+            fx, fy = self.camera_intrinsics['fx'], self.camera_intrinsics['fy']
+            cx, cy = self.camera_intrinsics['cx'], self.camera_intrinsics['cy']
             frame_id = self.camera_intrinsics['frame_id']
         else:
-            fx = 570.0
-            fy = 570.0
-            cx = self.raw_width / 2.0
-            cy = self.raw_height / 2.0
+            fx = fy = 570.0
+            cx = p.raw_width / 2.0
+            cy = p.raw_height / 2.0
             frame_id = 'camera_depth_optical_frame'
-
-        # Compute Horizontal Field of View (FOV) in Radians
-        fov = 2.0 * np.arctan(self.raw_width / (2.0 * fx))
-
-        # Check if we should use TF projection to target frame
-        use_tf = (self.target_frame != frame_id)
-        
-        translation = np.array([0.0, 0.0, 0.0])
-        R = np.eye(3)
-        actual_frame_id = frame_id
-
-        if use_tf:
-            try:
-                # Lookup transform from camera optical frame to target frame (e.g. camera_link)
-                trans = self.ros_node.tf_buffer.lookup_transform(
-                    self.target_frame,
-                    frame_id,
-                    rclpy.time.Time()
-                )
-                
-                # Get Translation
-                translation = np.array([
-                    trans.transform.translation.x,
-                    trans.transform.translation.y,
-                    trans.transform.translation.z
-                ])
-                
-                # Get Rotation Quaternion
-                qx = trans.transform.rotation.x
-                qy = trans.transform.rotation.y
-                qz = trans.transform.rotation.z
-                qw = trans.transform.rotation.w
-                
-                # Compute Rotation Matrix
-                R = np.array([
-                    [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
-                    [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
-                    [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]
-                ])
-                actual_frame_id = self.target_frame
-            except Exception as e:
-                self.ros_node.get_logger().warn(
-                    f"TF lookup failed to {self.target_frame}: {str(e)}. Falling back to manual tilt."
-                )
-                use_tf = False
-                if self.sld_tilt_angle.value() != 0:
-                    actual_frame_id = self.target_frame
-                else:
-                    actual_frame_id = frame_id
-
-        scan_msg = LaserScan()
-        scan_msg.header.stamp = self.ros_node.get_clock().now().to_msg()
-        scan_msg.header.frame_id = actual_frame_id
-        scan_msg.angle_min = -fov / 2.0
-        scan_msg.angle_max = fov / 2.0
-        scan_msg.angle_increment = fov / self.raw_width
-        scan_msg.time_increment = 0.0
-        scan_msg.scan_time = 0.033  # ~30 FPS
-        scan_msg.range_min = 0.4
-        scan_msg.range_max = 5.0
-
-        # Default all scan points to infinity (no obstacle detected)
-        ranges = [float('inf')] * self.raw_width
-
-        # Process obstacle coordinates if Ground Reference is loaded and active
-        if self.ground_frame is not None and obstacle_mask is not None:
-            # Find row (y) and column (x) indices of all obstacle pixels
-            y_idx, x_idx = np.where(obstacle_mask == 255)
             
-            if len(y_idx) > 0:
-                # Map coordinates back to the full image frame
-                u_coords = rx + x_idx
-                v_coords = ry + y_idx
-                
-                # Fetch depth values and convert to meters
-                depths_m = current_roi[y_idx, x_idx] / 1000.0
-                
-                # Filter out invalid depth pixels
-                valid = depths_m > 0
-                u_coords = u_coords[valid]
-                v_coords = v_coords[valid]
-                depths_m = depths_m[valid]
-                
-                if len(depths_m) > 0:
-                    # De-project 2D pixels to 3D space in Optical Frame
-                    x_3d = (u_coords - cx) * depths_m / fx
-                    y_3d = (v_coords - cy) * depths_m / fy
-                    z_3d = depths_m
-                    
-                    if use_tf:
-                        # Stack optical points: shape (N, 3)
-                        pts_optical = np.vstack([x_3d, y_3d, z_3d]).T
-                        # Rotate and translate to target frame
-                        pts_target = pts_optical @ R.T + translation
-                        
-                        # Extract projected coords (X_t is forward, Y_t is left)
-                        x_t = pts_target[:, 0]
-                        y_t = pts_target[:, 1]
-                        
-                        # Calculate angles and 2D planar ranges in target frame
-                        thetas = np.arctan2(y_t, x_t)
-                        planar_ranges = np.sqrt(x_t**2 + y_t**2)
-                    else:
-                        # Apply manual camera tilt pitch rotation around X-axis
-                        tilt_deg = self.sld_tilt_angle.value()
-                        if tilt_deg != 0:
-                            alpha_rad = -tilt_deg * np.pi / 180.0
-                            cos_a = np.cos(alpha_rad)
-                            sin_a = np.sin(alpha_rad)
-                            
-                            # Pitch rotation
-                            x_t = x_3d
-                            y_t = y_3d * cos_a - z_3d * sin_a
-                            z_t = y_3d * sin_a + z_3d * cos_a
-                            
-                            # In horizontal alignment, Z_t is forward, X_t is horizontal left/right
-                            # Map to ROS frame conventions: forward = z_t, left = -x_t
-                            thetas = np.arctan2(-x_t, z_t)
-                            planar_ranges = np.sqrt(x_t**2 + z_t**2)
-                        else:
-                            # Standard optical frame angle/range calculations
-                            thetas = np.arctan2(x_3d, z_3d)
-                            planar_ranges = np.sqrt(x_3d**2 + z_3d**2)
-                    
-                    # Apply calibration distance offset if specified
-                    dist_offset_m = self.sld_dist_offset.value() / 100.0
-                    if dist_offset_m != 0.0:
-                        planar_ranges = np.maximum(0.0, planar_ranges + dist_offset_m)
-
-                    # Determine range bin indexes
-                    bin_idx = ((thetas - scan_msg.angle_min) / scan_msg.angle_increment).astype(np.int32)
-                    
-                    # Filter bins lying within image width bounds
-                    in_bounds = (bin_idx >= 0) & (bin_idx < self.raw_width)
-                    planar_ranges = planar_ranges[in_bounds]
-                    bin_idx = bin_idx[in_bounds]
-                    
-                    if len(planar_ranges) > 0:
-                        # Vectorized minimum search to get closest obstacle for each angular bin
-                        ranges_arr = np.full(self.raw_width, np.inf, dtype=np.float32)
-                        np.minimum.at(ranges_arr, bin_idx, planar_ranges)
-                        
-                        # Populate final message values
-                        ranges = [float(val) for val in ranges_arr]
-
-        scan_msg.ranges = ranges
-        self.ros_node.publish_scan(scan_msg)
-
-    # ==========================================
-    # Canvas Renderers
-    # ==========================================
-
-    def display_main_depth(self, depth_color):
-        """
-        Scales and displays the main colorized depth image onto the ClickableLabel.
-        """
-        target_w = int(self.raw_width * self.zoom)
-        target_h = int(self.raw_height * self.zoom)
+        fov = 2.0 * np.arctan(p.raw_width / (2.0 * fx))
+        scan = LaserScan()
+        scan.header.stamp = self.ros_node.get_clock().now().to_msg()
+        scan.header.frame_id = p.target_frame
+        scan.angle_min = -fov / 2.0
+        scan.angle_max = fov / 2.0
+        scan.angle_increment = fov / p.raw_width
+        scan.range_min = p.min_range
+        scan.range_max = p.max_range
         
-        resized = cv2.resize(depth_color, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-        pixmap = self.numpy_to_pixmap(resized)
+        ranges = np.full(p.raw_width, np.inf, dtype=np.float32)
         
-        self.lbl_depth_viewer.setPixmap(pixmap)
+        y_idx, x_idx = np.where(mask == 255)
+        if len(y_idx) > 0:
+            u, v = rx + x_idx, ry + y_idx
+            depths_m = current_roi[y_idx, x_idx] / 1000.0
+            valid = depths_m > 0
+            u, v, depths_m = u[valid], v[valid], depths_m[valid]
+            
+            if len(depths_m) > 0:
+                x_3d = (u - cx) * depths_m / fx
+                y_3d = (v - cy) * depths_m / fy
+                z_3d = depths_m
+                
+                # Manual pitch since TF might be complex in debugger
+                alpha_rad = -p.pitch_deg * np.pi / 180.0
+                cos_a, sin_a = np.cos(alpha_rad), np.sin(alpha_rad)
+                
+                x_t = x_3d
+                y_t = y_3d * cos_a - z_3d * sin_a
+                z_t = y_3d * sin_a + z_3d * cos_a
+                
+                thetas = np.arctan2(-x_t, z_t)
+                planar = np.sqrt(x_t**2 + z_t**2)
+                
+                # Filter by range
+                valid_r = (planar >= p.min_range) & (planar <= p.max_range)
+                thetas = thetas[valid_r]
+                planar = planar[valid_r]
+                
+                bin_idx = ((thetas - scan.angle_min) / scan.angle_increment).astype(np.int32)
+                in_bounds = (bin_idx >= 0) & (bin_idx < p.raw_width)
+                bin_idx = bin_idx[in_bounds]
+                planar = planar[in_bounds]
+                
+                if len(planar) > 0:
+                    np.minimum.at(ranges, bin_idx, planar)
+                    
+        scan.ranges = [float(r) for r in ranges]
+        self.ros_node.publish_scan(scan)
+
+    def display_main_depth(self, img):
+        target_w = int(img.shape[1] * self.zoom)
+        target_h = int(img.shape[0] * self.zoom)
+        resized = cv2.resize(img, (target_w, target_h))
+        self.lbl_depth_viewer.setPixmap(self.numpy_to_pixmap(resized))
         self.lbl_depth_viewer.setFixedSize(target_w, target_h)
 
     def display_bottom_images(self, diff, mask, overlay):
-        """
-        Renders the three smaller status monitors at the bottom of the GUI.
-        """
-        # We scale bottom views to a fixed width of 360px to maintain clean alignment
-        target_w = 360
-        ratio = target_w / max(1, self.raw_width)
-        target_h = int(self.raw_height * ratio)
-
-        # Convert difference (single channel) to display
-        if len(diff.shape) == 2:
-            resized_diff = cv2.resize(diff, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
-            diff_color = cv2.applyColorMap(resized_diff, cv2.COLORMAP_BONE)
-            pix_diff = self.numpy_to_pixmap(diff_color)
-        else:
-            pix_diff = QPixmap()
-
-        # Convert mask (binary single channel) to display
-        resized_mask = cv2.resize(mask, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
-        mask_rgb = cv2.cvtColor(resized_mask, cv2.COLOR_GRAY2BGR)
-        pix_mask = self.numpy_to_pixmap(mask_rgb)
-
-        # Convert final overlay to display
-        resized_overlay = cv2.resize(overlay, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
-        pix_overlay = self.numpy_to_pixmap(resized_overlay)
-
-        # Update QLabels
-        self.lbl_diff_viewer.setPixmap(pix_diff)
-        self.lbl_diff_viewer.setFixedSize(target_w, target_h)
-
-        self.lbl_mask_viewer.setPixmap(pix_mask)
-        self.lbl_mask_viewer.setFixedSize(target_w, target_h)
-
-        self.lbl_overlay_viewer.setPixmap(pix_overlay)
-        self.lbl_overlay_viewer.setFixedSize(target_w, target_h)
+        tw = 320
+        th = int(overlay.shape[0] * (tw / max(1, overlay.shape[1])))
+        
+        diff_col = cv2.applyColorMap(cv2.resize(diff, (tw, th)), cv2.COLORMAP_BONE)
+        mask_rgb = cv2.cvtColor(cv2.resize(mask, (tw, th)), cv2.COLOR_GRAY2BGR)
+        over_res = cv2.resize(overlay, (tw, th))
+        
+        self.lbl_diff_viewer.setPixmap(self.numpy_to_pixmap(diff_col))
+        self.lbl_mask_viewer.setPixmap(self.numpy_to_pixmap(mask_rgb))
+        self.lbl_overlay_viewer.setPixmap(self.numpy_to_pixmap(over_res))
+        
+        for lbl in (self.lbl_diff_viewer, self.lbl_mask_viewer, self.lbl_overlay_viewer):
+            lbl.setFixedSize(tw, th)
 
     def numpy_to_pixmap(self, arr):
-        """
-        Safe conversion utility from OpenCV numpy array to QPixmap.
-        """
-        if arr is None or arr.size == 0:
-            return QPixmap()
-            
-        if len(arr.shape) == 3: # BGR Color format
+        if arr is None or arr.size == 0: return QPixmap()
+        if len(arr.shape) == 3:
             h, w, c = arr.shape
             rgb = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-            qimg = QImage(rgb.data, w, h, w * c, QImage.Format_RGB888)
-            return QPixmap.fromImage(qimg).copy()
-        else: # Grayscale format
+            return QPixmap.fromImage(QImage(rgb.data, w, h, w * c, QImage.Format_RGB888)).copy()
+        else:
             h, w = arr.shape
-            qimg = QImage(arr.data, w, h, w, QImage.Format_Grayscale8)
-            return QPixmap.fromImage(qimg).copy()
+            return QPixmap.fromImage(QImage(arr.data, w, h, w, QImage.Format_Grayscale8)).copy()
 
     def closeEvent(self, event):
-        """
-        Ensures clean shutdown of ROS 2 resources when the GUI window is closed.
-        """
-        self.ros_node.get_logger().info("Shutting down Debugger GUI...")
         super().closeEvent(event)
 
-
 def main(args=None):
-    # Initialize rclpy
     rclpy.init(args=args)
-
-    # Signal emitter for thread-safe cross-talk
-    signal_emitter = ImageSignalEmitter()
-
-    # Create the ROS 2 subscriber node
-    ros_node = DepthSubscriberNode(signal_emitter)
-
-    # Spin ROS 2 executor in a separate background thread
-    ros_thread = threading.Thread(target=rclpy.spin, args=(ros_node,), daemon=True)
-    ros_thread.start()
-
-    # Start the standard PyQt5 App event loop
+    emitter = ImageSignalEmitter()
+    node = DepthSubscriberNode(emitter)
+    t = threading.Thread(target=rclpy.spin, args=(node,), daemon=True)
+    t.start()
+    
     app = QApplication(sys.argv)
-    gui = DebuggerGUI(ros_node)
-    
-    # Connect the signal emitter to the GUI slot
-    signal_emitter.image_received.connect(gui.handle_new_frame)
-    
-    # Show GUI
+    gui = DebuggerGUI(node)
+    emitter.image_received.connect(gui.handle_new_frame)
     gui.show()
-
-    # Block on GUI thread exit
     sys.exit(app.exec_())
-
-    # Shutdown ROS
-    ros_node.destroy_node()
-    rclpy.shutdown()
-
 
 if __name__ == '__main__':
     main()

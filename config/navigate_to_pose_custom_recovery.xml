@@ -1,34 +1,144 @@
-<!--
-  This Behavior Tree replans the global path periodically at 1 Hz and it also has
-  recovery actions specific to planning / control as well as general system issues.
-  This will be continuous if a kinematically valid planner is selected.
-  Customized to REMOVE Spin and BackUp.
--->
 <root main_tree_to_execute="MainTree">
+
   <BehaviorTree ID="MainTree">
-    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+
+    <RecoveryNode
+        number_of_retries="6"
+        name="NavigateRecovery">
+
+      <!-- ================================================= -->
+      <!-- NORMAL NAVIGATION                                 -->
+      <!-- ================================================= -->
+
       <PipelineSequence name="NavigateWithReplanning">
+
         <RateController hz="1.0">
-          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
-            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
-            <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+
+          <RecoveryNode
+              number_of_retries="1"
+              name="ComputePathToPose">
+
+            <ComputePathToPose
+                goal="{goal}"
+                path="{path}"
+                planner_id="GridBased"/>
+
+            <ClearEntireCostmap
+                name="ClearGlobalCostmap-Context"
+                service_name="global_costmap/clear_entirely_global_costmap"/>
+
           </RecoveryNode>
+
         </RateController>
-        <RecoveryNode number_of_retries="1" name="FollowPath">
-          <FollowPath path="{path}" controller_id="FollowPath"/>
-          <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap"/>
+
+
+        <RecoveryNode
+            number_of_retries="1"
+            name="FollowPath">
+
+          <FollowPath
+              path="{path}"
+              controller_id="FollowPath"/>
+
+          <ClearEntireCostmap
+              name="ClearLocalCostmap-Context"
+              service_name="local_costmap/clear_entirely_local_costmap"/>
+
         </RecoveryNode>
+
       </PipelineSequence>
+
+
+      <!-- ================================================= -->
+      <!-- RECOVERY MANAGER                                  -->
+      <!-- ================================================= -->
+
       <ReactiveFallback name="RecoveryFallback">
+
+        <!-- New goal immediately cancels recovery -->
         <GoalUpdated/>
-        <RoundRobin name="RecoveryActions">
-          <Sequence name="ClearingActions">
-            <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap"/>
-            <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap"/>
+
+
+        <Fallback name="RecoverySelector">
+
+
+          <!-- ============================================= -->
+          <!-- CONTROLLER / STUCK RECOVERY                   -->
+          <!-- ============================================= -->
+
+          <Sequence name="ControllerStuckRecovery">
+
+            <WouldAControllerRecoveryHelp
+                error_code="{follow_path_error_code}"/>
+
+
+            <!-- Social recovery -->
+            <Speak
+                message="Xin vui lòng nhường đường cho robot."/>
+
+
+            <Wait wait_duration="3.0"/>
+
+
+            <!-- Check rear camera before reversing -->
+            <CheckRearSafety
+                topic="/rear_scan"
+                min_distance="0.40"
+                timeout="0.50"/>
+
+
+            <Speak
+                message="Robot sẽ lùi lại một chút."/>
+
+
+            <Beep duration="1.0"/>
+
+
+            <BackUp
+                backup_dist="0.15"
+                backup_speed="0.10"
+                time_allowance="5.0"/>
+
+
+            <ClearEntireCostmap
+                name="ClearLocalAfterBackUp"
+                service_name="local_costmap/clear_entirely_local_costmap"/>
+
           </Sequence>
-          <Wait wait_duration="5"/>
-        </RoundRobin>
+
+
+          <!-- ============================================= -->
+          <!-- PLANNER RECOVERY                              -->
+          <!-- ============================================= -->
+
+          <Sequence name="PlannerRecovery">
+
+            <WouldAPlannerRecoveryHelp
+                error_code="{compute_path_error_code}"/>
+
+
+            <ClearEntireCostmap
+                name="ClearGlobalPlannerRecovery"
+                service_name="global_costmap/clear_entirely_global_costmap"/>
+
+
+            <Wait wait_duration="2.0"/>
+
+          </Sequence>
+
+
+          <!-- ============================================= -->
+          <!-- FALLBACK SAFE WAIT                            -->
+          <!-- ============================================= -->
+
+          <Wait wait_duration="2.0"/>
+
+        </Fallback>
+
       </ReactiveFallback>
+
     </RecoveryNode>
+
   </BehaviorTree>
+
 </root>
