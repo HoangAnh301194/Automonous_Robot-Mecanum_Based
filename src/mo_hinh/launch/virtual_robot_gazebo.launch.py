@@ -1,5 +1,5 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -23,7 +23,7 @@ def generate_launch_description():
     ros_gz_sim_share = get_package_share_directory('ros_gz_sim')
 
     urdf_file = resolve_path('urdf', 'xe.urdf')
-    default_world = resolve_path('worlds', 'virtual_lab.world')
+    default_world = resolve_path('worlds', 'map_a2.world')
 
     with open(urdf_file, 'r', encoding='utf-8') as urdf:
         robot_description = urdf.read()
@@ -114,10 +114,12 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        SetEnvironmentVariable(name='GZ_SIM_RESOURCE_PATH', value='/home/duc/robot_ws/my_map'),
+        SetEnvironmentVariable(name='IGN_GAZEBO_RESOURCE_PATH', value='/home/duc/robot_ws/my_map'),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('world', default_value=default_world),
-        DeclareLaunchArgument('x_pose', default_value='0.0'),
-        DeclareLaunchArgument('y_pose', default_value='0.0'),
+        DeclareLaunchArgument('x_pose', default_value='-2.0'),
+        DeclareLaunchArgument('y_pose', default_value='-2.0'),
         DeclareLaunchArgument('z_pose', default_value='0.10'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
 
