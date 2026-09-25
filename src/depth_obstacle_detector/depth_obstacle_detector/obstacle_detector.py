@@ -47,6 +47,7 @@ class ObstacleDetectorNode(Node):
                 config_full = yaml.safe_load(f)
                 
             # Determine if it's front or rear config
+            # Handle both nested and flat YAML formats for compatibility with debugger_gui
             if 'front_camera' in config_full:
                 self.config = config_full['front_camera']
                 self.cam_name = "Front"
@@ -54,8 +55,12 @@ class ObstacleDetectorNode(Node):
                 self.config = config_full['rear_camera']
                 self.cam_name = "Rear"
             else:
-                self.get_logger().error("YAML does not contain 'front_camera' or 'rear_camera' root key!")
-                sys.exit(1)
+                self.config = config_full
+                target = self.config.get('target_frame', '')
+                if 'rear' in target.lower():
+                    self.cam_name = "Rear"
+                else:
+                    self.cam_name = "Front"
                 
             self.enabled = self.config.get('enabled', True)
             if not self.enabled:
@@ -74,10 +79,10 @@ class ObstacleDetectorNode(Node):
             self.max_range = self.config.get('max_range', 2.5)
             
             # ROI
-            self.roi_x = int(self.config.get('roi_left', 0))
-            self.roi_y = int(self.config.get('roi_top', 0))
-            self.roi_w = int(self.config.get('roi_right', 320)) - self.roi_x
-            self.roi_h = int(self.config.get('roi_bottom', 240)) - self.roi_y
+            self.roi_x = int(self.config.get('roi_x', 0))
+            self.roi_y = int(self.config.get('roi_y', 0))
+            self.roi_w = int(self.config.get('roi_width', 640))
+            self.roi_h = int(self.config.get('roi_height', 480))
             
             # Algorithms
             self.thresh_val = int(self.config.get('threshold', 80))
@@ -208,7 +213,7 @@ class ObstacleDetectorNode(Node):
         refined_mask = np.zeros_like(obstacle_mask)
         for cnt in contours:
             if cv2.contourArea(cnt) >= self.min_area:
-                cv2.drawContours(refined_mask, [cnt], -1, 255, -1)
+                cv2.drawContours(refined_mask, [cnt], -1, 255, 1)
 
         # Convert to PointCloud/Scan
         y_idx, x_idx = np.where(refined_mask == 255)
