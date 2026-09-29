@@ -1,4 +1,6 @@
-#!/usr/bin/env python3
+import sys
+
+code = """#!/usr/bin/env python3
 
 import os
 import sys
@@ -18,11 +20,11 @@ import sensor_msgs_py.point_cloud2 as pc2
 
 
 class ObstacleDetectorNode(Node):
-    """
+    \"\"\"
     Lightweight, headless ROS 2 Node that loads a YAML configuration file 
     (from the Dual-Camera Debugger GUI) and performs real-time depth obstacle 
     detection, publishing the result as a LaserScan.
-    """
+    \"\"\"
     def __init__(self):
         super().__init__('depth_obstacle_detector_node')
         
@@ -136,11 +138,6 @@ class ObstacleDetectorNode(Node):
 
     def process_frame(self, cv_image, stamp):
         if self.ground_frame is None or self.ground_frame.shape != cv_image.shape:
-            self.get_logger().error(f"Ground frame mismatch or missing! Ground: {self.ground_frame.shape if self.ground_frame is not None else None}, Image: {cv_image.shape}", throttle_duration_sec=2.0)
-            return
-            
-        if self.ground_frame.dtype != cv_image.dtype:
-            self.get_logger().error(f"Ground frame dtype mismatch! Ground: {self.ground_frame.dtype}, Image: {cv_image.dtype}. Please capture a new ground frame.", throttle_duration_sec=2.0)
             return
             
         h, w = cv_image.shape
@@ -149,10 +146,6 @@ class ObstacleDetectorNode(Node):
             fx, fy = self.camera_info.k[0], self.camera_info.k[4]
             cx, cy = self.camera_info.k[2], self.camera_info.k[5]
             frame_id = self.camera_info.header.frame_id
-            if frame_id == 'rear_camera_link':
-                frame_id = 'rear_camera_depth_optical_frame'
-            elif frame_id == 'camera_link' or frame_id == 'front_camera_link':
-                frame_id = 'camera_depth_optical_frame'
         else:
             self.get_logger().warn("No CameraInfo received yet!", throttle_duration_sec=2.0)
             if self.cam_name == "Rear":
@@ -253,10 +246,7 @@ class ObstacleDetectorNode(Node):
         refined_mask = np.zeros_like(obstacle_mask)
         for cnt in contours:
             if cv2.contourArea(cnt) >= self.min_area:
-                cv2.drawContours(refined_mask, [cnt], -1, 255, -1)
-
-        # Đảm bảo các pixel được tô kín thực sự là vật cản
-        refined_mask = cv2.bitwise_and(refined_mask, obstacle_mask)
+                cv2.drawContours(refined_mask, [cnt], -1, 255, 1)
 
         y_idx, x_idx = np.where(refined_mask == 255)
         
@@ -282,13 +272,6 @@ class ObstacleDetectorNode(Node):
                     pts_target = pts_optical @ R.T + translation
                     x_t, y_t, z_t = pts_target[:, 0], pts_target[:, 1], pts_target[:, 2]
                     
-                    if len(z_t) > 0:
-                        stats["z_min"] = float(np.min(z_t))
-                        stats["z_max"] = float(np.max(z_t))
-                        
-                        if stats["z_min"] < -0.10:
-                            self.get_logger().warn(f"[{self.cam_name}] Cảnh báo: Tồn tại điểm Z = {stats['z_min']:.2f}m. Có thể thuật toán đang nhận nhầm mặt sàn!", throttle_duration_sec=2.0)
-
                     if is_rear:
                         thetas = np.arctan2(y_t, x_t)
                         planar_ranges = np.sqrt(x_t**2 + y_t**2)
@@ -333,11 +316,11 @@ class ObstacleDetectorNode(Node):
                     
         stats["finite_bins"] = np.sum(np.isfinite(ranges))
         
-        z_info = f" | Z_min: {stats.get('z_min', 0.0):.2f}m | Z_max: {stats.get('z_max', 0.0):.2f}m" if 'z_min' in stats else ""
-        self.get_logger().info(
-            f"[{self.cam_name}] Pixels: {stats['pixels']} | 3D: {stats['valid_3d']} | InBounds: {stats['in_bounds']} | Bins: {stats['finite_bins']}{z_info}",
-            throttle_duration_sec=2.0
-        )
+        if is_rear:
+            self.get_logger().info(
+                f"[Rear] Pixels: {stats['pixels']} | 3D: {stats['valid_3d']} | InBounds: {stats['in_bounds']} | Bins: {stats['finite_bins']}",
+                throttle_duration_sec=2.0
+            )
 
         scan_msg.ranges = [float(val) for val in ranges]
         self.laser_pub.publish(scan_msg)
@@ -356,3 +339,7 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
+"""
+
+with open('/home/duc/robot_ws/src/depth_obstacle_detector/depth_obstacle_detector/obstacle_detector.py', 'w') as f:
+    f.write(code)

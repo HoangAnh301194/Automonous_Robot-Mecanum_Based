@@ -1,0 +1,18 @@
+rear_camera:
+  enabled: true
+  depth_topic: /rear_camera/depth/image_raw
+  camera_info_topic: /rear_camera/depth/camera_info
+  output_scan_topic: /rear_scan_obstacle
+  target_frame: rear_scan_frame
+  pitch_deg: 40.0
+  min_range: 0.2
+  max_range: 2.5
+  roi_x: 0
+  roi_y: 0
+  roi_width: 640
+  roi_height: 480
+  threshold: 0
+  min_area: 0
+  median_filter: 1
+  morphology_size: 0
+  ground_file_path: None

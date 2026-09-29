@@ -1,0 +1,45 @@
+cmake_minimum_required(VERSION 3.8)
+project(nav2_custom_plugins)
+
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_behavior_tree REQUIRED)
+find_package(behaviortree_cpp_v3 REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(diagnostic_msgs REQUIRED)
+
+add_library(nav2_operator_alert_plugin SHARED src/operator_alert.cpp)
+target_include_directories(nav2_operator_alert_plugin PRIVATE include)
+ament_target_dependencies(nav2_operator_alert_plugin
+  rclcpp nav2_core nav2_behavior_tree behaviortree_cpp_v3 diagnostic_msgs
+)
+target_compile_definitions(nav2_operator_alert_plugin PRIVATE BT_PLUGIN_EXPORT)
+
+add_library(nav2_speak_plugin SHARED src/speak.cpp)
+target_include_directories(nav2_speak_plugin PRIVATE include)
+ament_target_dependencies(nav2_speak_plugin
+  rclcpp nav2_core nav2_behavior_tree behaviortree_cpp_v3 std_msgs
+)
+target_compile_definitions(nav2_speak_plugin PRIVATE BT_PLUGIN_EXPORT)
+
+add_library(nav2_check_rear_safety_plugin SHARED src/check_rear_safety.cpp)
+target_include_directories(nav2_check_rear_safety_plugin PRIVATE include)
+ament_target_dependencies(nav2_check_rear_safety_plugin
+  rclcpp nav2_core nav2_behavior_tree behaviortree_cpp_v3 sensor_msgs
+)
+target_compile_definitions(nav2_check_rear_safety_plugin PRIVATE BT_PLUGIN_EXPORT)
+
+install(TARGETS
+  nav2_operator_alert_plugin
+  nav2_speak_plugin
+  nav2_check_rear_safety_plugin
+  DESTINATION lib
+)
+
+ament_package()

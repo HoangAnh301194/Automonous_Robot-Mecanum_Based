@@ -71,10 +71,13 @@ bt_navigator:
       plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
 
     # TẠM THỜI COMMENT FILE CUSTOM ĐỂ ROBOT CÓ THỂ CHẠY (DO CHƯA VIẾT C++ PLUGIN)
-    # default_nav_to_pose_bt_xml: "/home/duc/robot_ws/config/navigate_to_pose_custom_recovery.xml"
+    default_nav_to_pose_bt_xml: "/home/duc/robot_ws/config/navigate_to_pose_custom_recovery.xml"
     # default_nav_through_poses_bt_xml: "/home/duc/robot_ws/config/navigate_through_poses_custom_recovery.xml"
 
     plugin_lib_names:
+      - nav2_operator_alert_plugin
+      - nav2_speak_plugin
+      - nav2_check_rear_safety_plugin
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node

@@ -272,6 +272,16 @@
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
   </joint>
 
+  <!-- Rear Scan Frame (Horizontal projection for rear camera) -->
+  <link name="rear_scan_frame"/>
+
+  <joint name="rear_scan_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="rear_scan_frame"/>
+    <origin xyz="-0.28 0.14 0.0" rpy="0 0 3.14159265"/>
+  </joint>
+
+
   <!-- ========================= -->
   <!-- Drive Wheels (Diff Drive) -->
   <!-- ========================= -->
