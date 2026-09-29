@@ -10,12 +10,21 @@
 namespace nav2_custom_plugins
 {
 
+enum class SafetyState {
+  UNKNOWN,
+  SAFE,
+  OBSTACLE_TOO_CLOSE,
+  SCAN_STALE,
+  NO_VALID_SCAN
+};
+
 class CheckRearSafety : public BT::ConditionNode
 {
 public:
   CheckRearSafety(const std::string & xml_tag_name, const BT::NodeConfiguration & conf)
   : BT::ConditionNode(xml_tag_name, conf),
-    node_(nullptr)
+    node_(nullptr),
+    last_state_(SafetyState::UNKNOWN)
   {
     node_ = config().blackboard->get<rclcpp::Node::SharedPtr>("node");
     if (!node_) {
@@ -26,7 +35,7 @@ public:
     getInput("topic", topic);
 
     sub_ = node_->create_subscription<sensor_msgs::msg::LaserScan>(
-      topic, 10,
+      topic, rclcpp::QoS(1).best_effort(),
       std::bind(&CheckRearSafety::scanCallback, this, std::placeholders::_1));
   }
 
@@ -59,57 +68,79 @@ public:
       current_scan = last_scan_;
     }
 
+    SafetyState current_state = SafetyState::UNKNOWN;
+    double current_min_found = std::numeric_limits<double>::infinity();
+    double age = 0.0;
+
     if (!current_scan) {
-      RCLCPP_WARN(node_->get_logger(), "CheckRearSafety: No scan received yet.");
-      return BT::NodeStatus::FAILURE;
+      current_state = SafetyState::NO_VALID_SCAN;
+    } else {
+      rclcpp::Time now = node_->now();
+      rclcpp::Time scan_time(current_scan->header.stamp);
+      age = (now - scan_time).seconds();
+
+      if (age > timeout) {
+        current_state = SafetyState::SCAN_STALE;
+      } else {
+        bool has_valid_points = false;
+        double robot_width_half = 0.35; // 0.7m total width consideration
+        
+        for (size_t i = 0; i < current_scan->ranges.size(); ++i) {
+          double r = current_scan->ranges[i];
+          
+          if (std::isnan(r) || r < current_scan->range_min) {
+            continue;
+          }
+          has_valid_points = true;
+          
+          if (std::isinf(r) || r > current_scan->range_max) {
+            continue;
+          }
+          
+          double theta = current_scan->angle_min + i * current_scan->angle_increment;
+          double x = r * std::cos(theta);
+          double y = r * std::sin(theta);
+
+          if (x > 0.0 && std::abs(y) <= robot_width_half) {
+            if (x < current_min_found) {
+                current_min_found = x;
+            }
+          }
+        }
+
+        if (!has_valid_points) {
+          current_state = SafetyState::NO_VALID_SCAN;
+        } else if (current_min_found <= min_distance) {
+          current_state = SafetyState::OBSTACLE_TOO_CLOSE;
+        } else {
+          current_state = SafetyState::SAFE;
+        }
+      }
     }
 
-    rclcpp::Time now = node_->now();
-    rclcpp::Time scan_time(current_scan->header.stamp);
-    double age = (now - scan_time).seconds();
-
-    if (age > timeout) {
-      RCLCPP_WARN(node_->get_logger(), "CheckRearSafety: Scan data too old (%.2f s).", age);
-      return BT::NodeStatus::FAILURE;
-    }
-
-    bool has_valid_points = false;
-    double robot_width_half = 0.35; // 0.7m total width consideration
-
-    for (size_t i = 0; i < current_scan->ranges.size(); ++i) {
-      double r = current_scan->ranges[i];
-      
-      // If NaN or < min_range, it's invalid
-      if (std::isnan(r) || r < current_scan->range_min) {
-        continue;
+    if (current_state != last_state_) {
+      std::string state_str;
+      switch(current_state) {
+        case SafetyState::SAFE: state_str = "SAFE"; break;
+        case SafetyState::OBSTACLE_TOO_CLOSE: state_str = "OBSTACLE_TOO_CLOSE"; break;
+        case SafetyState::SCAN_STALE: state_str = "SCAN_STALE"; break;
+        case SafetyState::NO_VALID_SCAN: state_str = "NO_VALID_SCAN"; break;
+        default: state_str = "UNKNOWN"; break;
       }
       
-      has_valid_points = true;
-      
-      // If inf or > max_range, it means free space, so it's safe and valid, no collision check needed for this ray
-      if (std::isinf(r) || r > current_scan->range_max) {
-        continue;
-      }
-      
-      double theta = current_scan->angle_min + i * current_scan->angle_increment;
-      double x = r * std::cos(theta);
-      double y = r * std::sin(theta);
-
-      // Check if the point is within the bounding box behind the robot
-      // Since rear_scan_frame X is backward, x > 0 means behind.
-      if (x > 0.0 && x <= min_distance && std::abs(y) <= robot_width_half) {
-        RCLCPP_WARN(node_->get_logger(), "CheckRearSafety: Obstacle detected at X: %.2f, Y: %.2f", x, y);
-        return BT::NodeStatus::FAILURE;
-      }
+      RCLCPP_INFO(node_->get_logger(), 
+        "[CheckRearSafety] State Changed: %s | Age: %.3fs | MinDist: %.2fm | Timeout: %.2fs", 
+        state_str.c_str(), age, 
+        (std::isinf(current_min_found) ? 99.99 : current_min_found), 
+        timeout);
+        
+      last_state_ = current_state;
     }
 
-    if (!has_valid_points) {
-      // If ALL points were NaN or < range_min, it's an error state
-      RCLCPP_WARN(node_->get_logger(), "CheckRearSafety: No valid points in scan, cannot confirm safety.");
-      return BT::NodeStatus::FAILURE;
+    if (current_state == SafetyState::SAFE) {
+      return BT::NodeStatus::SUCCESS;
     }
-
-    return BT::NodeStatus::SUCCESS;
+    return BT::NodeStatus::FAILURE;
   }
 
 private:
@@ -117,6 +148,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr sub_;
   sensor_msgs::msg::LaserScan::SharedPtr last_scan_;
   std::mutex mutex_;
+  SafetyState last_state_;
 };
 
 }  // namespace nav2_custom_plugins

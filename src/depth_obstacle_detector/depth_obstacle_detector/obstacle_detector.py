@@ -1,13 +1,13 @@
-#!/usr/bin/env python3
-
 import os
 import sys
 import yaml
 import numpy as np
 import cv2
+import time
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import Image, CameraInfo, LaserScan, PointCloud2, PointField
 from std_msgs.msg import Header
 from cv_bridge import CvBridge
@@ -18,11 +18,6 @@ import sensor_msgs_py.point_cloud2 as pc2
 
 
 class ObstacleDetectorNode(Node):
-    """
-    Lightweight, headless ROS 2 Node that loads a YAML configuration file 
-    (from the Dual-Camera Debugger GUI) and performs real-time depth obstacle 
-    detection, publishing the result as a LaserScan.
-    """
     def __init__(self):
         super().__init__('depth_obstacle_detector_node')
         
@@ -43,11 +38,12 @@ class ObstacleDetectorNode(Node):
         self.bridge = CvBridge()
         
         self.camera_info = None
+        self.cached_tf = None
         
         self.load_configuration(config_path)
 
         if self.cam_name == "Rear" and self.debug_enabled:
-            self.pc_pub = self.create_publisher(PointCloud2, '/rear_obstacle_points', 10)
+            self.pc_pub = self.create_publisher(PointCloud2, '/rear_obstacle_points', 1)
 
     def load_configuration(self, config_path):
         try:
@@ -79,7 +75,6 @@ class ObstacleDetectorNode(Node):
             
             self.target_frame = self.config.get('target_frame', 'base_link')
             
-            # GIAI ĐOẠN 1: Bắt buộc dùng rear_scan_frame cho camera sau
             if self.cam_name == "Rear":
                 self.target_frame = "rear_scan_frame"
                 
@@ -113,9 +108,15 @@ class ObstacleDetectorNode(Node):
             self.get_logger().info(f"[{self.cam_name}] Topics -> Depth: {self.depth_topic}, Scan: {self.output_topic}")
             self.get_logger().info(f"[{self.cam_name}] Target Frame: {self.target_frame}, Pitch: {self.pitch_deg} deg")
 
-            self.info_sub = self.create_subscription(CameraInfo, self.info_topic, self.info_callback, 10)
-            self.subscription = self.create_subscription(Image, self.depth_topic, self.listener_callback, 10)
-            self.laser_pub = self.create_publisher(LaserScan, self.output_topic, 10)
+            qos_profile = QoSProfile(
+                reliability=QoSReliabilityPolicy.BEST_EFFORT,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                depth=1
+            )
+
+            self.info_sub = self.create_subscription(CameraInfo, self.info_topic, self.info_callback, qos_profile)
+            self.subscription = self.create_subscription(Image, self.depth_topic, self.listener_callback, qos_profile)
+            self.laser_pub = self.create_publisher(LaserScan, self.output_topic, 1)
 
         except Exception as e:
             self.get_logger().error(f"Failed to load configuration: {str(e)}")
@@ -125,22 +126,18 @@ class ObstacleDetectorNode(Node):
         self.camera_info = msg
 
     def listener_callback(self, msg):
+        t0 = time.perf_counter()
         try:
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
             if cv_image.dtype == np.float32 or cv_image.dtype == np.float64:
                 cv_image = np.nan_to_num(cv_image, posinf=0.0, neginf=0.0)
                 cv_image = (cv_image * 1000.0).astype(np.uint16)
-            self.process_frame(cv_image, msg.header.stamp)
+            self.process_frame(cv_image, msg.header.stamp, t0)
         except Exception as e:
             self.get_logger().error(f"Failed to process image: {str(e)}")
 
-    def process_frame(self, cv_image, stamp):
+    def process_frame(self, cv_image, stamp, t0):
         if self.ground_frame is None or self.ground_frame.shape != cv_image.shape:
-            self.get_logger().error(f"Ground frame mismatch or missing! Ground: {self.ground_frame.shape if self.ground_frame is not None else None}, Image: {cv_image.shape}", throttle_duration_sec=2.0)
-            return
-            
-        if self.ground_frame.dtype != cv_image.dtype:
-            self.get_logger().error(f"Ground frame dtype mismatch! Ground: {self.ground_frame.dtype}, Image: {cv_image.dtype}. Please capture a new ground frame.", throttle_duration_sec=2.0)
             return
             
         h, w = cv_image.shape
@@ -154,15 +151,13 @@ class ObstacleDetectorNode(Node):
             elif frame_id == 'camera_link' or frame_id == 'front_camera_link':
                 frame_id = 'camera_depth_optical_frame'
         else:
-            self.get_logger().warn("No CameraInfo received yet!", throttle_duration_sec=2.0)
             if self.cam_name == "Rear":
-                return  # Strict check for Rear pipeline
+                return
             fx = fy = 570.0
             cx, cy = w / 2.0, h / 2.0
             frame_id = 'camera_depth_optical_frame'
 
         fov = 2.0 * np.arctan(w / (2.0 * fx))
-        
         is_rear = (self.cam_name == "Rear")
         
         scan_msg = LaserScan()
@@ -171,42 +166,18 @@ class ObstacleDetectorNode(Node):
         scan_msg.range_max = float(self.max_range)
 
         if is_rear:
-            actual_frame_id = self.target_frame # rear_scan_frame
+            actual_frame_id = self.target_frame
             use_tf = True
             scan_msg.header.frame_id = actual_frame_id
             scan_msg.angle_min = -np.pi / 2.0
             scan_msg.angle_max = np.pi / 2.0
-            num_bins = 360 # 0.5 độ
+            num_bins = 360
             scan_msg.angle_increment = np.pi / num_bins
             ranges = np.full(num_bins, np.inf, dtype=np.float32)
             
-            try:
-                # GIAI ĐOẠN 2: Tra cứu TF, không dùng math thủ công
-                trans = self.tf_buffer.lookup_transform(actual_frame_id, frame_id, rclpy.time.Time())
-                translation = np.array([
-                    trans.transform.translation.x,
-                    trans.transform.translation.y,
-                    trans.transform.translation.z
-                ])
-                qx, qy = trans.transform.rotation.x, trans.transform.rotation.y
-                qz, qw = trans.transform.rotation.z, trans.transform.rotation.w
-                R = np.array([
-                    [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
-                    [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
-                    [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]
-                ])
-                self.get_logger().info(f"TF success: {frame_id} -> {actual_frame_id}", throttle_duration_sec=5.0)
-            except Exception as e:
-                self.get_logger().warn(f"TF failed from {frame_id} to {actual_frame_id}: {str(e)}", throttle_duration_sec=2.0)
-                return
-        else:
-            use_tf = (self.target_frame != frame_id)
-            translation = np.array([0.0, 0.0, 0.0])
-            R = np.eye(3)
-            actual_frame_id = frame_id
-            if use_tf:
+            if self.cached_tf is None:
                 try:
-                    trans = self.tf_buffer.lookup_transform(self.target_frame, frame_id, rclpy.time.Time())
+                    trans = self.tf_buffer.lookup_transform(actual_frame_id, frame_id, rclpy.time.Time())
                     translation = np.array([
                         trans.transform.translation.x,
                         trans.transform.translation.y,
@@ -219,11 +190,44 @@ class ObstacleDetectorNode(Node):
                         [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
                         [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]
                     ])
-                    actual_frame_id = self.target_frame
-                except Exception:
-                    use_tf = False
-                    if self.pitch_deg != 0:
-                        actual_frame_id = self.target_frame
+                    self.cached_tf = (translation, R)
+                except Exception as e:
+                    self.get_logger().warn(f"TF failed: {str(e)}", throttle_duration_sec=2.0)
+                    return
+            translation, R = self.cached_tf
+        else:
+            use_tf = (self.target_frame != frame_id)
+            translation = np.array([0.0, 0.0, 0.0])
+            R = np.eye(3)
+            actual_frame_id = frame_id
+            
+            if use_tf:
+                if self.cached_tf is None:
+                    try:
+                        trans = self.tf_buffer.lookup_transform(self.target_frame, frame_id, rclpy.time.Time())
+                        translation = np.array([
+                            trans.transform.translation.x,
+                            trans.transform.translation.y,
+                            trans.transform.translation.z
+                        ])
+                        qx, qy = trans.transform.rotation.x, trans.transform.rotation.y
+                        qz, qw = trans.transform.rotation.z, trans.transform.rotation.w
+                        R = np.array([
+                            [1 - 2*qy**2 - 2*qz**2, 2*qx*qy - 2*qz*qw, 2*qx*qz + 2*qy*qw],
+                            [2*qx*qy + 2*qz*qw, 1 - 2*qx**2 - 2*qz**2, 2*qy*qz - 2*qx*qw],
+                            [2*qx*qz - 2*qy*qw, 2*qy*qz + 2*qx*qw, 1 - 2*qx**2 - 2*qy**2]
+                        ])
+                        self.cached_tf = (translation, R)
+                    except Exception:
+                        use_tf = False
+                else:
+                    translation, R = self.cached_tf
+
+            if use_tf:
+                actual_frame_id = self.target_frame
+            elif self.pitch_deg != 0:
+                actual_frame_id = self.target_frame
+                
             scan_msg.header.frame_id = actual_frame_id
             scan_msg.angle_min = -fov / 2.0
             scan_msg.angle_max = fov / 2.0
@@ -255,12 +259,9 @@ class ObstacleDetectorNode(Node):
             if cv2.contourArea(cnt) >= self.min_area:
                 cv2.drawContours(refined_mask, [cnt], -1, 255, -1)
 
-        # Đảm bảo các pixel được tô kín thực sự là vật cản
         refined_mask = cv2.bitwise_and(refined_mask, obstacle_mask)
 
         y_idx, x_idx = np.where(refined_mask == 255)
-        
-        stats = {"pixels": len(y_idx), "valid_3d": 0, "in_bounds": 0, "finite_bins": 0}
         
         if len(y_idx) > 0:
             u_coords = rx + x_idx
@@ -271,8 +272,6 @@ class ObstacleDetectorNode(Node):
             u_coords, v_coords, depths_m = u_coords[valid], v_coords[valid], depths_m[valid]
             
             if len(depths_m) > 0:
-                stats["valid_3d"] = len(depths_m)
-                
                 x_3d = (u_coords - cx) * depths_m / fx
                 y_3d = (v_coords - cy) * depths_m / fy
                 z_3d = depths_m
@@ -282,21 +281,9 @@ class ObstacleDetectorNode(Node):
                     pts_target = pts_optical @ R.T + translation
                     x_t, y_t, z_t = pts_target[:, 0], pts_target[:, 1], pts_target[:, 2]
                     
-                    if len(z_t) > 0:
-                        stats["z_min"] = float(np.min(z_t))
-                        stats["z_max"] = float(np.max(z_t))
-                        
-                        if stats["z_min"] < -0.10:
-                            self.get_logger().warn(f"[{self.cam_name}] Cảnh báo: Tồn tại điểm Z = {stats['z_min']:.2f}m. Có thể thuật toán đang nhận nhầm mặt sàn!", throttle_duration_sec=2.0)
-
                     if is_rear:
                         thetas = np.arctan2(y_t, x_t)
                         planar_ranges = np.sqrt(x_t**2 + y_t**2)
-                        
-                        if self.debug_enabled:
-                            header = Header(stamp=stamp, frame_id=actual_frame_id)
-                            pc2_msg = pc2.create_cloud_xyz32(header, pts_target.tolist())
-                            self.pc_pub.publish(pc2_msg)
                     else:
                         thetas = np.arctan2(y_t, x_t)
                         planar_ranges = np.sqrt(x_t**2 + y_t**2)
@@ -323,25 +310,26 @@ class ObstacleDetectorNode(Node):
                 max_bins = num_bins if is_rear else w
                 in_bounds = (bin_idx >= 0) & (bin_idx < max_bins)
                 
-                stats["in_bounds"] = np.sum(in_bounds)
-                
                 bin_idx = bin_idx[in_bounds]
                 planar_ranges = planar_ranges[in_bounds]
                 
                 if len(planar_ranges) > 0:
                     np.minimum.at(ranges, bin_idx, planar_ranges)
                     
-        stats["finite_bins"] = np.sum(np.isfinite(ranges))
-        
-        z_info = f" | Z_min: {stats.get('z_min', 0.0):.2f}m | Z_max: {stats.get('z_max', 0.0):.2f}m" if 'z_min' in stats else ""
-        self.get_logger().info(
-            f"[{self.cam_name}] Pixels: {stats['pixels']} | 3D: {stats['valid_3d']} | InBounds: {stats['in_bounds']} | Bins: {stats['finite_bins']}{z_info}",
-            throttle_duration_sec=2.0
-        )
-
-        scan_msg.ranges = [float(val) for val in ranges]
+        scan_msg.ranges = ranges.tolist()
         self.laser_pub.publish(scan_msg)
-
+        
+        t1 = time.perf_counter()
+        
+        # Calculate latency
+        now = self.get_clock().now()
+        stamp_time = rclpy.time.Time.from_msg(stamp)
+        total_latency = (now - stamp_time).nanoseconds / 1e9
+        
+        self.get_logger().info(
+            f"[{self.cam_name}] ProcTime: {(t1-t0)*1000:.1f}ms | TotalLatency: {total_latency*1000:.1f}ms",
+            throttle_duration_sec=1.0
+        )
 
 def main(args=None):
     rclpy.init(args=args)

@@ -275,6 +275,7 @@ local_costmap:
         observation_sources: scan scan_camera
         scan:
           topic: /scan
+          sensor_frame: 'laser_link'
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -285,6 +286,7 @@ local_costmap:
           obstacle_min_range: 0.0
         scan_camera:
           topic: /scan_obstacles
+          sensor_frame: 'base_footprint'
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -316,6 +318,7 @@ global_costmap:
         observation_sources: scan
         scan:
           topic: /scan
+          sensor_frame: 'laser_link'
           max_obstacle_height: 2.0
           clearing: True
           marking: True
