@@ -32,13 +32,17 @@
           <Speak message="Xin vui lòng nhường đường cho robot."/>
           <Wait wait_duration="3.0"/>
           
-          <!-- Bước 2: Kiểm tra lại đường đi -->
           <Fallback>
-            <!-- Nếu đường đã hợp lệ (không bị chặn), Fallback trả SUCCESS, kết thúc nhánh để thử điều hướng lại -->
-            <IsPathValid path="{path}"/>
+            <!-- Thử chạy tới một khoảng ngắn để thoát kẹt -->
+            <Sequence name="TryEscape">
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+              <RecoveryProgressGuard distance="0.08" timeout="3.0" global_frame="odom" robot_base_frame="base_footprint">
+                <FollowPath path="{path}" controller_id="FollowPath" server_timeout="500"/>
+              </RecoveryProgressGuard>
+            </Sequence>
             
-            <!-- Bước 3: Nếu đường vẫn không hợp lệ, chuẩn bị lùi -->
-            <Fallback>
+            <!-- Bước 3: Nếu không thoát được, chuẩn bị lùi -->
+            <RecoveryNode number_of_retries="3" name="BackupRecovery">
               <!-- Nhánh thực hiện lùi -->
               <Sequence name="ExecuteBackUp">
                 <!-- Bước 4: Kiểm tra an toàn trước khi thông báo -->
@@ -51,7 +55,7 @@
                 <ReactiveSequence name="SafeBackUp">
                   <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.40" timeout="0.50"/>
                   <!-- Không xóa local costmap ở đây để BackUp vẫn còn dữ liệu vật cản tổng thể -->
-                  <BackUp backup_dist="0.15" backup_speed="0.10" time_allowance="5.0"/>
+                  <BackUp backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
                 </ReactiveSequence>
                 
                 <!-- Hoàn thành lùi an toàn, dọn dẹp để thử lập kế hoạch lại -->
@@ -64,10 +68,10 @@
               
               <!-- Nhánh thất bại (không đủ an toàn hoặc quá trình lùi gặp lỗi) -->
               <Sequence name="BackUpFailed">
-                <OperatorAlert code="BACKUP_FAILED" message="Không thể hoàn tất thao tác lùi. Đang chờ thử lại."/>
+                <OperatorAlert code="BACKUP_WAIT" message="Không thể hoàn tất thao tác lùi. Đang chờ thử lại."/>
                 <Wait wait_duration="2.0"/>
               </Sequence>
-            </Fallback>
+            </RecoveryNode>
           </Fallback>
         </Sequence>
       </ReactiveFallback>

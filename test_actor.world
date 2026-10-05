@@ -1,0 +1,47 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <world name="test_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"><render_engine>ogre2</render_engine></plugin>
+
+    <model name="ground">
+      <static>true</static>
+      <link name="link">
+        <collision name="col"><geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry></collision>
+        <visual name="vis"><geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry></visual>
+      </link>
+    </model>
+
+    <actor name="test_actor">
+      <pose>0 0 1.0 0 0 0</pose>
+      <skin>
+        <filename>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking person/1/files/meshes/walking.dae</filename>
+        <scale>1.0</scale>
+      </skin>
+      <animation name="walking">
+        <filename>https://fuel.gazebosim.org/1.0/OpenRobotics/models/Walking person/1/files/meshes/walking.dae</filename>
+        <scale>1.0</scale>
+        <interpolate_x>true</interpolate_x>
+      </animation>
+      <script>
+        <loop>true</loop>
+        <auto_start>true</auto_start>
+        <trajectory id="0" type="walking">
+          <waypoint><time>0.0</time><pose>0 0 1.0 0 0 0</pose></waypoint>
+          <waypoint><time>2.0</time><pose>2 0 1.0 0 0 0</pose></waypoint>
+        </trajectory>
+      </script>
+      <!-- ADD COLLISION -->
+      <link name="actor_collision">
+        <collision name="col">
+          <geometry><cylinder><radius>0.3</radius><length>1.8</length></cylinder></geometry>
+        </collision>
+      </link>
+    </actor>
+  </world>
+</sdf>

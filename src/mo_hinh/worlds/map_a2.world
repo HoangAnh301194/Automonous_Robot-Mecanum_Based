@@ -66,5 +66,7 @@
       <name>map_a2</name>
       <pose>-53.04 -46.14 0 0 0 0</pose>
     </include>
+    
+
   </world>
 </sdf>

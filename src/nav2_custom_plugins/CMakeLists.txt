@@ -35,10 +35,18 @@ ament_target_dependencies(nav2_check_rear_safety_plugin
 )
 target_compile_definitions(nav2_check_rear_safety_plugin PRIVATE BT_PLUGIN_EXPORT)
 
+add_library(nav2_recovery_progress_guard_plugin SHARED src/recovery_progress_guard.cpp)
+target_include_directories(nav2_recovery_progress_guard_plugin PRIVATE include)
+ament_target_dependencies(nav2_recovery_progress_guard_plugin
+  rclcpp nav2_core nav2_behavior_tree behaviortree_cpp_v3 tf2_ros tf2_geometry_msgs
+)
+target_compile_definitions(nav2_recovery_progress_guard_plugin PRIVATE BT_PLUGIN_EXPORT)
+
 install(TARGETS
   nav2_operator_alert_plugin
   nav2_speak_plugin
   nav2_check_rear_safety_plugin
+  nav2_recovery_progress_guard_plugin
   DESTINATION lib
 )
 
