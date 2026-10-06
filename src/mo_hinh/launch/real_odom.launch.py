@@ -13,18 +13,34 @@ import os
 def generate_launch_description():
     pkg_share = get_package_share_directory('mo_hinh')
     hw_launch_file = os.path.join(pkg_share, 'launch', 'real_hw.launch.py')
+    hw_hoverboard_launch_file = os.path.join(pkg_share, 'launch', 'real_hw_hoverboard.launch.py')
 
     odom_source = LaunchConfiguration('odom_source')
     use_sim_time = LaunchConfiguration('use_sim_time')
+    hoverboard_port = LaunchConfiguration('hoverboard_port')
     esp_port = LaunchConfiguration('esp_port')
     lidar_port = LaunchConfiguration('lidar_port')
     esp_baudrate = LaunchConfiguration('esp_baudrate')
     lidar_baudrate = LaunchConfiguration('lidar_baudrate')
     rf2o_freq = LaunchConfiguration('rf2o_freq')
 
+    use_hoverboard = IfCondition(PythonExpression(["'", odom_source, "' == 'hoverboard'"]))
     use_esp = IfCondition(PythonExpression(["'", odom_source, "' == 'esp'"]))
     use_rf2o = IfCondition(PythonExpression(["'", odom_source, "' == 'rf2o'"]))
 
+    # 1. Pipeline mới: ros2_control Hoverboard Driver trực tiếp
+    hw_with_hoverboard_odom = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(hw_hoverboard_launch_file),
+        launch_arguments={
+            'use_sim_time': use_sim_time,
+            'hoverboard_port': hoverboard_port,
+            'lidar_port': lidar_port,
+            'lidar_baudrate': lidar_baudrate,
+        }.items(),
+        condition=use_hoverboard,
+    )
+
+    # 2. Pipeline cũ (dự phòng): ESP32 Odom
     hw_with_esp_odom = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(hw_launch_file),
         launch_arguments={
@@ -39,6 +55,7 @@ def generate_launch_description():
         condition=use_esp,
     )
 
+    # 3. Pipeline cũ (dự phòng): RF2O Laser Odometry
     hw_with_rf2o_odom = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(hw_launch_file),
         launch_arguments={
@@ -73,8 +90,8 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'odom_source',
-            default_value='esp',
-            description="Odom source: 'esp' or 'rf2o'."
+            default_value='hoverboard',
+            description="Odom source: 'hoverboard' (ros2_control), 'esp', or 'rf2o'."
         ),
         DeclareLaunchArgument(
             'use_sim_time',
@@ -82,9 +99,14 @@ def generate_launch_description():
             description='Use simulation clock. Keep false on real robot.'
         ),
         DeclareLaunchArgument(
+            'hoverboard_port',
+            default_value='/dev/hoverboard',
+            description='Hoverboard serial port.'
+        ),
+        DeclareLaunchArgument(
             'esp_port',
             default_value='/dev/ttyUSB0',
-            description='ESP serial port. Override if needed.'
+            description='ESP serial port (fallback).'
         ),
         DeclareLaunchArgument(
             'lidar_port',
@@ -106,8 +128,8 @@ def generate_launch_description():
             default_value='20.0',
             description='RF2O update frequency in Hz.'
         ),
+        hw_with_hoverboard_odom,
         hw_with_esp_odom,
         hw_with_rf2o_odom,
         rf2o_node,
     ])
-

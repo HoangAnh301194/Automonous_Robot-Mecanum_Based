@@ -91,7 +91,6 @@ def generate_launch_description():
                 'serial_baudrate': ParameterValue(lidar_baudrate, value_type=int),
                 'frame_id': 'laser_link',
                 'angle_compensate': True,
-                'scan_mode': 'Sensitivity',
             }],
             remappings=[('scan', 'scan_raw')],
         ),
