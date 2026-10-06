@@ -786,6 +786,7 @@ class MainWindow(QWidget):
         self.rb_real.toggled.connect(self.on_robot_mode_changed)
 
         self.cmb_odom_source = QComboBox()
+        self.cmb_odom_source.addItem("Hoverboard ros2_control", "hoverboard")
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
@@ -1195,7 +1196,7 @@ class MainWindow(QWidget):
         return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
 
     def get_selected_odom_source(self):
-        return self.cmb_odom_source.currentData() or "esp"
+        return self.cmb_odom_source.currentData() or "hoverboard"
 
     def get_selected_esp_wheel_odom_mode(self):
         return self.cmb_esp_wheel_mode.currentData() or "diff_2"
@@ -1345,7 +1346,7 @@ class MainWindow(QWidget):
                 + "ros2 launch mo_hinh real_odom.launch.py "
                 + f"odom_source:={odom_source} use_sim_time:={sim_time} "
                 + f"esp_wheel_odom_mode:={esp_wheel_mode} "
-                + f"esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
+                + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
             self.proc_mgr.start(self.LAYER1_REAL, cmd)
 

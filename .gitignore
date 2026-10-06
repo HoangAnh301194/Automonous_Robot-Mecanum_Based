@@ -45,3 +45,6 @@ pip-delete-this-directory.txt
 *.zip
 *.7z
 *.rar
+
+# Local LLM credentials
+/config/llm.local.env
