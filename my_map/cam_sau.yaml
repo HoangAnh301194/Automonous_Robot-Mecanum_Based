@@ -3,7 +3,7 @@ depth_topic: /rear_camera/depth/image_raw
 camera_info_topic: /rear_camera/depth/camera_info
 output_scan_topic: /rear_scan_obstacle
 distance_offset: 0.0
-ground_file_path: /home/duc/robot_ws/my_map/cam_sau.npy
+ground_file_path: cam_sau.npy
 median_filter: 3
 min_area: 150
 morphology_size: 3
