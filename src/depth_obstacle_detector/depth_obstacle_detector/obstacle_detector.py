@@ -16,6 +16,8 @@ import tf2_ros
 import tf2_geometry_msgs
 import sensor_msgs_py.point_cloud2 as pc2
 
+from depth_obstacle_detector.config_paths import resolve_ground_path
+
 
 class ObstacleDetectorNode(Node):
     def __init__(self):
@@ -95,10 +97,7 @@ class ObstacleDetectorNode(Node):
             ground_path = self.config.get('ground_file_path', 'None')
             
             if ground_path and ground_path != "None" and ground_path != "Memory":
-                if not os.path.isabs(ground_path):
-                    config_dir = os.path.dirname(config_path)
-                    ground_path = os.path.abspath(os.path.join(config_dir, ground_path))
-                
+                ground_path = resolve_ground_path(config_path, ground_path)
                 self.get_logger().info(f"Loading ground reference from: {ground_path}")
                 self.ground_frame = np.load(ground_path)
             else:
