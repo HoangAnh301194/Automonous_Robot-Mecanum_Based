@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import os
 import sys
 import yaml
 import numpy as np
@@ -13,6 +12,8 @@ from cv_bridge import CvBridge
 
 import tf2_ros
 import tf2_geometry_msgs
+
+from depth_obstacle_detector.config_paths import resolve_ground_path
 
 
 class ObstacleDetectorNode(Node):
@@ -87,9 +88,7 @@ class ObstacleDetectorNode(Node):
             
             # Resolve relative ground file path if needed
             if ground_path and ground_path != "None" and ground_path != "Memory (Unsaved)":
-                if not os.path.isabs(ground_path):
-                    config_dir = os.path.dirname(config_path)
-                    ground_path = os.path.abspath(os.path.join(config_dir, ground_path))
+                ground_path = resolve_ground_path(config_path, ground_path)
                 
                 self.get_logger().info(f"Loading ground reference from: {ground_path}")
                 self.ground_frame = np.load(ground_path)

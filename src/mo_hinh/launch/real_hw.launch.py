@@ -8,14 +8,19 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
-    urdf_file = os.path.join(pkg_share, 'urdf', 'xe.urdf')
+    urdf_file = resolve_path('urdf', 'xe.urdf')
 
     with open(urdf_file, 'r', encoding='utf-8') as f:
         robot_description = f.read()
 
     use_sim_time = LaunchConfiguration('use_sim_time')
+    scan_filter_config = resolve_path('config', 'scan_filter.yaml')
+
     esp_port = LaunchConfiguration('esp_port')
     lidar_port = LaunchConfiguration('lidar_port')
     esp_baudrate = LaunchConfiguration('esp_baudrate')
@@ -24,7 +29,6 @@ def generate_launch_description():
     esp_odom_topic = LaunchConfiguration('esp_odom_topic')
 
     return LaunchDescription([
-
         DeclareLaunchArgument(
             'use_sim_time',
             default_value='false',
@@ -95,7 +99,7 @@ def generate_launch_description():
         Node(
             package='laser_filters',
             executable='scan_to_scan_filter_chain',
-            parameters=['/home/orin/ros2_ws/config/scan_filter.yaml'],
+            parameters=[scan_filter_config],
             remappings=[
                 ('scan', 'scan_raw'),
                 ('scan_filtered', 'scan')

@@ -9,10 +9,13 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
-    default_slam_params = os.path.join(pkg_share, 'config', 'mapper_params_online_async.yaml')
-    default_rviz_config = os.path.join(pkg_share, 'config', 'rviz_slam.rviz')
+    default_slam_params = resolve_path('config', 'mapper_params_online_async.yaml')
+    default_rviz_config = resolve_path('config', 'rviz_slam.rviz')
 
     use_sim_time = LaunchConfiguration('use_sim_time')
     use_rviz = LaunchConfiguration('use_rviz')

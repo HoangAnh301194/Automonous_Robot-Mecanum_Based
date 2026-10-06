@@ -311,6 +311,8 @@ class RosInterface(Node):
     def publish_pose_from_tf(self):
         if not self.pose_callback:
             return
+        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
+            return
         try:
             tf_msg = self.tf_buffer.lookup_transform(
                 self.target_map_frame,
@@ -319,7 +321,7 @@ class RosInterface(Node):
                 timeout=Duration(seconds=0.05),
             )
         except TransformException as exc:
-            self._warn_tf(f"TF pose lookup l?i ({self.target_map_frame} <- {self.target_base_frame}): {exc}")
+            self._warn_tf(f"TF pose lookup lỗi ({self.target_map_frame} <- {self.target_base_frame}): {exc}")
             return
 
         t = tf_msg.transform.translation
@@ -330,6 +332,8 @@ class RosInterface(Node):
     def _scan_to_world_points(self, msg):
         ranges = msg.ranges
         if not ranges:
+            return []
+        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
             return []
 
         source_frame = msg.header.frame_id if msg.header.frame_id else self.target_base_frame
@@ -1324,7 +1328,7 @@ class MainWindow(QWidget):
             cmd = (
                 self.ros_prefix()
                 + "ros2 launch mo_hinh virtual_robot_gazebo.launch.py "
-                + f"use_sim_time:={sim_time} gui:=true"
+                + f"use_sim_time:={sim_time}"
             )
             self.proc_mgr.start(self.LAYER1_SIM, cmd)
             QTimer.singleShot(3500, self.unpause_gazebo_physics)

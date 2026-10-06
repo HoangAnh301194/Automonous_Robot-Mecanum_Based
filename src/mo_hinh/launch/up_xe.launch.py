@@ -73,18 +73,21 @@ def detect_ports():
 
     print(f'[detect] ESP32 port = {esp_port}')
     print(f'[detect] LiDAR port = {lidar_port}')
-
     return esp_port, lidar_port
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
-    urdf_file = os.path.join(pkg_share, 'urdf', 'xe.urdf')
+    urdf_file = resolve_path('urdf', 'xe.urdf')
 
     with open(urdf_file, 'r', encoding='utf-8') as f:
         robot_description = f.read()
 
     esp_port, lidar_port = detect_ports()
+    scan_filter_config = resolve_path('config', 'scan_filter.yaml')
 
     rsp_node = Node(
         package='robot_state_publisher',
@@ -114,7 +117,7 @@ def generate_launch_description():
     laser_filter_node = Node(
         package='laser_filters',
         executable='scan_to_scan_filter_chain',
-        parameters=['/home/orin/ros2_ws/config/scan_filter.yaml'],
+        parameters=[scan_filter_config],
         remappings=[
             ('scan', 'scan_raw'),
             ('scan_filtered', 'scan')

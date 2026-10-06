@@ -1,0 +1,10 @@
+# Request
+string route_name
+---
+# Result
+bool success
+string finish_message
+---
+# Feedback
+string current_point
+float32 percent_complete

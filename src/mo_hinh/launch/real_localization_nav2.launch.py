@@ -10,15 +10,18 @@ from ament_index_python.packages import get_package_share_directory
 import os
 
 
+def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+
+
 def generate_launch_description():
-    pkg_share = get_package_share_directory('mo_hinh')
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
 
-    default_map_yaml = os.path.join(pkg_share, 'maps', 'my_map.yaml')
-    default_map_graph = os.path.join(pkg_share, 'maps', 'my_slam_graph')
-    default_nav2_params = os.path.join(pkg_share, 'config', 'nav2_params.yaml')
-    default_slam_loc_params = os.path.join(pkg_share, 'config', 'slam_localization.yaml')
-    default_rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
+    default_map_yaml = resolve_path('maps', 'my_map.yaml')
+    default_map_graph = resolve_path('maps', 'my_slam_graph')
+    default_nav2_params = resolve_path('config', 'nav2_params.yaml')
+    default_slam_loc_params = resolve_path('config', 'slam_localization.yaml')
+    default_rviz_config = resolve_path('config', 'rviz.rviz')
 
     localization_mode = LaunchConfiguration('localization_mode')
     use_sim_time = LaunchConfiguration('use_sim_time')

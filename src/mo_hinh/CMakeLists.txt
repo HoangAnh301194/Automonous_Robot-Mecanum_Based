@@ -48,6 +48,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install scripts
+install(
+  PROGRAMS scripts/dummy_unpause.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 
 
 ament_package()

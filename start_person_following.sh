@@ -1,5 +1,11 @@
 #!/bin/bash
 
+export WS="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "$WS/install/setup.bash" ]; then
+    printf 'Workspace is not built: %s\n' "$WS" >&2
+    exit 1
+fi
+
 # Function to clean up background processes when Ctrl+C is pressed
 cleanup() {
     echo ""
@@ -37,8 +43,8 @@ unset COLCON_PREFIX_PATH
 
 # 3. Source Workspace
 source /opt/ros/humble/setup.bash
-cd /home/orin/ros2_ws
-source install/setup.bash
+cd "$WS" || exit 1
+source "$WS/install/setup.bash"
 
 PERSON_MODEL="${PERSON_MODEL:-yolo11n.engine}"
 HAND_WAVE_BACKEND="${HAND_WAVE_BACKEND:-rtmpose}"
