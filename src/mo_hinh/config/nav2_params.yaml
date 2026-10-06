@@ -78,6 +78,7 @@ bt_navigator:
       - nav2_operator_alert_plugin
       - nav2_speak_plugin
       - nav2_check_rear_safety_plugin
+      - nav2_recovery_progress_guard_plugin
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node
