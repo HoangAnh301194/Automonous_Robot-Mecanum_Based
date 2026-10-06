@@ -1,12 +1,7 @@
 from launch import LaunchDescription
-from launch.actions import (
-    DeclareLaunchArgument,
-    IncludeLaunchDescription,
-    SetEnvironmentVariable,
-    TimerAction,
-)
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction, SetEnvironmentVariable
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -14,15 +9,21 @@ import os
 
 
 def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
-    return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+    try:
+        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+    except Exception:
+        pass
+    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
+    if os.path.exists(user_src_path):
+        return user_src_path
+    return os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
 
 
 def generate_launch_description():
     ros_gz_sim_share = get_package_share_directory('ros_gz_sim')
 
     urdf_file = resolve_path('urdf', 'xe.urdf')
-    default_world = resolve_path('worlds', 'virtual_lab.world')
-    worlds_dir = os.path.dirname(default_world)
+    default_world = resolve_path('worlds', 'map_a2.world')
 
     with open(urdf_file, 'r', encoding='utf-8') as urdf:
         robot_description = urdf.read()
@@ -88,8 +89,11 @@ def generate_launch_description():
             '/joint_states@sensor_msgs/msg/JointState[gz.msgs.Model',
             '/imu/data@sensor_msgs/msg/Imu[gz.msgs.IMU',
             '/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-            '/camera/color/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
-            '/camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/color/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/rear_camera/depth/image_raw@sensor_msgs/msg/Image[gz.msgs.Image',
+            '/front_camera/depth/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+            '/rear_camera/depth/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
         ],
         remappings=[
             ('/scan', '/scan_raw'),
@@ -110,14 +114,12 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        SetEnvironmentVariable(
-            'GZ_SIM_RESOURCE_PATH',
-            [worlds_dir, os.pathsep, EnvironmentVariable('GZ_SIM_RESOURCE_PATH', default_value='')],
-        ),
+        SetEnvironmentVariable(name='GZ_SIM_RESOURCE_PATH', value='/home/duc/robot_ws/my_map'),
+        SetEnvironmentVariable(name='IGN_GAZEBO_RESOURCE_PATH', value='/home/duc/robot_ws/my_map'),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('world', default_value=default_world),
-        DeclareLaunchArgument('x_pose', default_value='0.0'),
-        DeclareLaunchArgument('y_pose', default_value='0.0'),
+        DeclareLaunchArgument('x_pose', default_value='-2.0'),
+        DeclareLaunchArgument('y_pose', default_value='-2.0'),
         DeclareLaunchArgument('z_pose', default_value='0.10'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
 

@@ -1,0 +1,83 @@
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      
+      <PipelineSequence name="NavigateWithReplanning">
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+            <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            <Sequence name="PlannerRecovery">
+              <!-- Gửi OperatorAlert -->
+              <OperatorAlert code="PLANNER_RECOVERY" message="Đang xử lý lỗi lập kế hoạch."/>
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap"/>
+              <Wait wait_duration="2.0"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+
+        <RecoveryNode number_of_retries="1" name="FollowPath">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          
+          <ReactiveFallback name="ControllerRecoveryFallback">
+            <GoalUpdated/>
+            <Fallback>
+              <!-- Bước 1: Phân loại lỗi -->
+              <!-- Kiểm tra xem đường đi có còn hợp lệ (trống) không. 
+                   Nếu IsPathValid = SUCCESS, Fallback trả SUCCESS, bỏ qua nhánh recovery phía dưới. -->
+              <IsPathValid path="{path}"/>
+              
+              <Sequence name="ControllerStuckRecovery">
+                <!-- Bước 2: Tương tác -->
+                <OperatorAlert code="WAITING" message="Phát hiện vật cản. Đang chờ nhường đường."/>
+                <Speak message="Xin vui lòng nhường đường cho robot."/>
+                <Wait wait_duration="3.0"/>
+                
+                <!-- Bước 3: Đánh giá lại tình huống -->
+                <!-- Kiểm tra xem đường đã thông thoáng chưa sau khi chờ -->
+                <Fallback>
+                  <IsPathValid path="{path}"/>
+                  
+                  <!-- Nếu đường vẫn bị chặn, thực hiện kiểm tra và lùi -->
+                  <Fallback>
+                    <!-- Nhánh lùi -->
+                    <Sequence>
+                      <!-- Bước 4: Kiểm tra trước khi lùi -->
+                      <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.40" timeout="0.50"/>
+                      
+                      <!-- Bước 5: Thông báo và lùi -->
+                      <OperatorAlert code="PRE_BACKUP" message="Robot chuẩn bị lùi. Vui lòng giữ khoảng cách."/>
+                      <Speak message="Robot sẽ lùi lại một chút."/>
+                      
+                      <!-- Giám sát an toàn LIÊN TỤC trong suốt quá trình lùi. -->
+                      <ReactiveSequence name="SafeBackUpSequence">
+                        <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.40" timeout="0.50"/>
+                        <BackUp backup_dist="0.15" backup_speed="0.10" time_allowance="5.0"/>
+                      </ReactiveSequence>
+                      
+                      <!-- Bước 6: Hoàn tất (chỉ chạy tới đây nếu ReactiveSequence trả SUCCESS toàn bộ) -->
+                      <OperatorAlert code="REPLANNING" message="Đang tính toán lại đường đi."/>
+                      <ClearEntireCostmap name="ClearLocalAfterBackUp" service_name="local_costmap/clear_entirely_local_costmap"/>
+                    </Sequence>
+                    
+                    <!-- Nhánh thất bại do mất an toàn (trước hoặc trong khi lùi) -->
+                    <Sequence>
+                      <OperatorAlert code="REAR_UNSAFE" message="Không đủ điều kiện an toàn để lùi."/>
+                      <!-- Không làm gì thêm, chỉ chờ để đảm bảo không lặp lại ngay lập tức -->
+                      <Wait wait_duration="2.0"/>
+                    </Sequence>
+                  </Fallback>
+                </Fallback>
+              </Sequence>
+            </Fallback>
+          </ReactiveFallback>
+        </RecoveryNode>
+      </PipelineSequence>
+
+      <ReactiveFallback name="GlobalRecoveryFallback">
+        <GoalUpdated/>
+        <Wait wait_duration="1.0"/>
+      </ReactiveFallback>
+
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

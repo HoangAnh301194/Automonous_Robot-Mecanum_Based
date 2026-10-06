@@ -20,13 +20,6 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo, LaserScan
 from cv_bridge import CvBridge
 
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
-custom_qos = QoSProfile(
-    reliability=ReliabilityPolicy.RELIABLE,
-    history=HistoryPolicy.KEEP_LAST,
-    depth=1
-)
-
 import tf2_ros
 import tf2_geometry_msgs
 
@@ -56,17 +49,17 @@ class DepthSubscriberNode(Node):
         # Subscribe to camera info
         self.info_sub = self.create_subscription(
             CameraInfo,
-            '/front_camera/depth/camera_info',
+            '/camera/depth/camera_info',
             self.info_callback,
-            custom_qos
+            10
         )
         
         # Subscribe to depth raw topic (typically 16-bit unsigned in millimeters)
         self.subscription = self.create_subscription(
             Image,
-            '/front_camera/depth/image_raw',
+            '/camera/depth/image_raw',
             self.listener_callback,
-            custom_qos
+            10
         )
         
         # LaserScan publisher for detected obstacles
@@ -74,20 +67,8 @@ class DepthSubscriberNode(Node):
         
         self.bridge = CvBridge()
         self.get_logger().info("Depth Obstacle Debugger ROS 2 Node initialized.")
-        self.get_logger().info("Subscribed to /front_camera/depth/image_raw & /front_camera/depth/camera_info")
+        self.get_logger().info("Subscribed to /camera/depth/image_raw & /camera/depth/camera_info")
         self.get_logger().info("Publishing LaserScan on /scan_obstacles")
-
-    def switch_camera(self, prefix='front_'):
-        self.destroy_subscription(self.info_sub)
-        self.destroy_subscription(self.subscription)
-        
-        info_topic = f'/{prefix}camera/depth/camera_info'
-        img_topic = f'/{prefix}camera/depth/image_raw'
-        
-        self.info_sub = self.create_subscription(CameraInfo, info_topic, self.info_callback, custom_qos)
-        self.subscription = self.create_subscription(Image, img_topic, self.listener_callback, custom_qos)
-        
-        self.get_logger().info(f"Switched to {img_topic} & {info_topic}")
 
     def info_callback(self, msg):
         self.camera_info = msg
@@ -96,11 +77,6 @@ class DepthSubscriberNode(Node):
         try:
             # Convert depth image (passthrough retains 16-bit depth values)
             cv_image = self.bridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
-            
-            # Handle Gazebo simulation depth format (32FC1 meters) -> convert to 16UC1 millimeters
-            if cv_image.dtype == np.float32 or cv_image.dtype == np.float64:
-                cv_image = np.nan_to_num(cv_image, nan=0.0, posinf=0.0, neginf=0.0)
-                cv_image = (cv_image * 1000.0).astype(np.uint16)
             
             info_dict = None
             if self.camera_info is not None:
@@ -233,16 +209,6 @@ class DebuggerGUI(QMainWindow):
         self.cmb_zoom.currentIndexChanged.connect(self.on_zoom_changed)
         zoom_layout.addWidget(lbl_zoom)
         zoom_layout.addWidget(self.cmb_zoom)
-        
-        zoom_layout.addSpacing(20)
-        
-        lbl_cam = QLabel("Camera:")
-        self.cmb_cam = QComboBox()
-        self.cmb_cam.addItems(["Front", "Rear"])
-        self.cmb_cam.currentIndexChanged.connect(self.on_camera_changed)
-        zoom_layout.addWidget(lbl_cam)
-        zoom_layout.addWidget(self.cmb_cam)
-
         zoom_layout.addStretch()
         viewer_layout.addLayout(zoom_layout)
 
@@ -395,7 +361,6 @@ class DebuggerGUI(QMainWindow):
         self.cmb_target_frame.addItems([
             'camera_depth_optical_frame',
             'camera_link',
-            'rear_camera_link',
             'base_link',
             'base_footprint'
         ])
@@ -1032,8 +997,8 @@ class DebuggerGUI(QMainWindow):
             depth_8u = depth_8u.astype(np.uint8)
             # Apply Jet Color Map
             depth_color = cv2.applyColorMap(depth_8u, cv2.COLORMAP_JET)
-            # (Optional) Allow invalid pixels to show as dark blue instead of black so the frame is visible
-            # depth_color[self.current_frame == 0] = [0, 0, 0]
+            # Force invalid pixels (0 depth value) to black color
+            depth_color[self.current_frame == 0] = [0, 0, 0]
 
             # Initialize default lower view placeholders
             diff_disp = np.zeros((rh, rw), dtype=np.uint8)
@@ -1242,8 +1207,8 @@ class DebuggerGUI(QMainWindow):
         scan_msg.angle_increment = fov / self.raw_width
         scan_msg.time_increment = 0.0
         scan_msg.scan_time = 0.033  # ~30 FPS
-        scan_msg.range_min = 0.15
-        scan_msg.range_max = 8.0
+        scan_msg.range_min = 0.4
+        scan_msg.range_max = 5.0
 
         # Default all scan points to infinity (no obstacle detected)
         ranges = [float('inf')] * self.raw_width
@@ -1347,8 +1312,7 @@ class DebuggerGUI(QMainWindow):
         pixmap = self.numpy_to_pixmap(resized)
         
         self.lbl_depth_viewer.setPixmap(pixmap)
-        if self.lbl_depth_viewer.width() != target_w or self.lbl_depth_viewer.height() != target_h:
-            self.lbl_depth_viewer.setFixedSize(target_w, target_h)
+        self.lbl_depth_viewer.setFixedSize(target_w, target_h)
 
     def display_bottom_images(self, diff, mask, overlay):
         """
@@ -1378,16 +1342,13 @@ class DebuggerGUI(QMainWindow):
 
         # Update QLabels
         self.lbl_diff_viewer.setPixmap(pix_diff)
-        if self.lbl_diff_viewer.width() != target_w or self.lbl_diff_viewer.height() != target_h:
-            self.lbl_diff_viewer.setFixedSize(target_w, target_h)
+        self.lbl_diff_viewer.setFixedSize(target_w, target_h)
 
         self.lbl_mask_viewer.setPixmap(pix_mask)
-        if self.lbl_mask_viewer.width() != target_w or self.lbl_mask_viewer.height() != target_h:
-            self.lbl_mask_viewer.setFixedSize(target_w, target_h)
+        self.lbl_mask_viewer.setFixedSize(target_w, target_h)
 
         self.lbl_overlay_viewer.setPixmap(pix_overlay)
-        if self.lbl_overlay_viewer.width() != target_w or self.lbl_overlay_viewer.height() != target_h:
-            self.lbl_overlay_viewer.setFixedSize(target_w, target_h)
+        self.lbl_overlay_viewer.setFixedSize(target_w, target_h)
 
     def numpy_to_pixmap(self, arr):
         """
@@ -1405,18 +1366,6 @@ class DebuggerGUI(QMainWindow):
             h, w = arr.shape
             qimg = QImage(arr.data, w, h, w, QImage.Format_Grayscale8)
             return QPixmap.fromImage(qimg).copy()
-
-    def on_camera_changed(self):
-        text = self.cmb_cam.currentText()
-        if text == "Front":
-            self.ros_node.switch_camera('front_')
-        else:
-            self.ros_node.switch_camera('rear_')
-        # Reset the ground reference to force user to capture a new one when switching cameras
-        self.ground_frame = None
-        self.lbl_ground_status.setText("None (Switch Camera)")
-        self.lbl_ground_status.setStyleSheet("color: #ffaa00; font-weight: bold;")
-        self.ros_node.get_logger().info(f"Switched to {text} camera.")
 
     def closeEvent(self, event):
         """

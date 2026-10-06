@@ -1,0 +1,49 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="test_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    
+    <light type="directional" name="sun">
+      <pose>0 0 10 0 0 0</pose>
+    </light>
+    
+    <model name="person_01">
+      <pose>0 0 1 0 0 0</pose>
+      <link name="base_link">
+        <inertial>
+          <mass>70</mass>
+          <inertia>
+            <ixx>10</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>10</iyy><iyz>0</iyz><izz>10</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <cylinder><radius>0.3</radius><length>1.8</length></cylinder>
+          </geometry>
+        </collision>
+        <visual name="visual">
+          <geometry>
+            <cylinder><radius>0.3</radius><length>1.8</length></cylinder>
+          </geometry>
+        </visual>
+      </link>
+      <plugin filename="gz-sim-trajectory-follower-system" name="gz::sim::systems::TrajectoryFollower">
+        <link_name>base_link</link_name>
+        <loop>true</loop>
+        <waypoints>
+          <waypoint>5 0</waypoint>
+          <waypoint>0 0</waypoint>
+        </waypoints>
+        <force>50</force>
+        <torque>10</torque>
+        <range_tolerance>0.2</range_tolerance>
+      </plugin>
+    </model>
+  </world>
+</sdf>

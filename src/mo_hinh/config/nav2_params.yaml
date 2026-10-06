@@ -5,11 +5,11 @@
 
 amcl:
   ros__parameters:
-    alpha1: 0.02
-    alpha2: 0.02
-    alpha3: 0.02
-    alpha4: 0.02
-    alpha5: 0.01
+    alpha1: 0.3
+    alpha2: 0.3
+    alpha3: 0.25
+    alpha4: 0.25
+    alpha5: 0.2
 
     base_frame_id: "base_footprint"
     beam_skip_distance: 0.5
@@ -59,17 +59,72 @@ bt_navigator:
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
-    navigators: ["navigate_to_pose"]
+
+    navigators:
+      - navigate_to_pose
+      # - navigate_through_poses
+
     navigate_to_pose:
       plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
-    default_nav_to_pose_bt_xml: "/home/orin/ros2_ws/src/mo_hinh/config/navigate_to_pose_custom_recovery.xml"
-    default_nav_through_poses_bt_xml: "/home/orin/ros2_ws/src/mo_hinh/config/navigate_through_poses_custom_recovery.xml"    
-    # nav2_bt_navigator/navigate_through_poses_w_replanning_and_recovery.xml
-    # They can be set here or via a RewrittenYaml remap from a parent launch file to Nav2.
 
-    # plugin_lib_names is used to add custom BT plugins to the executor (vector of strings).
-    # Built-in plugins are added automatically
-    # plugin_lib_names: []
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+
+    # TẠM THỜI COMMENT FILE CUSTOM ĐỂ ROBOT CÓ THỂ CHẠY (DO CHƯA VIẾT C++ PLUGIN)
+    default_nav_to_pose_bt_xml: "/home/duc/robot_ws/config/navigate_to_pose_custom_recovery.xml"
+    # default_nav_through_poses_bt_xml: "/home/duc/robot_ws/config/navigate_through_poses_custom_recovery.xml"
+
+    plugin_lib_names:
+      - nav2_operator_alert_plugin
+      - nav2_speak_plugin
+      - nav2_check_rear_safety_plugin
+      - nav2_compute_path_to_pose_action_bt_node
+      - nav2_compute_path_through_poses_action_bt_node
+      - nav2_smooth_path_action_bt_node
+      - nav2_follow_path_action_bt_node
+      - nav2_spin_action_bt_node
+      - nav2_wait_action_bt_node
+      - nav2_assisted_teleop_action_bt_node
+      - nav2_back_up_action_bt_node
+      - nav2_drive_on_heading_bt_node
+      - nav2_clear_costmap_service_bt_node
+      - nav2_is_stuck_condition_bt_node
+      - nav2_goal_reached_condition_bt_node
+      - nav2_goal_updated_condition_bt_node
+      - nav2_globally_updated_goal_condition_bt_node
+      - nav2_is_path_valid_condition_bt_node
+      - nav2_initial_pose_received_condition_bt_node
+      - nav2_reinitialize_global_localization_service_bt_node
+      - nav2_rate_controller_bt_node
+      - nav2_distance_controller_bt_node
+      - nav2_speed_controller_bt_node
+      - nav2_truncate_path_action_bt_node
+      - nav2_truncate_path_local_action_bt_node
+      - nav2_goal_updater_node_bt_node
+      - nav2_recovery_node_bt_node
+      - nav2_pipeline_sequence_bt_node
+      - nav2_round_robin_node_bt_node
+      - nav2_transform_available_condition_bt_node
+      - nav2_time_expired_condition_bt_node
+      - nav2_path_expiring_timer_condition
+      - nav2_distance_traveled_condition_bt_node
+      - nav2_single_trigger_bt_node
+      - nav2_goal_updated_controller_bt_node
+      - nav2_is_battery_low_condition_bt_node
+      - nav2_navigate_through_poses_action_bt_node
+      - nav2_navigate_to_pose_action_bt_node
+      - nav2_remove_passed_goals_action_bt_node
+      - nav2_planner_selector_bt_node
+      - nav2_controller_selector_bt_node
+      - nav2_goal_checker_selector_bt_node
+      - nav2_controller_cancel_bt_node
+      - nav2_path_longer_on_approach_bt_node
+      - nav2_wait_cancel_bt_node
+      - nav2_spin_cancel_bt_node
+      - nav2_back_up_cancel_bt_node
+      - nav2_assisted_teleop_cancel_bt_node
+      - nav2_drive_on_heading_cancel_bt_node
+      - nav2_is_battery_charging_condition_bt_node
 
     error_code_names:
       - compute_path_error_code
@@ -118,7 +173,7 @@ controller_server:
       wz_max: 0.5
       iteration_count: 1
       prune_distance: 1.7
-      transform_tolerance: 1.0
+      transform_tolerance: 0.1
       temperature: 0.3
       gamma: 0.015
       motion_model: "DiffDrive"
@@ -158,7 +213,7 @@ controller_server:
         cost_weight: 3.81
         near_collision_cost: 253
         critical_cost: 300.0
-        consider_footprint: false
+        consider_footprint: true  # true: không đi qua vật cản , false : có thể đi qua vật cản
         collision_cost: 1000000.0
         near_goal_distance: 1.0
         trajectory_point_step: 2
@@ -201,7 +256,8 @@ local_costmap:
       width: 3
       height: 3
       resolution: 0.1
-      robot_radius: 0.35
+      footprint: "[[0.32, 0.32], [0.32, -0.32], [-0.32, -0.32], [-0.32, 0.32]]"
+      footprint_padding: 0.02
       plugins: ["voxel_layer", "inflation_layer"]
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
@@ -212,8 +268,8 @@ local_costmap:
         enabled: True
         publish_voxel_map: True
         origin_z: 0.0
-        z_resolution: 0.05
-        z_voxels: 16
+        z_resolution: 0.1
+        z_voxels: 12
         max_obstacle_height: 2.0
         mark_threshold: 0
         observation_sources: scan scan_camera
@@ -249,26 +305,17 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      robot_radius: 0.35
+      footprint: "[[0.32, 0.32], [0.32, -0.32], [-0.32, -0.32], [-0.32, 0.32]]"
+      footprint_padding: 0.02
       resolution: 0.1
       track_unknown_space: true
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
-        observation_sources: scan scan_camera
+        observation_sources: scan
         scan:
           topic: /scan
-          max_obstacle_height: 2.0
-          clearing: True
-          marking: True
-          data_type: "LaserScan"
-          raytrace_max_range: 3.0
-          raytrace_min_range: 0.0
-          obstacle_max_range: 2.5
-          obstacle_min_range: 0.0
-        scan_camera:
-          topic: /scan_obstacles
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -328,7 +375,11 @@ behavior_server:
     local_footprint_topic: local_costmap/published_footprint
     global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugins: ["drive_on_heading", "assisted_teleop", "wait"]
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    spin:
+      plugin: "nav2_behaviors/Spin"
+    backup:
+      plugin: "nav2_behaviors/BackUp"
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:
@@ -338,7 +389,7 @@ behavior_server:
     local_frame: odom
     global_frame: map
     robot_base_frame: base_footprint
-    transform_tolerance: 1.0
+    transform_tolerance: 0.1
     simulate_ahead_time: 2.0
     max_rotational_vel: 1.0
     min_rotational_vel: 0.4
@@ -399,7 +450,7 @@ collision_monitor:
     cmd_vel_in_topic: "cmd_vel_smoothed"
     cmd_vel_out_topic: "cmd_vel"
     state_topic: "collision_monitor_state"
-    transform_tolerance: 1.0
+    transform_tolerance: 0.2
     source_timeout: 1.0
     base_shift_correction: True
     stop_pub_timeout: 2.0
@@ -477,7 +528,7 @@ docking_server:
       use_collision_detection: true
       costmap_topic: "local_costmap/costmap_raw"
       footprint_topic: "local_costmap/published_footprint"
-      transform_tolerance: 1.0
+      transform_tolerance: 0.1
       projection_time: 5.0
       simulation_step: 0.1
       dock_collision_threshold: 0.3

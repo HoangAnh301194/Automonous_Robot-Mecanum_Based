@@ -39,6 +39,7 @@ from PyQt5.QtWidgets import (
 )
 
 import rclpy
+from diagnostic_msgs.msg import KeyValue
 from geometry_msgs.msg import PoseStamped, Twist
 from action_msgs.srv import CancelGoal
 from nav2_msgs.action import NavigateToPose
@@ -232,6 +233,7 @@ class RosInterface(Node):
         pose_callback=None,
         scan_callback=None,
         dataenc_callback=None,
+        alert_callback=None,
     ):
         super().__init__("desktop_nav_gui_v2")
         self.log_callback = log_callback
@@ -239,6 +241,7 @@ class RosInterface(Node):
         self.pose_callback = pose_callback
         self.scan_callback = scan_callback
         self.dataenc_callback = dataenc_callback
+        self.alert_callback = alert_callback
         self.last_scan_ui_pub = 0.0
         self.last_tf_warn_time = 0.0
         self.target_map_frame = "map"
@@ -276,6 +279,12 @@ class RosInterface(Node):
             self.on_dataenc,
             20,
         )
+        self.alert_sub = self.create_subscription(
+            KeyValue,
+            "/navigation/operator_alert",
+            self.on_alert,
+            10,
+        )
 
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
@@ -295,6 +304,10 @@ class RosInterface(Node):
     def on_map(self, msg):
         if self.map_callback:
             self.map_callback(msg)
+
+    def on_alert(self, msg):
+        if self.alert_callback:
+            self.alert_callback(msg.key, msg.value)
 
     def _pose_to_xyyaw(self, qx, qy, qz, qw):
         siny_cosp = 2.0 * (qw * qz + qx * qy)
@@ -733,6 +746,7 @@ class MainWindow(QWidget):
     pose_signal = pyqtSignal(float, float, float, str)
     scan_signal = pyqtSignal(object, object)
     dataenc_signal = pyqtSignal(object)
+    alert_signal = pyqtSignal(str, str)
 
     LAYER1_SIM = "layer1_sim"
     LAYER1_REAL = "layer1_real"
@@ -765,6 +779,7 @@ class MainWindow(QWidget):
         self.pose_signal.connect(self._on_new_pose_ui)
         self.scan_signal.connect(self._on_new_scan_ui)
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
+        self.alert_signal.connect(self._on_alert_ui)
 
         self.init_ui()
         self.init_ros()
@@ -786,7 +801,6 @@ class MainWindow(QWidget):
         self.rb_real.toggled.connect(self.on_robot_mode_changed)
 
         self.cmb_odom_source = QComboBox()
-        self.cmb_odom_source.addItem("Hoverboard ros2_control", "hoverboard")
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
@@ -989,6 +1003,7 @@ class MainWindow(QWidget):
             pose_callback=self.on_new_pose,
             scan_callback=self.on_new_scan,
             dataenc_callback=self.on_new_dataenc,
+            alert_callback=self.on_alert,
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True)
         self.ros_spin_thread.start()
@@ -1035,6 +1050,19 @@ class MainWindow(QWidget):
             self.lbl_dataenc.setText("Encoder /dataenc: []")
             return
         self.lbl_dataenc.setText(f"Encoder /dataenc: {values}")
+
+    def on_alert(self, code, message):
+        self.alert_signal.emit(code, message)
+
+    def _on_alert_ui(self, code, message):
+        self.lbl_nav2_status.setText(f"Nav2: {code}")
+        self.append_log(f"[ALERT] {code}: {message}")
+        if code == "BACKUP_FAILED":
+            self.lbl_nav2_status.setStyleSheet("color: red; font-weight: bold;")
+        elif code in ["WAITING", "PRE_BACKUP", "REPLANNING"]:
+            self.lbl_nav2_status.setStyleSheet("color: orange; font-weight: bold;")
+        else:
+            self.lbl_nav2_status.setStyleSheet("color: white; font-weight: bold;")
 
     def on_odom_source_changed(self):
         if self.is_sim_mode():
@@ -1196,7 +1224,7 @@ class MainWindow(QWidget):
         return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
 
     def get_selected_odom_source(self):
-        return self.cmb_odom_source.currentData() or "hoverboard"
+        return self.cmb_odom_source.currentData() or "esp"
 
     def get_selected_esp_wheel_odom_mode(self):
         return self.cmb_esp_wheel_mode.currentData() or "diff_2"
@@ -1346,7 +1374,7 @@ class MainWindow(QWidget):
                 + "ros2 launch mo_hinh real_odom.launch.py "
                 + f"odom_source:={odom_source} use_sim_time:={sim_time} "
                 + f"esp_wheel_odom_mode:={esp_wheel_mode} "
-                + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
+                + f"esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
             self.proc_mgr.start(self.LAYER1_REAL, cmd)
 

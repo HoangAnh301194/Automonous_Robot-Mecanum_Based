@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 import numpy as np
-from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer
+from PyQt5.QtCore import QPointF, QRectF, Qt, QTimer, pyqtSignal, QObject
 from PyQt5.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication,
@@ -39,6 +39,10 @@ from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import OccupancyGrid
 from rclpy.node import Node
 from tf2_ros import Buffer, TransformException, TransformListener
+from diagnostic_msgs.msg import KeyValue
+
+class RosSignals(QObject):
+    operator_alert = pyqtSignal(str, str)
 
 
 # ============================================================
@@ -81,6 +85,8 @@ class Waypoint:
 class GuiRosNode(Node):
     def __init__(self):
         super().__init__("route_gui_node")
+        
+        self.signals = RosSignals()
 
         self.declare_parameter("map_topic", "/map")
         self.declare_parameter("goal_topic", "/goal_pose")
@@ -103,9 +109,13 @@ class GuiRosNode(Node):
             OccupancyGrid, self.map_topic, self.on_map, 10
         )
         self.goal_pub = self.create_publisher(PoseStamped, self.goal_topic, 10)
+        self.alert_sub = self.create_subscription(KeyValue, "/navigation/operator_alert", self.on_operator_alert, 10)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+
+    def on_operator_alert(self, msg: KeyValue):
+        self.signals.operator_alert.emit(msg.key, msg.value)
 
     def on_map(self, msg: OccupancyGrid):
         self.map_msg = msg
@@ -355,6 +365,8 @@ class MainWindow(QMainWindow):
         self.ui_timer = QTimer(self)
         self.ui_timer.timeout.connect(self.refresh_ui)
         self.ui_timer.start(150)
+        
+        self.ros.signals.operator_alert.connect(self.on_operator_alert)
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -420,10 +432,13 @@ class MainWindow(QMainWindow):
         self.lbl_robot = QLabel("-")
         self.lbl_goal = QLabel("-")
         self.lbl_map = QLabel("no map")
+        self.lbl_alert = QLabel("-")
+        
         status_layout.addRow("Route", self.lbl_route)
         status_layout.addRow("Robot", self.lbl_robot)
         status_layout.addRow("Current Goal", self.lbl_goal)
         status_layout.addRow("Map", self.lbl_map)
+        status_layout.addRow("Alert", self.lbl_alert)
         left_layout.addWidget(status_box)
         left_layout.addStretch(1)
 
@@ -460,6 +475,21 @@ class MainWindow(QMainWindow):
         self.btn_up.clicked.connect(self.move_selected_up)
         self.btn_down.clicked.connect(self.move_selected_down)
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
+
+    def on_operator_alert(self, key: str, value: str):
+        self.lbl_alert.setText(f"[{key}] {value}")
+        if key == "WAITING":
+            self.lbl_alert.setStyleSheet("color: orange; font-weight: bold;")
+        elif key == "REAR_UNSAFE":
+            self.lbl_alert.setStyleSheet("color: red; font-weight: bold;")
+        elif key == "PRE_BACKUP":
+            self.lbl_alert.setStyleSheet("color: yellow; font-weight: bold; background-color: black;")
+        elif key == "REPLANNING":
+            self.lbl_alert.setStyleSheet("color: blue; font-weight: bold;")
+        elif key == "PLANNER_RECOVERY":
+            self.lbl_alert.setStyleSheet("color: magenta; font-weight: bold;")
+        else:
+            self.lbl_alert.setStyleSheet("")
 
     # ---------------- ROS / UI tick ----------------
     def on_ros_tick(self):
@@ -556,7 +586,7 @@ class MainWindow(QMainWindow):
             else:
                 wp.status = "pending"
 
-        self.ros.publish_goal(self.waypoints[self.current_index])
+        self.lbl_alert.setText("-"); self.lbl_alert.setStyleSheet(""); self.ros.publish_goal(self.waypoints[self.current_index])
 
     def check_goal_progress(self):
         if not (0 <= self.current_index < len(self.waypoints)):
