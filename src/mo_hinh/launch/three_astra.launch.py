@@ -53,7 +53,6 @@ def generate_launch_description():
         ],
         condition=IfCondition(LaunchConfiguration('enable_front')),
     )
-
     return LaunchDescription([
         DeclareLaunchArgument(
             'ai_serial', default_value='17122611013',
