@@ -90,7 +90,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'odom_source',
-            default_value='hoverboard',
+            default_value='esp',
             description="Odom source: 'hoverboard' (ros2_control), 'esp', or 'rf2o'."
         ),
         DeclareLaunchArgument(
