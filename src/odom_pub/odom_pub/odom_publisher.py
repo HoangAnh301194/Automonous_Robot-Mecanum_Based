@@ -8,6 +8,8 @@ from tf2_ros import TransformBroadcaster
 import serial
 import math
 import re
+import time
+
 
 # ============================================
 # H?NG S? V?T LÝ (Ph?i kh?p v?i main.cpp trên ESP32)
@@ -94,12 +96,18 @@ class HoverbotOdomNode(Node):
         # Serial Connection
         # ============================================
         self.ser = None
-        try:
-            self.ser = serial.Serial(self.esp_port, self.esp_baudrate, timeout=0.05)
-            self.get_logger().info(f"Serial: K?t n?i thành công {self.esp_port}")
-        except Exception as e:
-            self.get_logger().error(f"Serial: Không th? m? c?ng {self.esp_port}: {e}")
-            return
+        for attempt in range(1, 6):
+            try:
+                self.ser = serial.Serial(self.esp_port, self.esp_baudrate, timeout=0.05)
+                self.get_logger().info(f"Serial: Kết nối thành công {self.esp_port} (lần {attempt})")
+                break
+            except Exception as e:
+                self.get_logger().warn(f"Serial: Thử kết nối {self.esp_port} lần {attempt}/5 thất bại: {e}")
+                time.sleep(0.4)
+
+        if self.ser is None or not self.ser.is_open:
+            self.get_logger().error(f"Serial: Chưa thể mở cổng {self.esp_port}. Node sẽ tự động thử lại khi có dữ liệu.")
+
 
         # ============================================
         # Tr?ng thái Odometry
@@ -195,20 +203,25 @@ class HoverbotOdomNode(Node):
     def serial_read_callback(self):
         try:
             if self.ser is None or not self.ser.is_open:
-                return
+                try:
+                    self.ser = serial.Serial(self.esp_port, self.esp_baudrate, timeout=0.05)
+                    self.get_logger().info(f"Serial: Tự động kết nối lại thành công {self.esp_port}")
+                except Exception:
+                    return
 
-            # Ð?c t?t c? dòng có s?n, ch? l?y dòng cu?i cùng
+            # Đọc tất cả dòng có sẵn, chỉ lấy dòng telemetry mới nhất
             latest_telemetry = None
             while self.ser.in_waiting > 0:
                 try:
                     line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
+                    if line and line.startswith('V:'):
                         latest_telemetry = line
-                except Exception as e:
+                except Exception:
                     pass
 
             if latest_telemetry is None:
                 return
+
 
             # Parse chu?i telemetry b?ng regex
             match = self.telemetry_pattern.search(latest_telemetry)

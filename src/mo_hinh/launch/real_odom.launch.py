@@ -128,6 +128,12 @@ def generate_launch_description():
             default_value='20.0',
             description='RF2O update frequency in Hz.'
         ),
+        DeclareLaunchArgument(
+            'esp_wheel_odom_mode',
+            default_value='diff_2',
+            description='ESP wheel odom mode: diff_2 or diff_4.'
+        ),
+
         hw_with_hoverboard_odom,
         hw_with_esp_odom,
         hw_with_rf2o_odom,
