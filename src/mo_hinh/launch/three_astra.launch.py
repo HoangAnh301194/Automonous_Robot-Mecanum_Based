@@ -1,45 +1,58 @@
-"""Bring up three independently addressed Orbbec Astra Pro cameras.
+"""Bring up three serial-pinned Astra Pro cameras.
 
-Only starts camera drivers and the front depth TF alias; existing obstacle
-and AI processing launch files remain independent.
+Create the driver nodes directly, rather than forwarding numerical-looking serial
+strings through Orbbec's XML launch <param value="..."> auto type inference.
+The obstacle/AI processing nodes remain separate.
 """
-import os
-
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.conditions import IfCondition
-from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    astra_pro_launch = os.path.join(
-        get_package_share_directory('astra_camera'), 'launch', 'astra_pro.launch.xml'
-    )
-
     def camera_driver(name, serial_arg, enabled_arg, color, depth, publish_tf):
-        return IncludeLaunchDescription(
-            AnyLaunchDescriptionSource(astra_pro_launch),
-            launch_arguments={
-                'camera_name': name,
-                'serial_number': LaunchConfiguration(serial_arg),
-                'device_num': LaunchConfiguration('device_num'),
-                'enable_color': 'true' if color else 'false',
-                'enable_depth': 'true' if depth else 'false',
-                'enable_ir': 'false',
-                'enable_point_cloud': 'false',
-                'enable_colored_point_cloud': 'false',
-                'use_uvc_camera': 'true' if color else 'false',
-                'publish_tf': 'true' if publish_tf else 'false',
-            }.items(),
+        return Node(
+            package='astra_camera',
+            executable='astra_camera_node',
+            name='camera',
+            namespace=name,
+            output='screen',
             condition=IfCondition(LaunchConfiguration(enabled_arg)),
+            parameters=[{
+                'camera_name': name,
+                # Critical: the serial is an identifier, never an integer.
+                'serial_number': ParameterValue(
+                    LaunchConfiguration(serial_arg), value_type=str
+                ),
+                'device_num': ParameterValue(
+                    LaunchConfiguration('device_num'), value_type=int
+                ),
+                'enable_color': color,
+                'enable_depth': depth,
+                'enable_ir': False,
+                'enable_point_cloud': False,
+                'enable_colored_point_cloud': False,
+                'use_uvc_camera': color,
+                'uvc_vendor_id': 0x2bc5,
+                'uvc_product_id': 0x0501,
+                'color_width': 640,
+                'color_height': 480,
+                'color_fps': 30,
+                'depth_width': 640,
+                'depth_height': 480,
+                'depth_fps': 30,
+                'publish_tf': publish_tf,
+                # Avoid colliding with camera_link owned by robot_state_publisher.
+                'camera_link_frame_id': name + '_link',
+            }],
         )
 
-    # The URDF already publishes camera_depth_optical_frame and the rear optical
-    # frame. Keep the depth drivers from publishing competing TF authorities.
-    # Map the driver's front depth frame to the existing URDF optical frame.
+    # Existing URDF publishes camera_depth_optical_frame and
+    # rear_camera_depth_optical_frame. Both depth drivers must not publish
+    # their own transforms. Bridge front driver frame to the URDF frame.
     front_depth_tf_alias = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -53,6 +66,7 @@ def generate_launch_description():
         ],
         condition=IfCondition(LaunchConfiguration('enable_front')),
     )
+
     return LaunchDescription([
         DeclareLaunchArgument(
             'ai_serial', default_value='17122611013',
@@ -68,7 +82,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'device_num', default_value='3',
-            description='Number of physically attached Astra devices.',
+            description='Total number of physically attached Astra devices.',
         ),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
