@@ -13,7 +13,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    def camera_driver(name, serial_arg, enabled_arg, color, depth, publish_tf):
+    def camera_driver(name, serial_arg, enabled_arg, color, depth, publish_tf, depth_fps=30):
         return Node(
             package='astra_camera',
             executable='astra_camera_node',
@@ -43,7 +43,7 @@ def generate_launch_description():
                 'color_fps': 30,
                 'depth_width': 640,
                 'depth_height': 480,
-                'depth_fps': 30,
+                'depth_fps': depth_fps,
                 'publish_tf': publish_tf,
                 # Avoid colliding with camera_link owned by robot_state_publisher.
                 'camera_link_frame_id': name + '_link',
@@ -84,16 +84,30 @@ def generate_launch_description():
             'device_num', default_value='3',
             description='Total number of physically attached Astra devices.',
         ),
+        DeclareLaunchArgument(
+            'front_depth_fps', default_value='15',
+            description='Depth FPS for the front camera (default: 15).',
+        ),
+        DeclareLaunchArgument(
+            'rear_depth_fps', default_value='15',
+            description='Depth FPS for the rear camera (default: 15).',
+        ),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
         DeclareLaunchArgument('enable_rear', default_value='true'),
         front_depth_tf_alias,
         camera_driver('front_camera', 'front_serial', 'enable_front',
-                      color=False, depth=True, publish_tf=False),
+                      color=False, depth=True, publish_tf=False,
+                      depth_fps=ParameterValue(
+                          LaunchConfiguration('front_depth_fps'), value_type=int
+                      )),
         TimerAction(
             period=2.0,
             actions=[camera_driver('rear_camera', 'rear_serial', 'enable_rear',
-                                   color=False, depth=True, publish_tf=False)],
+                                   color=False, depth=True, publish_tf=False,
+                                   depth_fps=ParameterValue(
+                                       LaunchConfiguration('rear_depth_fps'), value_type=int
+                                   ))],
         ),
         TimerAction(
             period=4.0,
