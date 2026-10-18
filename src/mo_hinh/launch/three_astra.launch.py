@@ -1,11 +1,15 @@
-"""Bring up three serial-pinned Astra Pro cameras.
+"""Launch front/rear Astra Depth and a separately selected AI UVC/RGB stream.
 
-Create the driver nodes directly, rather than forwarding numerical-looking serial
-strings through Orbbec's XML launch <param value="..."> auto type inference.
-The obstacle/AI processing nodes remain separate.
+The two Astra Depth devices are selected using their OpenNI serial numbers.
+Astra Pro RGB interfaces have no unique USB serial, so the AI stream uses
+usb_cam and a fixed USB *port path* (resolved to /dev/videoN at launch time).
+Never select the AI UVC interface by a non-existent OpenNI serial number.
 """
+import os
+import stat
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, TimerAction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -13,7 +17,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    def camera_driver(name, serial_arg, enabled_arg, color, depth, publish_tf, depth_fps=30):
+    def depth_camera(name, serial_arg, enabled_arg, fps_arg):
         return Node(
             package='astra_camera',
             executable='astra_camera_node',
@@ -23,36 +27,71 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration(enabled_arg)),
             parameters=[{
                 'camera_name': name,
-                # Critical: the serial is an identifier, never an integer.
                 'serial_number': ParameterValue(
                     LaunchConfiguration(serial_arg), value_type=str
                 ),
+                # Number of *Astra driver processes* in this launch.
+                # The AI RGB interface is owned by usb_cam, not Astra.
                 'device_num': ParameterValue(
                     LaunchConfiguration('device_num'), value_type=int
                 ),
-                'enable_color': color,
-                'enable_depth': depth,
+                'enable_color': False,
+                'enable_depth': True,
                 'enable_ir': False,
                 'enable_point_cloud': False,
                 'enable_colored_point_cloud': False,
-                'use_uvc_camera': color,
-                'uvc_vendor_id': 0x2bc5,
-                'uvc_product_id': 0x0501,
-                'color_width': 640,
-                'color_height': 480,
-                'color_fps': 30,
+                'use_uvc_camera': False,
                 'depth_width': 640,
                 'depth_height': 480,
-                'depth_fps': depth_fps,
-                'publish_tf': publish_tf,
-                # Avoid colliding with camera_link owned by robot_state_publisher.
+                'depth_fps': ParameterValue(
+                    LaunchConfiguration(fps_arg), value_type=int
+                ),
+                'publish_tf': False,
                 'camera_link_frame_id': name + '_link',
             }],
         )
 
-    # Existing URDF publishes camera_depth_optical_frame and
-    # rear_camera_depth_optical_frame. Both depth drivers must not publish
-    # their own transforms. Bridge front driver frame to the URDF frame.
+    def ai_rgb_camera(context, *args, **kwargs):
+        # usb_cam on this Jetson does not correctly accept a /dev/v4l/by-path
+        # symlink directly. Resolve it to the active /dev/videoN first.
+        by_path = LaunchConfiguration('ai_video_device').perform(context)
+        device = os.path.realpath(by_path)
+        if not os.path.exists(device) or not stat.S_ISCHR(os.stat(device).st_mode):
+            raise RuntimeError(
+                'AI RGB UVC device not found: {} -> {}. Check USB connection '
+                'and `ls -l /dev/v4l/by-path/`. '
+                'Override with ai_video_device:=<correct path>.'.format(
+                    by_path, device
+                )
+            )
+
+        return [
+            LogInfo(msg='[three_astra] AI RGB video device: {} -> {}'.format(
+                by_path, device
+            )),
+            Node(
+                package='usb_cam',
+                executable='usb_cam_node_exe',
+                name='usb_cam',
+                namespace='ai_camera/color',
+                output='screen',
+                parameters=[{
+                    'video_device': device,
+                    'image_width': 640,
+                    'image_height': 480,
+                    'framerate': ParameterValue(
+                        LaunchConfiguration('ai_color_fps'), value_type=float
+                    ),
+                    'io_method': 'mmap',
+                    'pixel_format': 'mjpeg2rgb',
+                    'camera_name': 'ai_camera',
+                    'frame_id': 'ai_camera_color_optical_frame',
+                }],
+            ),
+        ]
+
+    # The front optical frame is already a child of the existing robot URDF
+    # camera_depth_optical_frame. No duplicate Astra TF is published.
     front_depth_tf_alias = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -69,49 +108,62 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument(
+            'ai_video_device',
+            default_value=(
+                '/dev/v4l/by-path/'
+                'platform-3610000.usb-usb-0:2.2.1:1.0-video-index0'
+            ),
+            description='Physical USB-port path of AI RGB UVC interface.',
+        ),
+        DeclareLaunchArgument(
+            'ai_color_fps', default_value='30',
+            description='AI RGB MJPEG FPS (default: 30).',
+        ),
+        # Compatibility with prior CLI; no AI OpenNI node is started.
+        DeclareLaunchArgument(
             'ai_serial', default_value='17122611013',
-            description='Serial of the forward-facing RGB/AI camera.',
+            description='Legacy AI OpenNI serial (not used by usb_cam).',
         ),
         DeclareLaunchArgument(
             'front_serial', default_value='17110310855',
-            description='Serial of the forward down-tilted depth camera.',
+            description='Serial of front depth camera.',
         ),
         DeclareLaunchArgument(
             'rear_serial', default_value='17122514440',
-            description='Serial of the rear down-tilted depth camera.',
+            description='Serial of rear depth camera.',
         ),
         DeclareLaunchArgument(
-            'device_num', default_value='3',
-            description='Total number of physically attached Astra devices.',
+            'device_num', default_value='2',
+            description='Number of Astra Depth driver nodes (default: 2).',
         ),
         DeclareLaunchArgument(
             'front_depth_fps', default_value='15',
-            description='Depth FPS for the front camera (default: 15).',
+            description='Front depth FPS (default: 15).',
         ),
         DeclareLaunchArgument(
             'rear_depth_fps', default_value='15',
-            description='Depth FPS for the rear camera (default: 15).',
+            description='Rear depth FPS (default: 15).',
         ),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
         DeclareLaunchArgument('enable_rear', default_value='true'),
         front_depth_tf_alias,
-        camera_driver('front_camera', 'front_serial', 'enable_front',
-                      color=False, depth=True, publish_tf=False,
-                      depth_fps=ParameterValue(
-                          LaunchConfiguration('front_depth_fps'), value_type=int
-                      )),
+        depth_camera('front_camera', 'front_serial', 'enable_front',
+                     'front_depth_fps'),
         TimerAction(
             period=2.0,
-            actions=[camera_driver('rear_camera', 'rear_serial', 'enable_rear',
-                                   color=False, depth=True, publish_tf=False,
-                                   depth_fps=ParameterValue(
-                                       LaunchConfiguration('rear_depth_fps'), value_type=int
-                                   ))],
+            actions=[
+                depth_camera('rear_camera', 'rear_serial', 'enable_rear',
+                             'rear_depth_fps'),
+            ],
         ),
         TimerAction(
             period=4.0,
-            actions=[camera_driver('ai_camera', 'ai_serial', 'enable_ai',
-                                   color=True, depth=False, publish_tf=True)],
+            actions=[
+                OpaqueFunction(
+                    function=ai_rgb_camera,
+                    condition=IfCondition(LaunchConfiguration('enable_ai')),
+                ),
+            ],
         ),
     ])
