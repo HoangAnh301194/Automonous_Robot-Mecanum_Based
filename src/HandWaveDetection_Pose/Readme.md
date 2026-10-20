@@ -41,6 +41,23 @@ python main.py --backend rtmpose --device cpu
 **Áp dụng cho nhánh `main` sau khi đồng bộ topic AI (PR #10).**
 Mục này mô tả node ROS 2 `hand_wave_detection`, **khác** với chương trình
 `python main.py` dùng để chạy độc lập và benchmark trong các phần bên dưới.
+Giữ nguyên namespace của `mo_hinh/three_astra.launch.py`.
+Cả ba thiết bị Astra Pro nay đều được định danh bằng serial OpenNI:
+Front `17110310855`, Rear `17122514440`, AI `17122611013`.
+Với AI RGB/UVC, launch tra serial từ thiết bị Depth rồi ghép giao diện
+RGB nằm cùng hub USB nội bộ của camera đó; nếu không ghép được duy nhất,
+launch dừng và báo lỗi thay vì lấy nhầm RGB của Rear.
+Trước khi chạy lần đầu (đã dừng các camera), nghiệm thu ánh xạ:
+
+~~~bash
+cd ~/ros2_ws
+python3 src/mo_hinh/launch/_astra_serial_resolver.py \\
+  --front-serial 17110310855 \\
+  --rear-serial 17122514440 \\
+  --ai-serial 17122611013
+python3 tools/test_astra_serial_resolver.py
+~~~
+
 Giữ nguyên namespace của `mo_hinh/three_astra.launch.py`:
 
 | Camera | Topic ảnh |
@@ -176,8 +193,8 @@ YOLO Detection/Tracking/Debug và HandWaveDetection phải subscribe
 `/ai_camera/color/image_raw`; riêng HandWaveDetection nhận thêm
 `/yolo/tracking`. Kết quả gồm `/pose/image_debug` (ảnh có khung xương),
 `/pose/wave_detected` (Bool), `/pose/wave_status` (String).
-Nếu đúng tên topic nhưng hình vẫn là Rear, kiểm tra thiết bị USB thực tế
-được `usb_cam` mở, không tự sửa namespace hoặc đổi sang Depth Rear.
+Nếu đúng tên topic nhưng hình vẫn là Rear, kiểm tra kết quả ghép serial
+và quan sát RGB vật lý. Không tự sửa namespace hoặc đổi sang Depth Rear.
 
 **Lưu ý CUDA:** CUDA của PyTorch dùng cho YOLO và `CUDAExecutionProvider`
 của ONNX Runtime dùng cho RTMPose là hai cấu hình độc lập. Trên Jetson hiện

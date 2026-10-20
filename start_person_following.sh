@@ -21,6 +21,9 @@ YOLO_CLASSES="${YOLO_CLASSES:-0}"
 YOLO_IMAGE_RELIABILITY="${YOLO_IMAGE_RELIABILITY:-2}"
 HAND_WAVE_DEVICE="${HAND_WAVE_DEVICE:-cpu}"
 HAND_WAVE_MAX_PEOPLE="${HAND_WAVE_MAX_PEOPLE:-3}"
+FRONT_SERIAL="${FRONT_SERIAL:-17110310855}"
+REAR_SERIAL="${REAR_SERIAL:-17122514440}"
+AI_SERIAL="${AI_SERIAL:-17122611013}"
 FRONT_DEPTH_FPS="${FRONT_DEPTH_FPS:-15}"
 REAR_DEPTH_FPS="${REAR_DEPTH_FPS:-15}"
 AI_COLOR_FPS="${AI_COLOR_FPS:-30}"
@@ -58,6 +61,9 @@ check_alive() {
 
 echo "[1/3] Start front/rear Depth and AI RGB"
 ros2 launch mo_hinh three_astra.launch.py \
+  front_serial:="$FRONT_SERIAL" \
+  rear_serial:="$REAR_SERIAL" \
+  ai_serial:="$AI_SERIAL" \
   front_depth_fps:="$FRONT_DEPTH_FPS" \
   rear_depth_fps:="$REAR_DEPTH_FPS" \
   ai_color_fps:="$AI_COLOR_FPS" \
@@ -102,6 +108,9 @@ check_alive "$pose_pid" "$LOG_DIR/hand_wave.log"
 cat <<EOF
 
 AI 2D + skeleton pipeline started.
+  Front serial:    $FRONT_SERIAL
+  Rear serial:     $REAR_SERIAL
+  AI serial:       $AI_SERIAL
   RGB source:      $AI_IMAGE_TOPIC
   Person tracking: $TRACKING_TOPIC
   Skeleton debug:  /pose/image_debug
