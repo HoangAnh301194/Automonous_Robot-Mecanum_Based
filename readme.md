@@ -324,6 +324,25 @@ The web Vision dashboard monitors these camera information topics:
 and `/rear_camera/depth/camera_info`.
 
 
+### 6.8 Refresh web Vision dashboard assets (optional)
+
+Only required when using the web dashboard at port 8000, not for
+the camera/YOLO/RTMPose runtime:
+
+```bash
+cd ~/ros2_ws/src/robot_ui/frontend
+npm ci
+npm run build
+cd ~/ros2_ws
+colcon build --symlink-install --packages-select robot_ui
+source ~/ros2_ws/install/setup.bash
+```
+
+Requires Node.js 20.19+ as described in the UI README. The updated Vision
+screen distinguishes AI RGB, Front Depth and Rear Depth CameraInfo topics.
+Simply building the Python ROS package without compiling the React frontend
+may leave an older web page visible.
+
 ## 7) Robot UI
 
 The repository provides two UI modes:
