@@ -2,7 +2,7 @@
 
 import os
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -35,6 +35,19 @@ def generate_launch_description():
     max_det_arg = DeclareLaunchArgument('max_det', default_value='10',
         description='Reduced from 300; 10 is enough for person following')
     
+    def validate_3d_topics(context, *args, **kwargs):
+        # Do not silently subscribe to old /camera/depth topics when 3D is enabled.
+        use_3d = context.perform_substitution(LaunchConfiguration('use_3d')).lower()
+        if use_3d in {'true', '1', 'yes'}:
+            depth_topic = context.perform_substitution(LaunchConfiguration('input_depth_topic'))
+            info_topic = context.perform_substitution(LaunchConfiguration('input_depth_info_topic'))
+            if not depth_topic or not info_topic:
+                raise RuntimeError(
+                    '3D person following requires explicitly configured, calibrated '
+                    'and registered input_depth_topic and input_depth_info_topic. '
+                    'Do not pair AI RGB with Front/Rear Depth without registration.'
+                )
+        return []
     # Safe default: RGB detection/tracking only; no cross-camera 3D inference.
     yolo_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(yolo_bringup_dir, 'launch', 'yolo.launch.py')),
@@ -84,6 +97,7 @@ def generate_launch_description():
         imgsz_height_arg,
         imgsz_width_arg,
         max_det_arg,
+        OpaqueFunction(function=validate_3d_topics),
         yolo_launch,
         tracker_node
     ])
