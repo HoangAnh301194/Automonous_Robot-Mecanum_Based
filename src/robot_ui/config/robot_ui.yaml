@@ -28,8 +28,9 @@ ros:
     diagnostics: /diagnostics
     rosout: /rosout
     mission_status: /mission/status
-    camera_color_info: /camera/color/camera_info
-    camera_depth_info: /camera/depth/camera_info
+    camera_color_info: /ai_camera/color/camera_info
+    camera_depth_info: /front_camera/depth/camera_info
+    camera_rear_depth_info: /rear_camera/depth/camera_info
     yolo_detections: /yolo/detections
     wave_detected: /pose/wave_detected
     wave_status: /pose/wave_status
@@ -47,6 +48,7 @@ ros:
     mission_status: 2.0
     camera_color_info: 5.0
     camera_depth_info: 5.0
+    camera_rear_depth_info: 5.0
     yolo_detections: 5.0
     scan_obstacles: 5.0
   navigation:
