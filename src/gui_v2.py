@@ -39,7 +39,6 @@ from PyQt5.QtWidgets import (
 )
 
 import rclpy
-from diagnostic_msgs.msg import KeyValue
 from geometry_msgs.msg import PoseStamped, Twist
 from action_msgs.srv import CancelGoal
 from nav2_msgs.action import NavigateToPose
@@ -114,72 +113,52 @@ def _list_serial_ports():
     return dedup
 
 
-def _is_rplidar_port(port, baudrate=115200, timeout=0.25):
-    """Gửi lệnh GET_INFO (A5 50) kiểm tra xem có phải RPLIDAR không (phản hồi trong <50ms)."""
+def _is_esp32_port(port, baudrate=115200):
     if serial is None:
         return False
     try:
-        ser = serial.Serial(port=port, baudrate=baudrate, timeout=timeout, write_timeout=0.2)
-        try:
-            ser.reset_input_buffer()
-            ser.write(b"\xA5\x50")
-            ser.flush()
-            start = time.monotonic()
-            desc = bytearray()
-            while len(desc) < 7 and (time.monotonic() - start) < timeout:
-                chunk = ser.read(7 - len(desc))
-                if chunk:
-                    desc.extend(chunk)
-            if bytes(desc) == b"\xA5\x5A\x14\x00\x00\x00\x04":
+        # Mở cổng với timeout ngắn để không bị treo (block) lâu
+        ser = serial.Serial(port, baudrate=baudrate, timeout=0.1)
+        ser.reset_input_buffer()
+        
+        # Quét liên tục trong tối đa 3 giây
+        start_time = time.time()
+        while time.time() - start_time < 3.0:
+            line = ser.readline().decode("utf-8", errors="ignore").strip()
+            if not line:
+                continue
+            
+            # Các dấu hiệu nhận biết chắc chắn 100% là ESP32
+            if line.startswith("V:") and "EL:" in line:
+                ser.close()
                 return True
-        finally:
-            ser.close()
-    except Exception:
-        pass
-    return False
-
-
-def _is_esp32_port(port, baudrate=115200, timeout=1.0):
-    """Kiểm tra telemetry V:... hoặc dấu hiệu khởi động của ESP32 một cách an toàn."""
-    if serial is None:
+            if line.startswith("E,"):
+                ser.close()
+                return True
+            # Dấu hiệu bootloader của mạch ESP32 khi vừa mở Serial
+            if "ets Jun" in line or "rst:0x" in line or "boot:" in line:
+                ser.close()
+                return True
+                
+        ser.close()
         return False
-    try:
-        ser = serial.Serial(port=port, baudrate=baudrate, timeout=0.1)
-        try:
-            start_time = time.monotonic()
-            while time.monotonic() - start_time < timeout:
-                line = ser.readline().decode("utf-8", errors="ignore").strip()
-                if not line:
-                    continue
-                if line.startswith("V:") and "EL:" in line:
-                    return True
-                if line.startswith("E,"):
-                    return True
-                if "ets Jun" in line or "rst:0x" in line or "boot:" in line or "HOVERBOT" in line:
-                    return True
-        finally:
-            ser.close()
     except Exception:
-        pass
-    return False
+        return False
 
 
 def _detect_esp_lidar_ports():
     esp_alias = "/dev/esp32"
-    lidar_alias = "/dev/rplidar" if os.path.exists("/dev/rplidar") else "/dev/lidar"
+    lidar_alias = "/dev/lidar"
     if os.path.exists(esp_alias) and os.path.exists(lidar_alias):
         return esp_alias, lidar_alias, "udev_alias"
 
     ports = _list_serial_ports()
     if not ports:
         return "/dev/ttyUSB0", "/dev/ttyUSB1", "fallback_defaults"
-    if len(ports) == 1:
-        return ports[0], "/dev/ttyUSB1" if ports[0] != "/dev/ttyUSB1" else "/dev/ttyUSB0", "single_port"
 
     esp_port = None
     lidar_port = None
 
-    # 1. Thử nhận diện qua tên thiết bị id nếu có
     for port in ports:
         key = os.path.basename(port).lower()
         if lidar_port is None and ("rplidar" in key or "slamtec" in key or "lidar" in key):
@@ -187,42 +166,31 @@ def _detect_esp_lidar_ports():
         if esp_port is None and ("esp32" in key or "esp" in key):
             esp_port = port
 
-    # 2. Nhận diện cực nhanh RPLIDAR qua lệnh GET_INFO A5 50 (<50ms, không làm dừng motor)
-    if lidar_port is None or esp_port is None:
-        for port in ports:
-            if lidar_port is None and _is_rplidar_port(port):
-                lidar_port = port
-                break
-        if lidar_port is not None:
-            remaining = [p for p in ports if p != lidar_port]
-            if remaining and esp_port is None:
-                esp_port = remaining[0]
-                time.sleep(0.2)
-                return esp_port, lidar_port, "fast_rplidar_probe"
-
-    # 3. Nếu chưa nhận diện được qua LiDAR, thử kiểm tra ESP32
     if esp_port is None:
         for port in ports:
-            if port != lidar_port and _is_esp32_port(port, timeout=1.0):
+            if _is_esp32_port(port):
                 esp_port = port
                 break
 
-    # 4. Fallback gán cổng hợp lý
-    if esp_port is None and lidar_port is not None:
-        remaining = [p for p in ports if p != lidar_port]
-        esp_port = remaining[0] if remaining else ("/dev/ttyUSB0" if lidar_port != "/dev/ttyUSB0" else "/dev/ttyUSB1")
+    if esp_port is None:
+        for port in ports:
+            if port.endswith("ttyUSB0") or port.endswith("ttyACM0"):
+                esp_port = port
+                break
 
-    if lidar_port is None and esp_port is not None:
-        remaining = [p for p in ports if p != esp_port]
-        lidar_port = remaining[0] if remaining else ("/dev/ttyUSB1" if esp_port != "/dev/ttyUSB1" else "/dev/ttyUSB0")
-
-    if esp_port is None and lidar_port is None:
+    if esp_port is None:
         esp_port = ports[0]
-        lidar_port = ports[1] if len(ports) > 1 else "/dev/ttyUSB1"
 
-    time.sleep(0.2)
-    return esp_port, lidar_port, "probe"
+    if lidar_port is None:
+        for port in ports:
+            if port != esp_port:
+                lidar_port = port
+                break
 
+    if lidar_port is None or lidar_port == esp_port:
+        lidar_port = "/dev/ttyUSB1" if esp_port != "/dev/ttyUSB1" else "/dev/ttyUSB0"
+
+    return esp_port, lidar_port, "scan"
 
 
 ROS_SETUP = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
@@ -264,7 +232,6 @@ class RosInterface(Node):
         pose_callback=None,
         scan_callback=None,
         dataenc_callback=None,
-        alert_callback=None,
     ):
         super().__init__("desktop_nav_gui_v2")
         self.log_callback = log_callback
@@ -272,7 +239,6 @@ class RosInterface(Node):
         self.pose_callback = pose_callback
         self.scan_callback = scan_callback
         self.dataenc_callback = dataenc_callback
-        self.alert_callback = alert_callback
         self.last_scan_ui_pub = 0.0
         self.last_tf_warn_time = 0.0
         self.target_map_frame = "map"
@@ -310,12 +276,6 @@ class RosInterface(Node):
             self.on_dataenc,
             20,
         )
-        self.alert_sub = self.create_subscription(
-            KeyValue,
-            "/navigation/operator_alert",
-            self.on_alert,
-            10,
-        )
 
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
@@ -335,10 +295,6 @@ class RosInterface(Node):
     def on_map(self, msg):
         if self.map_callback:
             self.map_callback(msg)
-
-    def on_alert(self, msg):
-        if self.alert_callback:
-            self.alert_callback(msg.key, msg.value)
 
     def _pose_to_xyyaw(self, qx, qy, qz, qw):
         siny_cosp = 2.0 * (qw * qz + qx * qy)
@@ -777,7 +733,6 @@ class MainWindow(QWidget):
     pose_signal = pyqtSignal(float, float, float, str)
     scan_signal = pyqtSignal(object, object)
     dataenc_signal = pyqtSignal(object)
-    alert_signal = pyqtSignal(str, str)
 
     LAYER1_SIM = "layer1_sim"
     LAYER1_REAL = "layer1_real"
@@ -810,7 +765,6 @@ class MainWindow(QWidget):
         self.pose_signal.connect(self._on_new_pose_ui)
         self.scan_signal.connect(self._on_new_scan_ui)
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
-        self.alert_signal.connect(self._on_alert_ui)
 
         self.init_ui()
         self.init_ros()
@@ -832,6 +786,7 @@ class MainWindow(QWidget):
         self.rb_real.toggled.connect(self.on_robot_mode_changed)
 
         self.cmb_odom_source = QComboBox()
+        self.cmb_odom_source.addItem("Hoverboard ros2_control", "hoverboard")
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
@@ -863,27 +818,7 @@ class MainWindow(QWidget):
         system_layout.addWidget(QLabel("Localization backend:"), 4, 0)
         system_layout.addWidget(self.cmb_localization_backend, 4, 1, 1, 2)
         system_layout.addWidget(self.chk_auto_nav2, 5, 0, 1, 3)
-
-        self.cmb_esp_port = QComboBox()
-        self.cmb_esp_port.addItem("Auto-detect", "auto")
-        self.cmb_lidar_port = QComboBox()
-        self.cmb_lidar_port.addItem("Auto-detect", "auto")
-
-
-        known_ports = ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/esp32", "/dev/rplidar", "/dev/lidar"]
-        for p in _list_serial_ports():
-            if p not in known_ports:
-                known_ports.append(p)
-        for p in known_ports:
-            self.cmb_esp_port.addItem(p, p)
-            self.cmb_lidar_port.addItem(p, p)
-
-        system_layout.addWidget(QLabel("Cổng ESP32:"), 6, 0)
-        system_layout.addWidget(self.cmb_esp_port, 6, 1, 1, 2)
-        system_layout.addWidget(QLabel("Cổng LiDAR:"), 7, 0)
-        system_layout.addWidget(self.cmb_lidar_port, 7, 1, 1, 2)
         system_group.setLayout(system_layout)
-
 
         self.lbl_map_folder = QLabel("Map folder: ")
         self.lbl_map_folder.setWordWrap(True)
@@ -1054,7 +989,6 @@ class MainWindow(QWidget):
             pose_callback=self.on_new_pose,
             scan_callback=self.on_new_scan,
             dataenc_callback=self.on_new_dataenc,
-            alert_callback=self.on_alert,
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True)
         self.ros_spin_thread.start()
@@ -1102,19 +1036,6 @@ class MainWindow(QWidget):
             return
         self.lbl_dataenc.setText(f"Encoder /dataenc: {values}")
 
-    def on_alert(self, code, message):
-        self.alert_signal.emit(code, message)
-
-    def _on_alert_ui(self, code, message):
-        self.lbl_nav2_status.setText(f"Nav2: {code}")
-        self.append_log(f"[ALERT] {code}: {message}")
-        if code == "BACKUP_FAILED":
-            self.lbl_nav2_status.setStyleSheet("color: red; font-weight: bold;")
-        elif code in ["WAITING", "PRE_BACKUP", "REPLANNING"]:
-            self.lbl_nav2_status.setStyleSheet("color: orange; font-weight: bold;")
-        else:
-            self.lbl_nav2_status.setStyleSheet("color: white; font-weight: bold;")
-
     def on_odom_source_changed(self):
         if self.is_sim_mode():
             self.cmb_esp_wheel_mode.setEnabled(False)
@@ -1139,11 +1060,8 @@ class MainWindow(QWidget):
 
     def on_robot_mode_changed(self):
         self.cmb_odom_source.setEnabled(not self.is_sim_mode())
-        self.cmb_esp_port.setEnabled(not self.is_sim_mode())
-        self.cmb_lidar_port.setEnabled(not self.is_sim_mode())
         self.on_operation_mode_changed()
         self.on_odom_source_changed()
-
 
     def waypoint_name_from_index(self, idx):
         alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -1278,7 +1196,7 @@ class MainWindow(QWidget):
         return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
 
     def get_selected_odom_source(self):
-        return self.cmb_odom_source.currentData() or "esp"
+        return self.cmb_odom_source.currentData() or "hoverboard"
 
     def get_selected_esp_wheel_odom_mode(self):
         return self.cmb_esp_wheel_mode.currentData() or "diff_2"
@@ -1419,30 +1337,18 @@ class MainWindow(QWidget):
             self.proc_mgr.stop(self.LAYER1_SIM)
             odom_source = self.get_selected_odom_source()
             esp_wheel_mode = self.get_selected_esp_wheel_odom_mode()
-            user_esp = self.cmb_esp_port.currentData()
-            user_lidar = self.cmb_lidar_port.currentData()
-
-            if user_esp != "auto" and user_lidar != "auto":
-                esp_port = user_esp
-                lidar_port = user_lidar
-                detect_method = "manual_gui"
-            else:
-                det_esp, det_lidar, detect_method = _detect_esp_lidar_ports()
-                esp_port = det_esp if user_esp == "auto" else user_esp
-                lidar_port = det_lidar if user_lidar == "auto" else user_lidar
-
+            esp_port, lidar_port, detect_method = _detect_esp_lidar_ports()
             self.append_log(
-                f"Serial port ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}"
+                f"Auto-detect serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}"
             )
             cmd = (
                 self.ros_prefix()
                 + "ros2 launch mo_hinh real_odom.launch.py "
                 + f"odom_source:={odom_source} use_sim_time:={sim_time} "
                 + f"esp_wheel_odom_mode:={esp_wheel_mode} "
-                + f"esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
+                + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
             self.proc_mgr.start(self.LAYER1_REAL, cmd)
-
 
     def stop_platform(self):
         self.proc_mgr.stop(self.LAYER1_SIM)
