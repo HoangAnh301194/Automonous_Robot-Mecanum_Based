@@ -173,9 +173,55 @@ Camera streams:
 - Rear Depth: `/rear_camera/depth/image_raw` — serial-pinned OpenNI.
 - AI RGB: `/ai_camera/color/image_raw` — `usb_cam`, MJPEG to RGB.
 
-The RGB camera is selected by physical USB port, not OpenNI serial:
-`/dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.1:1.0-video-index0`.
-Override `ai_video_device:=...` if the camera is moved to another port.
+All three cameras are identified by OpenNI serials, including AI:
+- Front: `front_serial:=17110310855`
+- Rear: `rear_serial:=17122514440`
+- AI: `ai_serial:=17122611013`
+
+**Astra Pro RGB is a separate UVC USB interface:** the launch resolves the
+OpenNI Depth device by serial (via `libOpenNI2.so`) and then looks for the
+sole UVC video-index0 interface underneath the same per-camera USB hub.
+It resolves to the currently active `/dev/videoN` and passes that to
+`usb_cam`. It does NOT assume USB enumeration order or a hard-coded port.
+If the USB topology cannot prove a unique match, startup **fails closed**
+rather than silently substituting RGB from Rear. Camera identity must be
+verified once on the physical Jetson hardware.
+
+**Before running three cameras for the first time**, stop all camera launches,
+then diagnose the serial-to-RGB pairing:
+
+```bash
+cd ~/ros2_ws
+python3 src/mo_hinh/launch/_astra_serial_resolver.py \
+  --front-serial 17110310855 \
+  --rear-serial 17122514440 \
+  --ai-serial 17122611013
+```
+
+The diagnostic prints three `serial -> /dev/videoN` mappings.
+If it reports missing `libOpenNI2.so`, point `OPENNI2_LIBRARY` to the
+library already used by `astra_camera` (ensure its OpenNI driver plugins
+are installed). If a USB pairing is ambiguous, inspect `lsusb -t` and
+`v4l2-ctl --list-devices`; do not force an unverified RGB device.
+
+Unit tests (no hardware required):
+
+```bash
+python3 tools/test_astra_serial_resolver.py
+python3 tools/test_ai_topic_contract.py
+```
+
+You can override the three serials when starting a specific robot:
+
+```bash
+ros2 launch mo_hinh three_astra.launch.py \
+  front_serial:=17110310855 \
+  rear_serial:=17122514440 \
+  ai_serial:=17122611013
+```
+
+This needs `colcon build --symlink-install --packages-select mo_hinh`
+after pulling the changed launch/helper files.
 
 Astra may reject 640x480@15 and fall back to a supported mode such as
 640x480@30. Treat 15 FPS as **requested** until actual FPS and driver
@@ -284,7 +330,7 @@ Default AI routing:
 - `/pose/image_debug` -> skeleton visualization
 - `/pose/wave_detected` -> raised-hand detection
 
-The script runs YOLO on `cuda:0` and RTMPose on `cpu` by default. Override
+The script runs YOLO on `cuda:0` and RTMPose on `cpu` by default. Three serials are configurable as `FRONT_SERIAL`, `REAR_SERIAL` and `AI_SERIAL` environment variables. Override
 non-topic options via environment variables, for example
 `HAND_WAVE_MAX_PEOPLE=1 bash start_person_following.sh`. All launch logs
 are written under `log/ai_pipeline_YYYYMMDD_HHMMSS/`. Press Ctrl+C to
