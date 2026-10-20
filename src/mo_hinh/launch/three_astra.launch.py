@@ -1,12 +1,18 @@
-"""Launch front/rear Astra Depth and a separately selected AI UVC/RGB stream.
+"""Launch three Astra Pro cameras bound by their OpenNI hardware serials.
 
-The two Astra Depth devices are selected using their OpenNI serial numbers.
-Astra Pro RGB interfaces have no unique USB serial, so the AI stream uses
-usb_cam and a fixed USB *port path* (resolved to /dev/videoN at launch time).
-Never select the AI UVC interface by a non-existent OpenNI serial number.
+Front/Rear Depth use astra_camera with serial_number. The AI RGB UVC stream
+is resolved from ai_serial via the Depth USB device and its internal hub.
+Ambiguous or missing physical device identity aborts startup (no guessing).
 """
+
 import os
 import stat
+import sys
+from pathlib import Path
+
+# This helper is installed alongside the launch file by the mo_hinh package.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _astra_serial_resolver import resolve_video_from_serial
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, LogInfo, OpaqueFunction, TimerAction
@@ -52,22 +58,28 @@ def generate_launch_description():
         )
 
     def ai_rgb_camera(context, *args, **kwargs):
-        # usb_cam on this Jetson does not correctly accept a /dev/v4l/by-path
-        # symlink directly. Resolve it to the active /dev/videoN first.
-        by_path = LaunchConfiguration('ai_video_device').perform(context)
-        device = os.path.realpath(by_path)
-        if not os.path.exists(device) or not stat.S_ISCHR(os.stat(device).st_mode):
+        front_serial = LaunchConfiguration('front_serial').perform(context)
+        rear_serial = LaunchConfiguration('rear_serial').perform(context)
+        ai_serial = LaunchConfiguration('ai_serial').perform(context)
+        device, report = resolve_video_from_serial(
+            ai_serial=ai_serial,
+            required_serials=[front_serial, rear_serial, ai_serial],
+        )
+        resolved_device = os.path.realpath(device)
+        if (not os.path.exists(resolved_device)
+                or not stat.S_ISCHR(os.stat(resolved_device).st_mode)):
             raise RuntimeError(
-                'AI RGB UVC device not found: {} -> {}. Check USB connection '
-                'and `ls -l /dev/v4l/by-path/`. '
-                'Override with ai_video_device:=<correct path>.'.format(
-                    by_path, device
-                )
+                'Serial {} resolved to {}, but it is not an active '
+                'character device.'.format(ai_serial, device)
             )
 
         return [
-            LogInfo(msg='[three_astra] AI RGB video device: {} -> {}'.format(
-                by_path, device
+            *[LogInfo(msg='[three_astra] Serial-to-RGB: {}'.format(s))
+              for s in report],
+            LogInfo(msg=(
+                '[three_astra] AI serial {} -> {}; Front={} Rear={}'.format(
+                    ai_serial, resolved_device, front_serial, rear_serial
+                )
             )),
             Node(
                 package='usb_cam',
@@ -76,7 +88,7 @@ def generate_launch_description():
                 namespace='ai_camera/color',
                 output='screen',
                 parameters=[{
-                    'video_device': device,
+                    'video_device': resolved_device,
                     'image_width': 640,
                     'image_height': 480,
                     'framerate': ParameterValue(
@@ -106,23 +118,35 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration('enable_front')),
     )
 
-    return LaunchDescription([
-        DeclareLaunchArgument(
-            'ai_video_device',
-            default_value=(
-                '/dev/v4l/by-path/'
-                'platform-3610000.usb-usb-0:2.2.1:1.0-video-index0'
+    def launch_verified_cameras(context, *args, **kwargs):
+        # Resolve and RELEASE all three OpenNI devices before any Depth node
+        # starts; concurrent OpenNI handles may race or lock the hardware.
+        start_ai = (LaunchConfiguration('enable_ai').perform(context).lower()
+                    in ('true', '1', 'yes'))
+        ai_actions = ai_rgb_camera(context) if start_ai else []
+        return [
+            front_depth_tf_alias,
+            depth_camera('front_camera', 'front_serial', 'enable_front',
+                         'front_depth_fps'),
+            TimerAction(
+                period=2.0,
+                actions=[
+                    depth_camera('rear_camera', 'rear_serial', 'enable_rear',
+                                 'rear_depth_fps'),
+                ],
             ),
-            description='Physical USB-port path of AI RGB UVC interface.',
-        ),
+            TimerAction(period=4.0, actions=ai_actions) if start_ai
+            else LogInfo(msg='[three_astra] AI RGB disabled'),
+        ]
+
+    return LaunchDescription([
         DeclareLaunchArgument(
             'ai_color_fps', default_value='30',
             description='AI RGB MJPEG FPS (default: 30).',
         ),
-        # Compatibility with prior CLI; no AI OpenNI node is started.
         DeclareLaunchArgument(
             'ai_serial', default_value='17122611013',
-            description='Legacy AI OpenNI serial (not used by usb_cam).',
+            description='OpenNI serial used to resolve the physical AI RGB UVC camera.',
         ),
         DeclareLaunchArgument(
             'front_serial', default_value='17110310855',
@@ -147,23 +171,5 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
         DeclareLaunchArgument('enable_rear', default_value='true'),
-        front_depth_tf_alias,
-        depth_camera('front_camera', 'front_serial', 'enable_front',
-                     'front_depth_fps'),
-        TimerAction(
-            period=2.0,
-            actions=[
-                depth_camera('rear_camera', 'rear_serial', 'enable_rear',
-                             'rear_depth_fps'),
-            ],
-        ),
-        TimerAction(
-            period=4.0,
-            actions=[
-                OpaqueFunction(
-                    function=ai_rgb_camera,
-                    condition=IfCondition(LaunchConfiguration('enable_ai')),
-                ),
-            ],
-        ),
+        OpaqueFunction(function=launch_verified_cameras),
     ])
