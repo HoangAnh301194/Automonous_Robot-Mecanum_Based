@@ -23,7 +23,7 @@ from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
-    def depth_camera(name, serial_arg, enabled_arg, fps_arg):
+    def depth_camera(name, serial_arg, enabled_arg, fps_arg, width_arg, height_arg):
         return Node(
             package='astra_camera',
             executable='astra_camera_node',
@@ -47,8 +47,12 @@ def generate_launch_description():
                 'enable_point_cloud': False,
                 'enable_colored_point_cloud': False,
                 'use_uvc_camera': False,
-                'depth_width': 640,
-                'depth_height': 480,
+                'depth_width': ParameterValue(
+                    LaunchConfiguration(width_arg), value_type=int
+                ),
+                'depth_height': ParameterValue(
+                    LaunchConfiguration(height_arg), value_type=int
+                ),
                 'depth_fps': ParameterValue(
                     LaunchConfiguration(fps_arg), value_type=int
                 ),
@@ -89,8 +93,12 @@ def generate_launch_description():
                 output='screen',
                 parameters=[{
                     'video_device': resolved_device,
-                    'image_width': 640,
-                    'image_height': 480,
+                    'image_width': ParameterValue(
+                        LaunchConfiguration('ai_color_width'), value_type=int
+                    ),
+                    'image_height': ParameterValue(
+                        LaunchConfiguration('ai_color_height'), value_type=int
+                    ),
                     'framerate': ParameterValue(
                         LaunchConfiguration('ai_color_fps'), value_type=float
                     ),
@@ -127,12 +135,12 @@ def generate_launch_description():
         return [
             front_depth_tf_alias,
             depth_camera('front_camera', 'front_serial', 'enable_front',
-                         'front_depth_fps'),
+                         'front_depth_fps', 'front_depth_width', 'front_depth_height'),
             TimerAction(
                 period=2.0,
                 actions=[
                     depth_camera('rear_camera', 'rear_serial', 'enable_rear',
-                                 'rear_depth_fps'),
+                                 'rear_depth_fps', 'rear_depth_width', 'rear_depth_height'),
                 ],
             ),
             TimerAction(period=4.0, actions=ai_actions) if start_ai
@@ -140,6 +148,15 @@ def generate_launch_description():
         ]
 
     return LaunchDescription([
+        # AI RGB Camera parameters
+        DeclareLaunchArgument(
+            'ai_color_width', default_value='640',
+            description='AI RGB width (default: 640, or 1280 for HD).',
+        ),
+        DeclareLaunchArgument(
+            'ai_color_height', default_value='480',
+            description='AI RGB height (default: 480, or 720 for HD).',
+        ),
         DeclareLaunchArgument(
             'ai_color_fps', default_value='30',
             description='AI RGB MJPEG FPS (default: 30).',
@@ -148,28 +165,51 @@ def generate_launch_description():
             'ai_serial', default_value='17122611013',
             description='OpenNI serial used to resolve the physical AI RGB UVC camera.',
         ),
+
+        # Front Depth Camera parameters (640x480 @ 15 FPS)
         DeclareLaunchArgument(
             'front_serial', default_value='17110310855',
             description='Serial of front depth camera.',
         ),
         DeclareLaunchArgument(
-            'rear_serial', default_value='17122514440',
-            description='Serial of rear depth camera.',
+            'front_depth_width', default_value='640',
+            description='Front depth width (default: 640).',
         ),
         DeclareLaunchArgument(
-            'device_num', default_value='2',
-            description='Number of Astra Depth driver nodes (default: 2).',
+            'front_depth_height', default_value='480',
+            description='Front depth height (default: 480).',
         ),
         DeclareLaunchArgument(
             'front_depth_fps', default_value='15',
             description='Front depth FPS (default: 15).',
         ),
+
+        # Rear Depth Camera parameters (320x240 @ 15 FPS - siêu nhẹ cho Jetson)
+        DeclareLaunchArgument(
+            'rear_serial', default_value='17122514440',
+            description='Serial of rear depth camera.',
+        ),
+        DeclareLaunchArgument(
+            'rear_depth_width', default_value='320',
+            description='Rear depth width (default: 320 - optimal lightweight).',
+        ),
+        DeclareLaunchArgument(
+            'rear_depth_height', default_value='240',
+            description='Rear depth height (default: 240).',
+        ),
         DeclareLaunchArgument(
             'rear_depth_fps', default_value='15',
             description='Rear depth FPS (default: 15).',
+        ),
+
+        # System arguments
+        DeclareLaunchArgument(
+            'device_num', default_value='2',
+            description='Number of Astra Depth driver nodes (default: 2).',
         ),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
         DeclareLaunchArgument('enable_rear', default_value='true'),
         OpaqueFunction(function=launch_verified_cameras),
     ])
+
