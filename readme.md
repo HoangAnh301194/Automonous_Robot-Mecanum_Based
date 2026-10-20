@@ -470,41 +470,56 @@ The current web configuration is primarily for monitoring and diagnostics.
 Navigation controls, process controls, and teleoperation are disabled in
 src/robot_ui/config/robot_ui.yaml.
 
-### 7.7 Configure Chat / LLM / RAG
+### 7.7 Configure Chat / LLM / RAG — use saved 9router settings
 
-The native kiosk contains the LLM client, but it does **not** start the LLM server.
-A compatible 9router/OpenAI-style endpoint must already be running.
+The native kiosk contains the LLM client, but does **not** start the 9router
+service. 9router must already be running and reachable.
 
-Set the environment variables in the same terminal that launches the kiosk:
+The Jetson's locally saved, **untracked** configuration is normally at
+`/home/orin/ros2_ws/config/llm.local.env`. It should provide
+`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. Never commit that file
+or paste the API key into the repository.
+
+If those variables are not exported automatically in the launching terminal,
+load the existing file, without entering or printing the key:
 
 ~~~bash
-export LLM_BASE_URL="http://localhost:20128/v1"
-export LLM_API_KEY="YOUR_9ROUTER_API_KEY"
-export LLM_MODEL="hehe"
+set -a
+source ~/ros2_ws/config/llm.local.env
+set +a
+
+printf 'LLM_BASE_URL=%s\nLLM_MODEL=%s\n' "$LLM_BASE_URL" "$LLM_MODEL"
+if [ -n "$LLM_API_KEY" ]; then
+  echo "LLM_API_KEY: configured"
+else
+  echo "LLM_API_KEY: missing"
+fi
 ~~~
 
-If 9router runs on another machine, replace localhost with that machine's IP.
+If `~/.bashrc` already loads this file, sourcing it again is unnecessary.
+A variable in one terminal is **not** automatically inherited by a
+separately launched GUI process. Load the file in the **same terminal**
+used to launch the kiosk.
 
-Verify the endpoint:
+Verify the endpoint without exposing the key:
 
 ~~~bash
 curl -sS "$LLM_BASE_URL/models" \
   -H "Authorization: Bearer $LLM_API_KEY"
 ~~~
 
-Then launch the kiosk:
+Then, on a Jetson with a graphical desktop or working X11:
 
 ~~~bash
-ros2 launch robot_ui kiosk.launch.py
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=true hide_cursor:=false use_sim_time:=false
 ~~~
 
-Local RAG documents are stored in:
+If 9router is on a different machine, the `LLM_BASE_URL` in the env file
+must point to that host rather than `localhost`.
 
-~~~text
-src/robot_ui/robot_ui/kiosk/rag_docs/
-~~~
-
-Rebuild robot_ui after changing Python code or RAG documents.
+Local RAG documents: `src/robot_ui/robot_ui/kiosk/rag_docs/`.
+Rebuild `robot_ui` after modifying Python code or RAG documents.
 
 ### 7.8 ROS Interfaces Used by the Native UI
 
