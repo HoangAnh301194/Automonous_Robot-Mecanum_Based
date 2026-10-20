@@ -286,6 +286,7 @@ export interface VisionDetectionState {
 export interface VisionState {
   color_camera?: VisionCameraState;
   depth_camera?: VisionCameraState;
+  rear_depth_camera?: VisionCameraState;
   yolo?: {
     frame_id?: string;
     timestamp?: number;

@@ -267,14 +267,81 @@ ros2 topic echo /pose/wave_detected
 Do not expose the unauthenticated video server directly to the Internet.
 A plain SSH session without X forwarding cannot display `rqt_image_view`.
 
-### 6.6 Legacy all-in-one script
+### 6.6 Start the complete AI pipeline with one command
 
-The existing `start_person_following.sh` is **not** the recommended
-entrypoint for the new three-camera setup. It still launches a single
-`astra_pro.launch.xml` with old `/camera/*` topics, and it can forcefully
-terminate other camera/YOLO processes. Use the four terminal steps above
-instead; migrate the script separately before using it with three cameras.
+The updated script runs `three_astra.launch.py`, YOLO 2D person tracking
+on `/ai_camera/color/image_raw`, and RTMPose skeleton/hand-wave detection
+on the same AI RGB topic. No `/camera/color/image_raw` fallback is used.
 
+```bash
+cd ~/ros2_ws
+bash start_person_following.sh
+```
+
+Default AI routing:
+- `/ai_camera/color/image_raw` -> YOLO detector + tracker + RTMPose
+- `/yolo/tracking` -> RTMPose person bounding boxes
+- `/pose/image_debug` -> skeleton visualization
+- `/pose/wave_detected` -> raised-hand detection
+
+The script runs YOLO on `cuda:0` and RTMPose on `cpu` by default. Override
+non-topic options via environment variables, for example
+`HAND_WAVE_MAX_PEOPLE=1 bash start_person_following.sh`. All launch logs
+are written under `log/ai_pipeline_YYYYMMDD_HHMMSS/`. Press Ctrl+C to
+stop the script's child launches; it does not kill unrelated camera nodes.
+
+**Important:** This is an AI RGB / 2D pipeline, not a calibrated 3D
+person follower. `person_follower.launch.py` now defaults to 2D YOLO
+without publishing `/person_tracking`. To use the 3D follower, explicitly
+set `use_3d:=True` and supply registered, calibrated matching RGB and Depth
+topics; Front/Rear Depth cannot be silently combined with AI RGB.
+
+To prevent regression to legacy topic names:
+
+```bash
+python3 tools/test_ai_topic_contract.py
+```
+
+### 6.7 Verify running subscribers and physical camera selection
+
+```bash
+ros2 node info /yolo/yolo_node
+ros2 node info /yolo/tracking_node
+ros2 node info /yolo/debug_node
+ros2 node info /hand_wave_detection
+
+ros2 topic info /ai_camera/color/image_raw -v
+ros2 param get /ai_camera/color/usb_cam video_device
+```
+
+All image subscribers in this AI pipeline must use
+`/ai_camera/color/image_raw`. A correct ROS topic does not by itself prove
+the UVC camera is the intended physical device: verify the
+`ai_video_device` USB-by-path mapping if the image looks like Rear RGB.
+
+The web Vision dashboard monitors these camera information topics:
+`/ai_camera/color/camera_info`, `/front_camera/depth/camera_info`,
+and `/rear_camera/depth/camera_info`.
+
+
+### 6.8 Refresh web Vision dashboard assets (optional)
+
+Only required when using the web dashboard at port 8000, not for
+the camera/YOLO/RTMPose runtime:
+
+```bash
+cd ~/ros2_ws/src/robot_ui/frontend
+npm ci
+npm run build
+cd ~/ros2_ws
+colcon build --symlink-install --packages-select robot_ui
+source ~/ros2_ws/install/setup.bash
+```
+
+Requires Node.js 20.19+ as described in the UI README. The updated Vision
+screen distinguishes AI RGB, Front Depth and Rear Depth CameraInfo topics.
+Simply building the Python ROS package without compiling the React frontend
+may leave an older web page visible.
 
 ## 7) Robot UI
 

@@ -249,6 +249,12 @@ class RobotUiBridgeNode(Node):
             sensor_qos,
         )
         self.create_subscription(
+            CameraInfo,
+            self._topics["camera_rear_depth_info"],
+            self._on_rear_depth_camera_info,
+            sensor_qos,
+        )
+        self.create_subscription(
             DetectionArray,
             self._topics["yolo_detections"],
             self._on_yolo_detections,
@@ -814,6 +820,9 @@ class RobotUiBridgeNode(Node):
 
     def _on_depth_camera_info(self, message: CameraInfo) -> None:
         self._on_camera_info("depth_camera", "camera_depth_info", message)
+
+    def _on_rear_depth_camera_info(self, message: CameraInfo) -> None:
+        self._on_camera_info("rear_depth_camera", "camera_rear_depth_info", message)
 
     def _on_camera_info(
         self,
