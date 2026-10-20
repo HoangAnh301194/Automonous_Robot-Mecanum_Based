@@ -25,8 +25,9 @@ function PipelineStage({ title, topic, detail }: { title: string; topic?: TopicS
 export function VisionPage({ state }: VisionPageProps) {
   const vision = state?.vision;
   const topics = state?.topics ?? {};
-  const colorTopic = topics["/camera/color/camera_info"];
-  const depthTopic = topics["/camera/depth/camera_info"];
+  const colorTopic = topics["/ai_camera/color/camera_info"];
+  const depthTopic = topics["/front_camera/depth/camera_info"];
+  const rearDepthTopic = topics["/rear_camera/depth/camera_info"];
   const yoloTopic = topics["/yolo/detections"];
   const obstacleTopic = topics["/scan_obstacles"];
   const waveTopic = topics["/pose/wave_detected"];
@@ -42,20 +43,22 @@ export function VisionPage({ state }: VisionPageProps) {
       </div>
 
       <div className="metric-grid metric-grid--five">
-        <MetricCard title="Color Camera" value={colorTopic?.state ?? "WAITING"} detail={vision?.color_camera?.width ? `${vision.color_camera.width}×${vision.color_camera.height}` : "No CameraInfo"} />
-        <MetricCard title="Depth Camera" value={depthTopic?.state ?? "WAITING"} detail={vision?.depth_camera?.width ? `${vision.depth_camera.width}×${vision.depth_camera.height}` : "No CameraInfo"} />
+        <MetricCard title="AI RGB Camera" value={colorTopic?.state ?? "WAITING"} detail={vision?.color_camera?.width ? `${vision.color_camera.width}×${vision.color_camera.height}` : "No CameraInfo"} />
+        <MetricCard title="Front Depth" value={depthTopic?.state ?? "WAITING"} detail={vision?.depth_camera?.width ? `${vision.depth_camera.width}×${vision.depth_camera.height}` : "No CameraInfo"} />
+        <MetricCard title="Rear Depth" value={rearDepthTopic?.state ?? "WAITING"} detail={vision?.rear_depth_camera?.width ? `${vision.rear_depth_camera.width}×${vision.rear_depth_camera.height}` : "No CameraInfo"} />
         <MetricCard title="YOLO Rate" value={`${yoloTopic?.rate_hz?.toFixed(1) ?? "-"} Hz`} detail={`${yoloTopic?.expected_rate_hz?.toFixed(1) ?? "-"} Hz expected`} />
         <MetricCard title="Detections" value={`${vision?.yolo?.detection_count ?? 0}`} detail={`${vision?.yolo?.person_count ?? 0} persons · ${vision?.yolo?.tracked_count ?? 0} tracked`} />
         <MetricCard title="Nearest Obstacle" value={`${vision?.obstacle?.nearest_range?.toFixed(2) ?? "-"} m`} detail={`${vision?.obstacle?.obstacle_point_count ?? 0} obstacle points`} />
       </div>
 
       <div className="vision-pipeline-flow">
-        <PipelineStage title="Color Camera" topic={colorTopic} detail={vision?.color_camera?.frame_id || "/camera/color/camera_info"} />
+        <PipelineStage title="AI RGB Camera" topic={colorTopic} detail={vision?.color_camera?.frame_id || "/ai_camera/color/camera_info"} />
         <span className="pipeline-connector">YOLO</span>
         <PipelineStage title="YOLO Detection" topic={yoloTopic} detail={`${vision?.yolo?.detection_count ?? 0} current objects`} />
         <span className="pipeline-connector">POSE</span>
         <PipelineStage title="Wave Detection" topic={waveTopic} detail={vision?.pose?.status || "Event-driven output"} />
-        <PipelineStage title="Depth Camera" topic={depthTopic} detail={vision?.depth_camera?.frame_id || "/camera/depth/camera_info"} />
+        <PipelineStage title="Front Depth" topic={depthTopic} detail={vision?.depth_camera?.frame_id || "/front_camera/depth/camera_info"} />
+        <PipelineStage title="Rear Depth" topic={rearDepthTopic} detail={vision?.rear_depth_camera?.frame_id || "/rear_camera/depth/camera_info"} />
         <span className="pipeline-connector">DEPTH</span>
         <PipelineStage title="Obstacle Detector" topic={obstacleTopic} detail={`${vision?.obstacle?.obstacle_point_count ?? 0} valid scan points`} />
       </div>
