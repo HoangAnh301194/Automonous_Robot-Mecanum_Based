@@ -48,3 +48,4 @@ pip-delete-this-directory.txt
 
 # Local LLM credentials
 /config/llm.local.env
+archive/
