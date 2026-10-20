@@ -356,7 +356,7 @@ class RosInterface(Node):
                 )
             except TransformException as exc:
                 self._warn_tf(
-                    f"TF scan lookup l?i ({self.target_map_frame} <- {source_frame}): {exc}"
+                    f"TF scan lookup lỗi ({self.target_map_frame} <- {source_frame}): {exc}"
                 )
                 return []
 
@@ -410,7 +410,7 @@ class RosInterface(Node):
 
     def send_goal(self, x, y, yaw=0.0):
         if not self.nav_to_pose_client.wait_for_server(timeout_sec=1.0):
-            self.log("NavigateToPose action server ch?a s?n sàng.")
+            self.log("NavigateToPose action server chưa sẵn sàng.")
             return False
 
         goal_msg = NavigateToPose.Goal()
@@ -424,7 +424,7 @@ class RosInterface(Node):
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
 
-        self.log(f"G?i goal Nav2: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
+        self.log(f"Gửi goal Nav2: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
         self.nav_to_pose_client.send_goal_async(goal_msg)
         return True
 
@@ -433,7 +433,7 @@ class RosInterface(Node):
         msg.data = json.dumps({"waypoints": waypoints}, ensure_ascii=False)
         self.waypoints_pub.publish(msg)
         self.log(
-            f"G?i batch waypoint cho nhiemvuboss: {len(waypoints)} ?i?m lên /nhiemvuboss/waypoints_json"
+            f"Gửi batch waypoint cho nhiemvuboss: {len(waypoints)} điểm lên /nhiemvuboss/waypoints_json"
         )
 
     def cancel_nav2_goals(self):
@@ -455,7 +455,7 @@ class MapViewer(QLabel):
         self.setMinimumSize(260, 220)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background-color: #1e1e1e; border: 1px solid #555;")
-        self.setText("Ch?a có d? li?u /map")
+        self.setText("Chưa có dữ liệu /map")
 
         self.map_pixmap = None
         self.map_resolution = None
@@ -613,7 +613,7 @@ class MapViewer(QLabel):
 
         painter.setPen(QPen(QColor(0, 255, 0), 1))
         painter.setFont(QFont("Arial", 10))
-        painter.drawText(10, 20, "Click trái ?? g?i goal Nav2")
+        painter.drawText(10, 20, "Click trái để gửi goal Nav2")
         painter.drawText(10, 38, f"Pose source: {self.pose_source}")
         painter.drawText(10, 56, f"/scan points: {len(self.scan_points_world)}")
         painter.end()
@@ -633,7 +633,7 @@ class MapViewer(QLabel):
             if ros_node is not None:
                 ok = ros_node.send_goal(wx, wy, yaw=0.0)
                 if ok:
-                    ros_node.log(f"?ã click goal trên map: ({wx:.3f}, {wy:.3f})")
+                    ros_node.log(f"Đã click goal trên map: ({wx:.3f}, {wy:.3f})")
 
     def widget_to_world(self, px, py):
         if self.map_pixmap is None:
@@ -674,7 +674,7 @@ class ProcessManager:
 
     def start(self, name, cmd):
         if name in self.processes and self.is_running(name):
-            self.log(f"[{name}] ?ang ch?y r?i.")
+            self.log(f"[{name}] đang chạy rồi.")
             return
 
         self.log(f"[{name}] START")
@@ -806,7 +806,7 @@ class MainWindow(QWidget):
 
     def init_ui(self):
         self.rb_sim = QRadioButton("Simulation (Gazebo)")
-        self.rb_real = QRadioButton("Robot th?t")
+        self.rb_real = QRadioButton("Robot thật")
         self.rb_real.setChecked(True)
         self.robot_mode_group = QButtonGroup(self)
         self.robot_mode_group.setExclusive(True)
@@ -831,10 +831,10 @@ class MainWindow(QWidget):
         self.cmb_localization_backend = QComboBox()
         self.cmb_localization_backend.addItems(["SLAM Toolbox", "AMCL"])
 
-        self.chk_auto_nav2 = QCheckBox("T? start Nav2 khi Start All")
+        self.chk_auto_nav2 = QCheckBox("Tự start Nav2 khi Start All")
         self.chk_auto_nav2.setChecked(True)
 
-        system_group = QGroupBox("C?u hình h? th?ng")
+        system_group = QGroupBox("Cấu hình hệ thống")
         system_layout = QGridLayout()
         system_layout.addWidget(QLabel("Robot mode:"), 0, 0)
         system_layout.addWidget(self.rb_sim, 0, 1)
@@ -864,23 +864,23 @@ class MainWindow(QWidget):
         self.btn_refresh_maps.clicked.connect(self.refresh_map_list)
         self.btn_choose_map_file.clicked.connect(self.choose_map_file)
 
-        self.lbl_selected_map = QLabel("Map ?ang dùng: ch?a ch?n")
+        self.lbl_selected_map = QLabel("Map đang dùng: chưa chọn")
         self.lbl_selected_map.setWordWrap(True)
         self.edt_save_map_name = QLineEdit("my_map/new_map")
-        self.btn_save_map = QPushButton("L?u map (Serialize)")
+        self.btn_save_map = QPushButton("Lưu map (Serialize)")
         self.btn_save_map.clicked.connect(self.save_map)
         self.btn_batch_mode = QPushButton("Waypoint Mode: OFF")
         self.btn_batch_clear = QPushButton("Clear A..")
         self.btn_batch_undo = QPushButton("Undo")
-        self.btn_batch_send = QPushButton("G?i A.. cho nhiemvuboss")
+        self.btn_batch_send = QPushButton("Gửi A.. cho nhiemvuboss")
         self.btn_batch_mode.clicked.connect(self.toggle_batch_waypoint_mode)
         self.btn_batch_clear.clicked.connect(self.clear_batch_waypoints)
         self.btn_batch_undo.clicked.connect(self.undo_batch_waypoint)
         self.btn_batch_send.clicked.connect(self.send_batch_waypoints_to_boss)
-        self.lbl_batch_info = QLabel("Batch: 0 ?i?m")
+        self.lbl_batch_info = QLabel("Batch: 0 điểm")
         self.lbl_batch_info.setWordWrap(True)
 
-        map_group = QGroupBox("Qu?n lý map")
+        map_group = QGroupBox("Quản lý map")
         map_layout = QGridLayout()
         map_layout.addWidget(self.lbl_map_folder, 0, 0, 1, 3)
         map_layout.addWidget(self.btn_choose_map_folder, 1, 0)
@@ -1022,7 +1022,7 @@ class MainWindow(QWidget):
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True)
         self.ros_spin_thread.start()
-        self.append_log("ROS2 node v2 ?ã kh?i ??ng.")
+        self.append_log("ROS2 node v2 đã khởi động.")
 
     def spin_ros(self):
         try:
@@ -1110,15 +1110,15 @@ class MainWindow(QWidget):
     def refresh_batch_waypoint_views(self):
         mode_text = "ON" if self.batch_waypoint_mode else "OFF"
         self.btn_batch_mode.setText(f"Waypoint Mode: {mode_text}")
-        self.lbl_batch_info.setText(f"Batch: {len(self.batch_waypoints)} ?i?m")
+        self.lbl_batch_info.setText(f"Batch: {len(self.batch_waypoints)} điểm")
         self.map_view.update_waypoint_batch(self.batch_waypoints)
 
     def toggle_batch_waypoint_mode(self):
         self.batch_waypoint_mode = not self.batch_waypoint_mode
         self.refresh_batch_waypoint_views()
         self.append_log(
-            "Waypoint mode b?t: click map ?? thêm A/B/C..." if self.batch_waypoint_mode
-            else "Waypoint mode t?t: click map g?i goal Nav2 nh? c?."
+            "Waypoint mode bật: click map để thêm A/B/C..." if self.batch_waypoint_mode
+            else "Waypoint mode tắt: click map gửi goal Nav2 như cũ."
         )
 
     def on_map_clicked(self, wx, wy):
@@ -1150,25 +1150,25 @@ class MainWindow(QWidget):
             return
         self.batch_waypoints = []
         self.refresh_batch_waypoint_views()
-        self.append_log("?ã clear toàn b? waypoint batch.")
+        self.append_log("Đã clear toàn bộ waypoint batch.")
 
     def send_batch_waypoints_to_boss(self):
         if not self.batch_waypoints:
-            QMessageBox.warning(self, "Thi?u waypoint", "B?n ch?a có waypoint A/B/C/... nào.")
+            QMessageBox.warning(self, "Thiếu waypoint", "Bạn chưa có waypoint A/B/C/... nào.")
             return
         node = self.get_ros_node()
         if node is None:
-            QMessageBox.warning(self, "ROS ch?a s?n sàng", "ROS node c?a GUI ch?a ch?y.")
+            QMessageBox.warning(self, "ROS chưa sẵn sàng", "ROS node của GUI chưa chạy.")
             return
         node.send_waypoint_batch(self.batch_waypoints)
         self.append_log(
-            "?ã g?i waypoint batch cho nhiemvuboss. Hãy ??m b?o node nhiemvuboss.py ?ang ch?y."
+            "Đã gửi waypoint batch cho nhiemvuboss. Hãy đảm bảo node nhiemvuboss.py đang chạy."
         )
 
     def choose_map_folder(self):
         folder = QFileDialog.getExistingDirectory(
             self,
-            "Ch?n th? m?c ch?a map YAML",
+            "Chọn thư mục chứa map YAML",
             self.map_dir if os.path.exists(self.map_dir) else os.path.expanduser("~"),
         )
         if folder:
@@ -1179,14 +1179,14 @@ class MainWindow(QWidget):
         start_dir = self.map_dir if os.path.exists(self.map_dir) else os.path.expanduser("~")
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Ch?n file map YAML",
+            "Chọn file map YAML",
             start_dir,
             "YAML files (*.yaml *.yml)",
         )
         if file_path:
             self.selected_map_file = file_path
-            self.lbl_selected_map.setText(f"Map ?ang dùng: {file_path}")
-            self.append_log(f"?ã ch?n map th? công: {file_path}")
+            self.lbl_selected_map.setText(f"Map đang dùng: {file_path}")
+            self.append_log(f"Đã chọn map thủ công: {file_path}")
 
     def refresh_map_list(self):
         os.makedirs(self.map_dir, exist_ok=True)
@@ -1208,17 +1208,17 @@ class MainWindow(QWidget):
                 pick_index = files.index(prev)
             self.cmb_map_files.setCurrentIndex(pick_index)
             self.selected_map_file = self.cmb_map_files.currentData()
-            self.lbl_selected_map.setText(f"Map ?ang dùng: {self.selected_map_file}")
+            self.lbl_selected_map.setText(f"Map đang dùng: {self.selected_map_file}")
         else:
             self.selected_map_file = ""
-            self.lbl_selected_map.setText("Map ?ang dùng: ch?a có file YAML trong folder")
-        self.append_log(f"Refresh map list: tìm th?y {len(files)} file.")
+            self.lbl_selected_map.setText("Map đang dùng: chưa có file YAML trong folder")
+        self.append_log(f"Refresh map list: tìm thấy {len(files)} file.")
 
     def on_selected_map_changed(self):
         fpath = self.cmb_map_files.currentData()
         if fpath:
             self.selected_map_file = fpath
-            self.lbl_selected_map.setText(f"Map ?ang dùng: {fpath}")
+            self.lbl_selected_map.setText(f"Map đang dùng: {fpath}")
 
     def is_sim_mode(self):
         return self.rb_sim.isChecked()
@@ -1288,9 +1288,9 @@ class MainWindow(QWidget):
             if not os.path.exists(amcl_yaml):
                 QMessageBox.warning(
                     self,
-                    "Thi?u map AMCL",
-                    "Không tìm th?y file YAML map cho AMCL.\n"
-                    "Hãy Save map tr??c ho?c ch?n file map YAML h?p l?.",
+                    "Thiếu map AMCL",
+                    "Không tìm thấy file YAML map cho AMCL.\n"
+                    "Hãy Save map trước hoặc chọn file map YAML hợp lệ.",
                 )
                 return False
             return True
@@ -1300,9 +1300,9 @@ class MainWindow(QWidget):
         if not (os.path.exists(posegraph) or os.path.exists(data)):
             QMessageBox.warning(
                 self,
-                "Thi?u map localization",
-                "Không tìm th?y file posegraph/data cho SLAM localization.\n"
-                "Hãy Save map tr??c ?? t?o b?n localization.",
+                "Thiếu map localization",
+                "Không tìm thấy file posegraph/data cho SLAM localization.\n"
+                "Hãy Save map trước để tạo bản localization.",
             )
             return False
         return True
@@ -1330,7 +1330,7 @@ class MainWindow(QWidget):
         changed = _replace_key_recursive(data, "odom_topic", topic)
         temp_path = self._write_temp_yaml(data, "nav2_gui_v2_")
         self.append_log(
-            f"T?o params Nav2 t?m: {temp_path} (odom_topic='{topic}', c?p nh?t {changed} v? trí)"
+            f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí)"
         )
         return temp_path
 
@@ -1349,7 +1349,7 @@ class MainWindow(QWidget):
             params["map_file_name"] = _map_stem_from_yaml(self.selected_map_file)
         temp_path = self._write_temp_yaml(data, "slam_loc_gui_v2_")
         self.append_log(
-            f"T?o params SLAM localization t?m: {temp_path} (map_file_name='{params['map_file_name']}')"
+            f"Tạo params SLAM localization tạm: {temp_path} (map_file_name='{params['map_file_name']}')"
         )
         return temp_path
 
@@ -1397,7 +1397,7 @@ class MainWindow(QWidget):
                 + f"use_sim_time:={sim_time} slam_params_file:='{SLAM_MAPPING_PARAMS_BASE}'"
             )
             self.append_log(
-                "SLAM mô ph?ng: c?n robot di chuy?n thì map m?i m? r?ng (dùng teleop /cmd_vel)."
+                "SLAM mô phỏng: cần robot di chuyển thì map mới mở rộng (dùng teleop /cmd_vel)."
             )
         else:
             cmd = (
@@ -1482,7 +1482,7 @@ class MainWindow(QWidget):
         sim_time = _bool_to_ros(self.is_sim_mode())
         if (not self.is_sim_mode()) and self.cmb_operation_mode.currentText() == "Localization":
             self.append_log(
-                "Localization mode (real) ?ã bao g?m Nav2 trong file4, b? qua Start Nav2 riêng."
+                "Localization mode (real) đã bao gồm Nav2 trong file4, bỏ qua Start Nav2 riêng."
             )
             return
         nav2_params = self.build_nav2_params_for_selected_odom()
@@ -1519,7 +1519,7 @@ class MainWindow(QWidget):
     def kill_node(self):
         pattern = self.edt_kill_node.text().strip()
         if not pattern:
-            QMessageBox.warning(self, "Thi?u tên node", "B?n c?n nh?p tên node/pattern.")
+            QMessageBox.warning(self, "Thiếu tên node", "Bạn cần nhập tên node/pattern.")
             return
         safe_pattern = shlex.quote(pattern)
         cmd = self.ros_prefix() + f"pkill -f {safe_pattern}"
@@ -1542,7 +1542,7 @@ class MainWindow(QWidget):
     def save_map(self):
         raw_name = self.edt_save_map_name.text().strip()
         if not raw_name:
-            QMessageBox.warning(self, "Thi?u tên", "B?n ch?a nh?p tên map c?n l?u.")
+            QMessageBox.warning(self, "Thiếu tên", "Bạn chưa nhập tên map cần lưu.")
             return
         if not (
             self.proc_mgr.is_running(self.SLAM_MAPPING)
@@ -1550,8 +1550,8 @@ class MainWindow(QWidget):
         ):
             QMessageBox.warning(
                 self,
-                "SLAM ch?a ch?y",
-                "B?n c?n ch?y SLAM tr??c khi l?u map.",
+                "SLAM chưa chạy",
+                "Bạn cần chạy SLAM trước khi lưu map.",
             )
             return
 
@@ -1578,7 +1578,7 @@ class MainWindow(QWidget):
             + serialize_req
         )
         self.append_log(
-            "L?u map 2 b?n:"
+            "Lưu map 2 bản:"
             f" AMCL='{amcl_stem}.yaml/.pgm',"
             f" Localization='{localization_stem}.yaml/.pgm + .posegraph/.data'"
         )
@@ -1593,8 +1593,8 @@ class MainWindow(QWidget):
                 idx = self.cmb_map_files.findData(selected)
                 if idx >= 0:
                     self.cmb_map_files.setCurrentIndex(idx)
-                self.lbl_selected_map.setText(f"Map ?ang dùng: {selected}")
-                self.append_log(f"Auto ch?n map AMCL: {selected}")
+                self.lbl_selected_map.setText(f"Map đang dùng: {selected}")
+                self.append_log(f"Auto chọn map AMCL: {selected}")
 
         self.run_one_shot_command("save_map", cmd, _after_save)
 
