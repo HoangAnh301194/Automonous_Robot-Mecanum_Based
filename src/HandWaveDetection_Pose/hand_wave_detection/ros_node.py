@@ -95,7 +95,7 @@ class HandWaveDetectionNode(Node):
         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
 
         image_topic = self._string_parameter(
-            'image_topic', '/camera/color/image_raw'
+            'image_topic', '/ai_camera/color/image_raw'
         )
         tracking_topic = self._string_parameter(
             'tracking_topic', '/yolo/tracking'
