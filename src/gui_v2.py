@@ -33,6 +33,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QRadioButton,
     QScrollArea,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -805,6 +806,89 @@ class MainWindow(QWidget):
         self.status_timer.start(500)
 
     def init_ui(self):
+        # ==========================================
+        # 1. CÁC WIDGET CHO TAB 1: 🎮 ĐIỀU KHIỂN
+        # ==========================================
+        self.btn_start_platform = QPushButton("Start Layer 1 (Odom)")
+        self.btn_stop_platform = QPushButton("Stop Layer 1 (Odom)")
+        self.btn_start_mode = QPushButton("Start Layer 2 (Mode)")
+        self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
+        self.btn_switch_mode = QPushButton("Switch Layer 2 Mode")
+        self.btn_start_nav2 = QPushButton("Start Nav2")
+        self.btn_stop_nav2 = QPushButton("Stop Nav2")
+        self.btn_start_all = QPushButton("▶ Start All")
+        self.btn_stop_all = QPushButton("⏹ Stop All")
+        self.btn_start_nhiemvuboss = QPushButton("Start NhiemVuBoss")
+        self.btn_stop_nhiemvuboss = QPushButton("Stop NhiemVuBoss")
+        self.edt_kill_node = QLineEdit("rviz2")
+        self.btn_kill_node = QPushButton("Kill Node")
+
+        self.btn_start_all.setStyleSheet("background-color: #16a34a; color: white; font-weight: bold; padding: 6px;")
+        self.btn_stop_all.setStyleSheet("background-color: #b91c1c; color: white; font-weight: bold; padding: 6px;")
+        self.btn_switch_mode.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold;")
+
+        self.btn_start_platform.clicked.connect(self.start_platform)
+        self.btn_stop_platform.clicked.connect(self.stop_platform)
+        self.btn_start_mode.clicked.connect(self.start_operation_mode)
+        self.btn_stop_mode.clicked.connect(self.stop_operation_mode)
+        self.btn_switch_mode.clicked.connect(self.switch_operation_mode)
+        self.btn_start_nav2.clicked.connect(self.start_nav2)
+        self.btn_stop_nav2.clicked.connect(self.stop_nav2)
+        self.btn_start_all.clicked.connect(self.start_all)
+        self.btn_stop_all.clicked.connect(self.stop_all)
+        self.btn_start_nhiemvuboss.clicked.connect(self.start_nhiemvuboss)
+        self.btn_stop_nhiemvuboss.clicked.connect(self.stop_nhiemvuboss)
+        self.btn_kill_node.clicked.connect(self.kill_node)
+
+        self.lbl_platform_status = QLabel("Layer1 Odom: OFF")
+        self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
+        self.lbl_nav2_status = QLabel("Nav2: OFF")
+        self.lbl_nhiemvuboss_status = QLabel("NhiemVuBoss: OFF")
+        self.lbl_odom_status = QLabel("Odom source: esp -> /odom")
+        self.lbl_dataenc = QLabel("Encoder /dataenc: -")
+
+        control_box = QGroupBox("Tiến trình điều khiển")
+        control_grid = QGridLayout()
+        control_grid.addWidget(self.btn_start_all, 0, 0)
+        control_grid.addWidget(self.btn_stop_all, 0, 1)
+        control_grid.addWidget(self.btn_start_platform, 1, 0)
+        control_grid.addWidget(self.btn_stop_platform, 1, 1)
+        control_grid.addWidget(self.btn_start_mode, 2, 0)
+        control_grid.addWidget(self.btn_stop_mode, 2, 1)
+        control_grid.addWidget(self.btn_switch_mode, 3, 0, 1, 2)
+        control_grid.addWidget(self.btn_start_nav2, 4, 0)
+        control_grid.addWidget(self.btn_stop_nav2, 4, 1)
+        control_grid.addWidget(self.btn_start_nhiemvuboss, 5, 0)
+        control_grid.addWidget(self.btn_stop_nhiemvuboss, 5, 1)
+        control_grid.addWidget(QLabel("Node cần kill:"), 6, 0)
+        control_grid.addWidget(self.edt_kill_node, 6, 1)
+        control_grid.addWidget(self.btn_kill_node, 7, 0, 1, 2)
+        control_box.setLayout(control_grid)
+
+        status_box = QGroupBox("Trạng thái hoạt động")
+        status_vbox = QVBoxLayout()
+        status_vbox.addWidget(self.lbl_platform_status)
+        status_vbox.addWidget(self.lbl_mode_status)
+        status_vbox.addWidget(self.lbl_nav2_status)
+        status_vbox.addWidget(self.lbl_nhiemvuboss_status)
+        status_vbox.addWidget(self.lbl_odom_status)
+        status_vbox.addWidget(self.lbl_dataenc)
+        status_box.setLayout(status_vbox)
+
+        tab_control = QWidget()
+        tab_control_layout = QVBoxLayout()
+        tab_control_layout.addWidget(control_box)
+        tab_control_layout.addWidget(status_box)
+        tab_control_layout.addStretch()
+        tab_control.setLayout(tab_control_layout)
+
+        tab_control_scroll = QScrollArea()
+        tab_control_scroll.setWidgetResizable(True)
+        tab_control_scroll.setWidget(tab_control)
+
+        # ==========================================
+        # 2. CÁC WIDGET CHO TAB 2: ⚙️ CẤU HÌNH HỆ THỐNG
+        # ==========================================
         self.rb_sim = QRadioButton("Simulation (Gazebo)")
         self.rb_real = QRadioButton("Robot thật")
         self.rb_real.setChecked(True)
@@ -820,6 +904,7 @@ class MainWindow(QWidget):
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
+
         self.cmb_esp_wheel_mode = QComboBox()
         self.cmb_esp_wheel_mode.addItem("Vi sai 2 bánh (Hoverboard)", "diff_2")
         self.cmb_esp_wheel_mode.currentIndexChanged.connect(self.on_odom_source_changed)
@@ -850,6 +935,19 @@ class MainWindow(QWidget):
         system_layout.addWidget(self.chk_auto_nav2, 5, 0, 1, 3)
         system_group.setLayout(system_layout)
 
+        tab_config = QWidget()
+        tab_config_layout = QVBoxLayout()
+        tab_config_layout.addWidget(system_group)
+        tab_config_layout.addStretch()
+        tab_config.setLayout(tab_config_layout)
+
+        tab_config_scroll = QScrollArea()
+        tab_config_scroll.setWidgetResizable(True)
+        tab_config_scroll.setWidget(tab_config)
+
+        # ==========================================
+        # 3. CÁC WIDGET CHO TAB 3: 🗺️ BẢN ĐỒ & WAYPOINTS
+        # ==========================================
         self.lbl_map_folder = QLabel("Map folder: ")
         self.lbl_map_folder.setWordWrap(True)
         self.cmb_map_files = QComboBox()
@@ -866,9 +964,29 @@ class MainWindow(QWidget):
 
         self.lbl_selected_map = QLabel("Map đang dùng: chưa chọn")
         self.lbl_selected_map.setWordWrap(True)
+
+        map_select_group = QGroupBox("Chọn & Tải bản đồ")
+        map_select_layout = QGridLayout()
+        map_select_layout.addWidget(self.lbl_map_folder, 0, 0, 1, 2)
+        map_select_layout.addWidget(self.btn_choose_map_folder, 1, 0)
+        map_select_layout.addWidget(self.btn_refresh_maps, 1, 1)
+        map_select_layout.addWidget(self.btn_choose_map_file, 2, 0)
+        map_select_layout.addWidget(self.btn_open_map_editor, 2, 1)
+        map_select_layout.addWidget(self.cmb_map_files, 3, 0, 1, 2)
+        map_select_layout.addWidget(self.lbl_selected_map, 4, 0, 1, 2)
+        map_select_group.setLayout(map_select_layout)
+
         self.edt_save_map_name = QLineEdit("my_map/new_map")
         self.btn_save_map = QPushButton("Lưu map (Serialize)")
         self.btn_save_map.clicked.connect(self.save_map)
+
+        map_save_group = QGroupBox("Lưu bản đồ (Mapping)")
+        map_save_layout = QGridLayout()
+        map_save_layout.addWidget(QLabel("Tên file save:"), 0, 0)
+        map_save_layout.addWidget(self.edt_save_map_name, 0, 1)
+        map_save_layout.addWidget(self.btn_save_map, 1, 0, 1, 2)
+        map_save_group.setLayout(map_save_layout)
+
         self.btn_batch_mode = QPushButton("Waypoint Mode: OFF")
         self.btn_batch_clear = QPushButton("Clear A..")
         self.btn_batch_undo = QPushButton("Undo")
@@ -880,119 +998,109 @@ class MainWindow(QWidget):
         self.lbl_batch_info = QLabel("Batch: 0 điểm")
         self.lbl_batch_info.setWordWrap(True)
 
-        map_group = QGroupBox("Quản lý map")
-        map_layout = QGridLayout()
-        map_layout.addWidget(self.lbl_map_folder, 0, 0, 1, 3)
-        map_layout.addWidget(self.btn_choose_map_folder, 1, 0)
-        map_layout.addWidget(self.btn_refresh_maps, 1, 1)
-        map_layout.addWidget(self.btn_choose_map_file, 1, 2)
-        map_layout.addWidget(self.btn_open_map_editor, 2, 0, 1, 3)
-        map_layout.addWidget(self.cmb_map_files, 3, 0, 1, 3)
-        map_layout.addWidget(self.lbl_selected_map, 4, 0, 1, 3)
-        map_layout.addWidget(QLabel("Tên file save (không cần .yaml):"), 5, 0, 1, 3)
-        map_layout.addWidget(self.edt_save_map_name, 6, 0, 1, 2)
-        map_layout.addWidget(self.btn_save_map, 6, 2)
-        map_layout.addWidget(self.btn_batch_mode, 7, 0)
-        map_layout.addWidget(self.btn_batch_undo, 7, 1)
-        map_layout.addWidget(self.btn_batch_clear, 7, 2)
-        map_layout.addWidget(self.btn_batch_send, 8, 0, 1, 3)
-        map_layout.addWidget(self.lbl_batch_info, 9, 0, 1, 3)
-        map_group.setLayout(map_layout)
+        waypoint_group = QGroupBox("Lộ trình Waypoint A, B, C...")
+        waypoint_layout = QGridLayout()
+        waypoint_layout.addWidget(self.btn_batch_mode, 0, 0)
+        waypoint_layout.addWidget(self.btn_batch_undo, 0, 1)
+        waypoint_layout.addWidget(self.btn_batch_clear, 0, 2)
+        waypoint_layout.addWidget(self.btn_batch_send, 1, 0, 1, 3)
+        waypoint_layout.addWidget(self.lbl_batch_info, 2, 0, 1, 3)
+        waypoint_group.setLayout(waypoint_layout)
 
-        self.btn_start_platform = QPushButton("Start Layer 1 (Odom)")
-        self.btn_stop_platform = QPushButton("Stop Layer 1 (Odom)")
-        self.btn_start_mode = QPushButton("Start Layer 2 (Mode)")
-        self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
-        self.btn_switch_mode = QPushButton("Switch Layer 2 Mode")
-        self.btn_start_nav2 = QPushButton("Start Nav2")
-        self.btn_stop_nav2 = QPushButton("Stop Nav2")
-        self.btn_start_all = QPushButton("Start All")
-        self.btn_stop_all = QPushButton("Stop All")
-        self.btn_start_nhiemvuboss = QPushButton("Start NhiemVuBoss")
-        self.btn_stop_nhiemvuboss = QPushButton("Stop NhiemVuBoss")
-        self.edt_kill_node = QLineEdit("rviz2")
-        self.btn_kill_node = QPushButton("Kill Node")
+        tab_map = QWidget()
+        tab_map_layout = QVBoxLayout()
+        tab_map_layout.addWidget(map_select_group)
+        tab_map_layout.addWidget(map_save_group)
+        tab_map_layout.addWidget(waypoint_group)
+        tab_map_layout.addStretch()
+        tab_map.setLayout(tab_map_layout)
 
-        self.btn_start_platform.clicked.connect(self.start_platform)
-        self.btn_stop_platform.clicked.connect(self.stop_platform)
-        self.btn_start_mode.clicked.connect(self.start_operation_mode)
-        self.btn_stop_mode.clicked.connect(self.stop_operation_mode)
-        self.btn_switch_mode.clicked.connect(self.switch_operation_mode)
-        self.btn_start_nav2.clicked.connect(self.start_nav2)
-        self.btn_stop_nav2.clicked.connect(self.stop_nav2)
-        self.btn_start_all.clicked.connect(self.start_all)
-        self.btn_stop_all.clicked.connect(self.stop_all)
-        self.btn_start_nhiemvuboss.clicked.connect(self.start_nhiemvuboss)
-        self.btn_stop_nhiemvuboss.clicked.connect(self.stop_nhiemvuboss)
-        self.btn_kill_node.clicked.connect(self.kill_node)
+        tab_map_scroll = QScrollArea()
+        tab_map_scroll.setWidgetResizable(True)
+        tab_map_scroll.setWidget(tab_map)
 
-        self.btn_estop = QPushButton("HỦY CHẠY / E-STOP")
-        self.btn_estop.setStyleSheet("background-color: red; color: white; font-weight: bold; font-size: 14px; padding: 5px;")
-        self.btn_estop.clicked.connect(self.estop_clicked)
-
-        self.lbl_platform_status = QLabel("Layer1 Odom: OFF")
-        self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
-        self.lbl_nav2_status = QLabel("Nav2: OFF")
-        self.lbl_nhiemvuboss_status = QLabel("NhiemVuBoss: OFF")
-        self.lbl_odom_status = QLabel("Odom source: esp -> /odom")
-        self.lbl_dataenc = QLabel("Encoder /dataenc: -")
-
-        control_group = QGroupBox("Điều khiển")
-        control_layout = QGridLayout()
-        control_layout.addWidget(self.btn_start_platform, 0, 0)
-        control_layout.addWidget(self.btn_stop_platform, 0, 1)
-        control_layout.addWidget(self.btn_start_mode, 1, 0)
-        control_layout.addWidget(self.btn_stop_mode, 1, 1)
-        control_layout.addWidget(self.btn_switch_mode, 2, 0, 1, 2)
-        control_layout.addWidget(self.btn_start_nav2, 3, 0)
-        control_layout.addWidget(self.btn_stop_nav2, 3, 1)
-        control_layout.addWidget(self.btn_start_all, 4, 0)
-        control_layout.addWidget(self.btn_stop_all, 4, 1)
-        control_layout.addWidget(self.btn_start_nhiemvuboss, 5, 0)
-        control_layout.addWidget(self.btn_stop_nhiemvuboss, 5, 1)
-        control_layout.addWidget(QLabel("Node/pattern to kill:"), 6, 0)
-        control_layout.addWidget(self.edt_kill_node, 6, 1)
-        control_layout.addWidget(self.btn_kill_node, 7, 0, 1, 2)
-        control_layout.addWidget(self.btn_estop, 8, 0, 1, 2)
-        control_layout.addWidget(self.lbl_platform_status, 9, 0, 1, 2)
-        control_layout.addWidget(self.lbl_mode_status, 10, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nav2_status, 11, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nhiemvuboss_status, 12, 0, 1, 2)
-        control_layout.addWidget(self.lbl_odom_status, 13, 0, 1, 2)
-        control_layout.addWidget(self.lbl_dataenc, 14, 0, 1, 2)
-        control_group.setLayout(control_layout)
-
+        # ==========================================
+        # 4. CÁC WIDGET CHO TAB 4: 📋 NHẬT KÝ (LOG)
+        # ==========================================
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
-        self.log_box.setMinimumHeight(140)
-        log_group = QGroupBox("Log")
-        log_layout = QVBoxLayout()
-        log_layout.addWidget(self.log_box)
-        log_group.setLayout(log_layout)
+        self.btn_clear_log = QPushButton("Xóa nội dung Log")
+        self.btn_clear_log.clicked.connect(self.log_box.clear)
+
+        tab_log = QWidget()
+        tab_log_layout = QVBoxLayout()
+        tab_log_layout.addWidget(self.log_box)
+        tab_log_layout.addWidget(self.btn_clear_log)
+        tab_log.setLayout(tab_log_layout)
+
+        # ==========================================
+        # 5. KHỞI TẠO TAB WIDGET CHÍNH
+        # ==========================================
+        self.tabs = QTabWidget()
+        self.tabs.addTab(tab_control_scroll, "🎮 Điều khiển")
+        self.tabs.addTab(tab_config_scroll, "⚙️ Cấu hình")
+        self.tabs.addTab(tab_map_scroll, "🗺️ Bản đồ")
+        self.tabs.addTab(tab_log, "📋 Nhật ký")
+
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #334155;
+                background-color: #1e293b;
+                border-radius: 6px;
+                padding: 4px;
+            }
+            QTabBar::tab {
+                background-color: #0f172a;
+                color: #94a3b8;
+                padding: 8px 12px;
+                margin-right: 2px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QTabBar::tab:selected {
+                background-color: #2563eb;
+                color: #ffffff;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #1e293b;
+                color: #f1f5f9;
+            }
+        """)
+
+        # ==========================================
+        # 6. KHỐI KHẨN CẤP (E-STOP) & FOOTER TRÊN TRÁI
+        # ==========================================
+        self.btn_estop = QPushButton("🛑 HỦY CHẠY / E-STOP (DỪNG GẤP)")
+        self.btn_estop.setStyleSheet(
+            "background-color: #dc2626; color: white; font-weight: bold; font-size: 13px; padding: 7px; border-radius: 5px;"
+        )
+        self.btn_estop.clicked.connect(self.estop_clicked)
+
+        self.lbl_latest_log = QLabel("Log: Sẵn sàng")
+        self.lbl_latest_log.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_latest_log.setWordWrap(True)
 
         left_layout = QVBoxLayout()
-        left_layout.addWidget(system_group)
-        left_layout.addWidget(map_group)
-        left_layout.addWidget(control_group)
-        left_layout.addWidget(log_group, stretch=1)
+        left_layout.addWidget(self.btn_estop)
+        left_layout.addWidget(self.tabs, stretch=1)
+        left_layout.addWidget(self.lbl_latest_log)
+
         left_widget = QWidget()
         left_widget.setLayout(left_layout)
-
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_scroll.setWidget(left_widget)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll.setMinimumWidth(320)
+        left_widget.setMinimumWidth(360)
+        left_widget.setMaximumWidth(420)
 
         self.map_view = MapViewer(self.get_ros_node, self.on_map_clicked)
         right_layout = QVBoxLayout()
         right_layout.addWidget(self.map_view)
         right_widget = QWidget()
         right_widget.setLayout(right_layout)
-        right_widget.setMinimumWidth(260)
+        right_widget.setMinimumWidth(300)
 
         root_layout = QHBoxLayout()
-        root_layout.addWidget(left_scroll, stretch=0)
+        root_layout.addWidget(left_widget, stretch=0)
         root_layout.addWidget(right_widget, stretch=1)
         root_layout.setContentsMargins(6, 6, 6, 6)
         root_layout.setSpacing(6)
@@ -1039,6 +1147,11 @@ class MainWindow(QWidget):
 
     def _append_log_ui(self, text):
         self.log_box.append(text)
+        if hasattr(self, "lbl_latest_log"):
+            first_line = text.strip().splitlines()[0] if text.strip() else ""
+            if len(first_line) > 50:
+                first_line = first_line[:47] + "..."
+            self.lbl_latest_log.setText(f"Log: {first_line}")
 
     def on_new_map(self, msg):
         self.map_signal.emit(msg)

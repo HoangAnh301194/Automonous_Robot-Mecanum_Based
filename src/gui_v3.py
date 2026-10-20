@@ -22,7 +22,7 @@ from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
     QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QRadioButton, QScrollArea, QSlider, QTextEdit,
+    QPushButton, QRadioButton, QScrollArea, QSlider, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
@@ -822,18 +822,62 @@ class MainWindow(QWidget):
         control_group.setLayout(control_layout)
         self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setMinimumHeight(140)
         log_group = QGroupBox("Log"); log_layout = QVBoxLayout(); log_layout.addWidget(self.log_box); log_group.setLayout(log_layout)
+        # ==========================================
+        # TỔ CHỨC CÁC TAB CHỨC NĂNG (QTabWidget)
+        # ==========================================
+        def _make_scroll_tab(group):
+            w = QWidget(); l = QVBoxLayout(); l.addWidget(group); l.addStretch(); w.setLayout(l)
+            s = QScrollArea(); s.setWidgetResizable(True); s.setWidget(w); return s
+
+        self.btn_clear_log = QPushButton("Xóa nội dung Log")
+        self.btn_clear_log.clicked.connect(self.log_box.clear)
+        log_vbox = QVBoxLayout()
+        log_vbox.addWidget(self.log_box)
+        log_vbox.addWidget(self.btn_clear_log)
+        tab_log_widget = QWidget(); tab_log_widget.setLayout(log_vbox)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(_make_scroll_tab(control_group), "🎮 Điều khiển")
+        self.tabs.addTab(_make_scroll_tab(system_group), "⚙️ Cấu hình")
+        self.tabs.addTab(_make_scroll_tab(map_group), "🗺️ Bản đồ")
+        self.tabs.addTab(_make_scroll_tab(edit_group), "✏️ Sửa Map")
+        self.tabs.addTab(tab_log_widget, "📋 Nhật ký")
+
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #334155; background-color: #1e293b; border-radius: 6px; padding: 4px; }
+            QTabBar::tab { background-color: #0f172a; color: #94a3b8; padding: 8px 10px; margin-right: 2px; border-top-left-radius: 5px; border-top-right-radius: 5px; font-weight: bold; font-size: 11px; }
+            QTabBar::tab:selected { background-color: #2563eb; color: #ffffff; }
+            QTabBar::tab:hover:!selected { background-color: #1e293b; color: #f1f5f9; }
+        """)
+
+        self.lbl_latest_log = QLabel("Log: Sẵn sàng")
+        self.lbl_latest_log.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_latest_log.setWordWrap(True)
+
         left_layout = QVBoxLayout()
-        left_layout.addWidget(system_group); left_layout.addWidget(map_group); left_layout.addWidget(edit_group)
-        left_layout.addWidget(control_group); left_layout.addWidget(log_group, stretch=1)
-        left_widget = QWidget(); left_widget.setLayout(left_layout)
-        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True); left_scroll.setWidget(left_widget)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(320)
+        left_layout.addWidget(self.tabs, stretch=1)
+        left_layout.addWidget(self.lbl_latest_log)
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
+        left_widget.setMinimumWidth(360)
+        left_widget.setMaximumWidth(420)
+
         self.map_view = MapViewer(self.get_ros_node, on_map_click=self.on_map_clicked, on_map_drag=self.on_map_dragged)
-        right_layout = QVBoxLayout(); right_layout.addWidget(self.map_view)
-        right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(260)
-        root_layout = QHBoxLayout(); root_layout.addWidget(left_scroll, stretch=0); root_layout.addWidget(right_widget, stretch=1)
-        root_layout.setContentsMargins(6, 6, 6, 6); root_layout.setSpacing(6); self.setLayout(root_layout)
-        self.on_robot_mode_changed(); self.refresh_batch_waypoint_views()
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.map_view)
+        right_widget = QWidget()
+        right_widget.setLayout(right_layout)
+        right_widget.setMinimumWidth(300)
+
+        root_layout = QHBoxLayout()
+        root_layout.addWidget(left_widget, stretch=0)
+        root_layout.addWidget(right_widget, stretch=1)
+        root_layout.setContentsMargins(6, 6, 6, 6)
+        root_layout.setSpacing(6)
+        self.setLayout(root_layout)
+
+        self.on_robot_mode_changed()
+        self.refresh_batch_waypoint_views()
 
     def init_ros(self):
         if not rclpy.ok():
@@ -857,6 +901,11 @@ class MainWindow(QWidget):
 
     def _append_log_ui(self, text):
         self.log_box.append(text)
+        if hasattr(self, "lbl_latest_log"):
+            first_line = text.strip().splitlines()[0] if text.strip() else ""
+            if len(first_line) > 50:
+                first_line = first_line[:47] + "..."
+            self.lbl_latest_log.setText(f"Log: {first_line}")
 
     def on_new_map(self, msg):
         self.map_signal.emit(msg)
