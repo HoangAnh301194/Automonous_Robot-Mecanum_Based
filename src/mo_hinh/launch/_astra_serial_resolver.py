@@ -283,3 +283,33 @@ def resolve_video_from_serial(
     if not match:
         raise CameraIdentityError("AI serial {} did not resolve.".format(ai_serial))
     return match, report
+
+
+def _cli():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Verify Astra Pro OpenNI serials and their paired RGB UVC devices."
+    )
+    parser.add_argument("--front-serial", default="17110310855")
+    parser.add_argument("--rear-serial", default="17122514440")
+    parser.add_argument("--ai-serial", default="17122611013")
+    args = parser.parse_args()
+    print("Checking three OpenNI serials and the USB RGB pairing...")
+    try:
+        video, mapping = resolve_video_from_serial(
+            ai_serial=args.ai_serial,
+            required_serials=[
+                args.front_serial, args.rear_serial, args.ai_serial,
+            ],
+        )
+    except CameraIdentityError as exc:
+        parser.exit(2, "ERROR: {}\n".format(exc))
+    print("Verified serial -> UVC mapping:")
+    for item in mapping:
+        print("  {}".format(item))
+    print("AI RGB device: {}".format(video))
+    print("Note: open the ROS AI image to verify physical orientation.")
+
+
+if __name__ == "__main__":
+    _cli()
