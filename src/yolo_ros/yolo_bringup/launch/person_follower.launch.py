@@ -6,6 +6,7 @@ from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch.conditions import IfCondition
 from ament_index_python.packages import get_package_share_directory
 
 def generate_launch_description():
@@ -15,11 +16,15 @@ def generate_launch_description():
     model_arg = DeclareLaunchArgument('model', default_value='yolo11n.pt')
     tracker_arg = DeclareLaunchArgument('tracker', default_value='bytetrack.yaml')
     device_arg = DeclareLaunchArgument('device', default_value='cuda:0')
-    input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/camera/color/image_raw')
-    input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='/camera/depth/image_raw')
-    input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='/camera/depth/camera_info')
+    input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/ai_camera/color/image_raw')
+    input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='')
+    input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='')
     target_frame_arg = DeclareLaunchArgument('target_frame', default_value='camera_link')
     threshold_arg = DeclareLaunchArgument('threshold', default_value='0.25')
+    use_3d_arg = DeclareLaunchArgument(
+        'use_3d', default_value='False',
+        description='Opt-in only: requires calibrated, registered RGB and Depth topics.'
+    )
 
     # Patch 1: person-following optimized defaults
     classes_arg = DeclareLaunchArgument('classes', default_value='0',
@@ -30,7 +35,7 @@ def generate_launch_description():
     max_det_arg = DeclareLaunchArgument('max_det', default_value='10',
         description='Reduced from 300; 10 is enough for person following')
     
-    # YOLO + Tracking + 3D + Debug (Visuals)
+    # Safe default: RGB detection/tracking only; no cross-camera 3D inference.
     yolo_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(os.path.join(yolo_bringup_dir, 'launch', 'yolo.launch.py')),
         launch_arguments={
@@ -38,7 +43,7 @@ def generate_launch_description():
             'tracker': LaunchConfiguration('tracker'),
             'device': LaunchConfiguration('device'),
             'use_tracking': 'True',
-            'use_3d': 'True',
+            'use_3d': LaunchConfiguration('use_3d'),
             'use_debug': 'False', # Disabled to save CPU and improve FPS
             'input_image_topic': LaunchConfiguration('input_image_topic'),
             'input_depth_topic': LaunchConfiguration('input_depth_topic'),
@@ -53,11 +58,12 @@ def generate_launch_description():
         }.items()
     )
 
-    # Person Tracker Node (The data provider for your Behavior Tree)
+    # PersonTracking needs valid 3D detections; do not start on RGB-only mode.
     tracker_node = Node(
         package='yolo_ros',
         executable='follower_node',
         name='person_tracker_node',
+        condition=IfCondition(LaunchConfiguration('use_3d')),
         remappings=[
             ('yolo/detections_3d', '/yolo/detections_3d'),
             ('person_tracking', '/person_tracking')
@@ -73,6 +79,7 @@ def generate_launch_description():
         input_depth_info_topic_arg,
         target_frame_arg,
         threshold_arg,
+        use_3d_arg,
         classes_arg,
         imgsz_height_arg,
         imgsz_width_arg,
