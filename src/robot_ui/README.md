@@ -35,44 +35,52 @@ sudo apt install python3-pyqt5 python3-opencv python3-numpy
 
 ## Configure the Kiosk Chatbot
 
-The kiosk chatbot expects a running 9router server with an OpenAI-compatible
-endpoint. By default it connects to:
+The native kiosk uses the 9router OpenAI-compatible API, defaulting to
+`http://localhost:20128/v1`. **9router must already be running**; launching
+the kiosk does not start the LLM server.
 
-```text
-http://localhost:20128/v1
-```
+On the Jetson, reuse the existing local, untracked configuration
+`/home/orin/ros2_ws/config/llm.local.env` with `LLM_BASE_URL`,
+`LLM_API_KEY`, and `LLM_MODEL`. Never commit this file or copy the API
+key into documentation.
 
-Set these variables in the same terminal that will launch the kiosk:
-
-```bash
-export LLM_BASE_URL="http://localhost:20128/v1"
-export LLM_API_KEY="YOUR_9ROUTER_API_KEY"
-export LLM_MODEL="hehe"
-```
-
-If 9router runs on another computer, replace `localhost` with that computer's
-IP address. Do not commit the API key to the repository. The model name must
-match one of the models returned by:
+In the **same terminal** that will launch the kiosk, run (unless those
+variables are already loaded from `~/.bashrc`):
 
 ```bash
-curl "$LLM_BASE_URL/models"
+set -a
+source ~/ros2_ws/config/llm.local.env
+set +a
+
+printf 'LLM_BASE_URL=%s\nLLM_MODEL=%s\n' "$LLM_BASE_URL" "$LLM_MODEL"
+if [ -n "$LLM_API_KEY" ]; then
+  echo "LLM_API_KEY: configured"
+else
+  echo "LLM_API_KEY: missing"
+fi
 ```
 
-Before launching the kiosk, test the endpoint without exposing the key:
+Check 9router access (without printing the key):
 
 ```bash
 curl -sS "$LLM_BASE_URL/models" \
   -H "Authorization: Bearer $LLM_API_KEY"
 ```
 
-The chatbot uses the text files in:
+If 9router is on another computer, adjust the saved `LLM_BASE_URL`
+to its reachable IP rather than `localhost`. The saved `LLM_MODEL`
+must be valid on the connected server.
 
-```text
-robot_ui/kiosk/rag_docs/
+Launch the kiosk on a machine with a working graphical display:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=true hide_cursor:=false use_sim_time:=false
 ```
 
-Add or edit `.txt` files there when updating the robot knowledge base. Rebuild
-the `robot_ui` package after changing Python code or RAG documents.
+The chatbot loads `.txt` knowledge files from
+`robot_ui/kiosk/rag_docs/`. Rebuild the `robot_ui` package after
+changing Python code or those documents.
 
 ## Build the UI
 
