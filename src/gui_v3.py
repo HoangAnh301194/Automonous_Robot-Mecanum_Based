@@ -638,10 +638,16 @@ class ProcessManager:
         if proc.poll() is None:
             self.log(f"[{name}] STOP")
             try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-                time.sleep(1.0)
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                for _ in range(3):
+                    time.sleep(0.1)
+                    if proc.poll() is not None:
+                        break
                 if proc.poll() is None:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
             except Exception as exc:
                 self.log(f"[{name}] stop error: {exc}")
         else:
@@ -652,8 +658,32 @@ class ProcessManager:
         return bool(proc and proc.poll() is None)
 
     def stop_all(self):
-        for name in list(self.processes.keys()):
-            self.stop(name)
+        active = []
+        for name, proc in list(self.processes.items()):
+            if proc and proc.poll() is None:
+                try:
+                    pgid = os.getpgid(proc.pid)
+                    active.append((name, proc, pgid))
+                    os.killpg(pgid, signal.SIGTERM)
+                    self.log(f"[{name}] STOP (SIGTERM)")
+                except Exception:
+                    pass
+
+        if not active:
+            return
+
+        for _ in range(3):
+            time.sleep(0.1)
+            if all(proc.poll() is not None for _, proc, _ in active):
+                break
+
+        for name, proc, pgid in active:
+            if proc.poll() is None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                    self.log(f"[{name}] FORCE KILL (SIGKILL)")
+                except Exception:
+                    pass
 
 class MainWindow(QWidget):
     log_signal = pyqtSignal(str)
@@ -706,6 +736,7 @@ class MainWindow(QWidget):
         self.rb_sim.toggled.connect(self.on_robot_mode_changed)
         self.rb_real.toggled.connect(self.on_robot_mode_changed)
         self.cmb_odom_source = QComboBox()
+        self.cmb_odom_source.addItem("Hoverboard ros2_control", "hoverboard")
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
         self.cmb_odom_source.addItem("LiDAR RF2O odom", "rf2o")
         self.cmb_odom_source.currentIndexChanged.connect(self.on_odom_source_changed)
@@ -815,7 +846,8 @@ class MainWindow(QWidget):
         try:
             rclpy.spin(self.ros_node)
         except Exception as exc:
-            self.append_log(f"ROS spin error: {exc}")
+            if not self.is_shutting_down:
+                self.append_log(f"ROS spin error: {exc}")
 
     def get_ros_node(self):
         return self.ros_node
@@ -1061,7 +1093,7 @@ class MainWindow(QWidget):
             self.proc_mgr.stop(self.LAYER1_SIM)
             esp_port, lidar_port, detect_method = _detect_esp_lidar_ports()
             self.append_log(f"Auto-detect serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}")
-            self.proc_mgr.start(self.LAYER1_REAL, self.ros_prefix() + f"ros2 launch mo_hinh real_odom.launch.py odom_source:={self.get_selected_odom_source()} use_sim_time:={sim_time} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}")
+            self.proc_mgr.start(self.LAYER1_REAL, self.ros_prefix() + f"ros2 launch mo_hinh real_odom.launch.py odom_source:={self.get_selected_odom_source()} use_sim_time:={sim_time} hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}")
     def stop_platform(self): self.proc_mgr.stop(self.LAYER1_SIM); self.proc_mgr.stop(self.LAYER1_REAL)
     def start_slam_mapping(self):
         self.append_log("Layer2 mode: SLAM Mapping")
@@ -1175,61 +1207,150 @@ class MainWindow(QWidget):
         self.lbl_odom_status.setText(f"Odom source: {'gazebo' if self.is_sim_mode() else self.get_selected_odom_source()} -> /odom")
 
     def stop_one_shot_processes(self):
-        with self.one_shot_lock: procs = list(self.one_shot_procs)
+        with self.one_shot_lock:
+            procs = list(self.one_shot_procs)
+            self.one_shot_procs = []
+
+        if not procs:
+            return
+
         for proc in procs:
             try:
-                if proc.poll() is None: os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
-            except Exception: pass
-        time.sleep(0.4)
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                pass
+
+        time.sleep(0.15)
         for proc in procs:
             try:
-                if proc.poll() is None: os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception: pass
-        with self.one_shot_lock: self.one_shot_procs = []
+                if proc.poll() is None:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception:
+                pass
 
     def force_kill_known_ros_processes(self):
-        patterns = ["ros2 launch mo_hinh virtual_robot_gazebo.launch.py", "ros2 launch mo_hinh real_odom.launch.py", "ros2 launch mo_hinh real_slam.launch.py", "ros2 launch mo_hinh real_localization_nav2.launch.py", "ros2 launch slam_toolbox online_async_launch.py", "ros2 launch slam_toolbox localization_launch.py", "ros2 launch nav2_bringup localization_launch.py", "ros2 launch nav2_bringup navigation_launch.py", "ros2 service call /unpause_physics"]
-        for sig in ("TERM", "KILL"):
-            for pat in patterns:
-                subprocess.run(["bash", "-lc", f"pkill -{sig} -f {shlex.quote(pat)} >/dev/null 2>&1 || true"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
-            if sig == "TERM": time.sleep(0.6)
+        # Direct pkill without login bash subshells to avoid freezing the GUI event loop
+        patterns = [
+            "virtual_robot_gazebo",
+            "real_odom",
+            "real_slam",
+            "real_localization_nav2",
+            "slam_toolbox",
+            "nav2_bringup",
+            "hoverboard_driver",
+            "unpause_physics",
+        ]
+        combined = "|".join(patterns)
+        try:
+            subprocess.run(
+                ["pkill", "-TERM", "-f", combined],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.5,
+            )
+        except Exception:
+            pass
+
+        time.sleep(0.15)
+
+        try:
+            subprocess.run(
+                ["pkill", "-KILL", "-f", combined],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=0.5,
+            )
+        except Exception:
+            pass
 
     def cleanup_temp_files(self):
         for path in self.temp_files:
             try:
-                if os.path.exists(path): os.remove(path)
-            except Exception: pass
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:
+                pass
         self.temp_files = []
 
     def closeEvent(self, event):
-        if self.is_shutting_down: event.accept(); return
+        if self.is_shutting_down:
+            event.accept()
+            return
         self.is_shutting_down = True
+
+        # 1. Hide window immediately so the desktop UI closes instantly
+        self.hide()
+        QApplication.processEvents()
+
+        # 2. Stop GUI status timers
         try:
-            if self.status_timer.isActive(): self.status_timer.stop()
-        except Exception: pass
-        # Reset SLAM về /map nếu đã remap
+            if hasattr(self, "status_timer") and self.status_timer.isActive():
+                self.status_timer.stop()
+        except Exception:
+            pass
+
+        # 3. Stop background managed processes
         try:
-            subprocess.run(["bash", "-c", "ros2 param set /slam_toolbox map_topic /map"], capture_output=True, text=True, timeout=5)
-        except Exception: pass
-        try: self.stop_all()
-        except Exception: pass
-        try: self.stop_one_shot_processes()
-        except Exception: pass
-        try: self.force_kill_known_ros_processes()
-        except Exception: pass
-        try: self.cleanup_temp_files()
-        except Exception: pass
+            self.stop_all()
+        except Exception:
+            pass
+
+        # 4. Clean up lingering ROS 2 launch processes
         try:
-            if self.ros_node is not None: self.ros_node.destroy_node()
-            if rclpy.ok(): rclpy.shutdown()
-        except Exception: pass
+            self.force_kill_known_ros_processes()
+        except Exception:
+            pass
+
+        # 5. Clean up temporary files
+        try:
+            self.cleanup_temp_files()
+        except Exception:
+            pass
+
+        # 6. Shut down ROS 2 node cleanly
+        try:
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception:
+            pass
+
+        try:
+            if self.ros_spin_thread and self.ros_spin_thread.is_alive():
+                self.ros_spin_thread.join(timeout=0.2)
+        except Exception:
+            pass
+
+        try:
+            if self.ros_node is not None:
+                self.ros_node.destroy_node()
+        except Exception:
+            pass
+
+        event.accept()
         super().closeEvent(event)
+
 
 def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+
+    # Enable responsive Ctrl+C in terminal:
+    def sigint_handler(sig, frame):
+        if window.is_shutting_down:
+            os._exit(0)
+        window.close()
+
+    signal.signal(signal.SIGINT, sigint_handler)
+
+    sig_timer = QTimer()
+    sig_timer.timeout.connect(lambda: None)
+    sig_timer.start(200)
+
+    exit_code = app.exec_()
+    os._exit(exit_code)
+
 
 if __name__ == "__main__":
-    main()
+    main()
