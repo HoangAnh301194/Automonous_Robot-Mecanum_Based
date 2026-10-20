@@ -20,7 +20,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 'image_topic',
-                default_value='/camera/color/image_raw',
+                default_value='/ai_camera/color/image_raw',
                 description='Camera color image topic.',
             ),
             DeclareLaunchArgument(
@@ -31,7 +31,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 'device',
-                default_value='cuda:0',
+                default_value='cpu',
                 description='Inference device, for example cuda:0 or cpu.',
             ),
             DeclareLaunchArgument(
