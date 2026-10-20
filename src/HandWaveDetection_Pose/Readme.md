@@ -36,6 +36,164 @@ python main.py
 python main.py --backend rtmpose --device cpu
 ```
 
+## Triển khai ROS 2 Humble trên Jetson Orin (ba camera)
+
+**Áp dụng cho nhánh `main` sau khi đồng bộ topic AI (PR #10).**
+Mục này mô tả node ROS 2 `hand_wave_detection`, **khác** với chương trình
+`python main.py` dùng để chạy độc lập và benchmark trong các phần bên dưới.
+Giữ nguyên namespace của `mo_hinh/three_astra.launch.py`:
+
+| Camera | Topic ảnh |
+| --- | --- |
+| AI RGB (UVC, `usb_cam`) | `/ai_camera/color/image_raw` |
+| Front Depth (`astra_camera`) | `/front_camera/depth/image_raw` |
+| Rear Depth (`astra_camera`) | `/rear_camera/depth/image_raw` |
+
+Luồng AI 2D: **AI RGB → YOLO11 Detection/Tracking (GPU) →
+RTMPose (ONNX Runtime CPU) → Skeleton Debug + trạng thái giơ tay**.
+Không ghép Depth của Front/Rear vào ảnh AI để suy ra vị trí 3D nếu chưa có
+hiệu chuẩn và căn chỉnh tương ứng.
+
+### Chuẩn bị và build (một lần sau khi pull code)
+
+~~~bash
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+
+colcon build --symlink-install --packages-up-to \
+  mo_hinh yolo_bringup hand_wave_detection
+
+source ~/ros2_ws/install/setup.bash
+~~~
+
+Mỗi terminal ROS 2 mới phải chạy `source /opt/ros/humble/setup.bash` và
+`source ~/ros2_ws/install/setup.bash`. Các thư viện Python và driver
+camera/GPU cần được cài sẵn theo phiên bản JetPack của Jetson.
+
+### Cách A — Tự động chạy toàn bộ pipeline
+
+~~~bash
+cd ~/ros2_ws
+bash start_person_following.sh
+~~~
+
+Script của nhánh `main` khởi chạy ba camera → YOLO trên `cuda:0` →
+RTMPose trên `cpu`, tự truyền topic AI mới và `/yolo/tracking`.
+Có thể đổi số người xử lý bằng cách đặt biến trước lệnh chạy:
+
+~~~bash
+HAND_WAVE_MAX_PEOPLE=1 bash start_person_following.sh
+~~~
+
+Các log nằm trong `~/ros2_ws/log/ai_pipeline_YYYYMMDD_HHMMSS/`.
+Dừng bằng Ctrl+C; script chỉ dừng các tiến trình nó đã khởi tạo.
+Không chạy thêm một bản `three_astra.launch.py` nếu đang dùng script này,
+vì hai tiến trình camera sẽ tranh chấp cùng phần cứng.
+
+### Cách B — Chạy riêng từng terminal để kiểm tra
+
+**Terminal 1 — Ba camera:**
+
+~~~bash
+ros2 launch mo_hinh three_astra.launch.py \
+  front_depth_fps:=15 rear_depth_fps:=15 ai_color_fps:=30
+~~~
+
+Giá trị 15 FPS là cấu hình **yêu cầu**; driver Astra có thể fallback sang mode
+hỗ trợ khác. Kiểm tra log và tốc độ phát dữ liệu thực tế trước khi kết luận.
+
+**Terminal 2 — YOLO11 nhận ảnh AI, theo dõi người:**
+
+~~~bash
+ros2 launch yolo_bringup yolo.launch.py \
+  model:=yolo11n.pt \
+  device:=cuda:0 \
+  input_image_topic:=/ai_camera/color/image_raw \
+  image_reliability:=2 \
+  classes:=0 \
+  imgsz_height:=384 imgsz_width:=640 max_det:=10 \
+  use_tracking:=True use_3d:=False use_debug:=True
+~~~
+
+**Terminal 3 — RTMPose nhận đúng RGB AI và kết quả Tracking:**
+
+~~~bash
+ros2 launch hand_wave_detection hand_wave_detection.launch.py \
+  backend:=rtmpose \
+  device:=cpu \
+  image_topic:=/ai_camera/color/image_raw \
+  tracking_topic:=/yolo/tracking \
+  max_people:=3
+~~~
+
+Các giá trị `image_topic`, `tracking_topic` và `device` trên đây đã
+được cập nhật thành **mặc định** trong launch ROS 2; có thể viết gọn:
+
+~~~bash
+ros2 launch hand_wave_detection hand_wave_detection.launch.py
+~~~
+
+Mặc định **chỉ áp dụng khi chạy đúng file launch phiên bản mới** và không
+truyền tham số ghi đè. `max_people` mặc định là 5 nếu không chỉ định.
+
+### Xem ảnh Debug Skeleton
+
+Mở trên Jetson có giao diện đồ họa:
+
+~~~bash
+ros2 run rqt_image_view rqt_image_view /pose/image_debug
+~~~
+
+Nếu Jetson chạy headless qua SSH, mở video bằng trình duyệt laptop:
+
+~~~bash
+sudo apt install -y ros-humble-web-video-server
+ros2 run web_video_server web_video_server --ros-args -p port:=8080
+~~~
+
+Trên laptop cùng mạng LAN tin cậy truy cập
+`http://<IP_JETSON>:8080/stream_viewer?topic=/pose/image_debug`.
+Web video server không có cơ chế xác thực mặc định, không công khai ra Internet.
+
+`/pose/image_debug` chỉ được render/phát khi có subscriber, nên hãy mở
+trình xem trước khi đo FPS của topic này.
+
+### Kiểm tra topic và xác nhận nguồn ảnh
+
+~~~bash
+ros2 node info /yolo/yolo_node
+ros2 node info /yolo/tracking_node
+ros2 node info /yolo/debug_node
+ros2 node info /hand_wave_detection
+
+ros2 topic hz /yolo/tracking
+ros2 topic echo /pose/wave_detected
+ros2 topic info /ai_camera/color/image_raw -v
+ros2 param get /ai_camera/color/usb_cam video_device
+~~~
+
+YOLO Detection/Tracking/Debug và HandWaveDetection phải subscribe
+`/ai_camera/color/image_raw`; riêng HandWaveDetection nhận thêm
+`/yolo/tracking`. Kết quả gồm `/pose/image_debug` (ảnh có khung xương),
+`/pose/wave_detected` (Bool), `/pose/wave_status` (String).
+Nếu đúng tên topic nhưng hình vẫn là Rear, kiểm tra thiết bị USB thực tế
+được `usb_cam` mở, không tự sửa namespace hoặc đổi sang Depth Rear.
+
+**Lưu ý CUDA:** CUDA của PyTorch dùng cho YOLO và `CUDAExecutionProvider`
+của ONNX Runtime dùng cho RTMPose là hai cấu hình độc lập. Trên Jetson hiện
+tại, ONNX Runtime chỉ có `CPUExecutionProvider` và
+`AzureExecutionProvider`; `device:=cuda:0` cho RTMPose sẽ lỗi khởi tạo.
+Dùng `device:=cpu` như lệnh trên. Chỉ chuyển sang CUDA khi đã cài và
+nghiệm thu riêng ONNX Runtime GPU tương thích JetPack.
+
+Kiểm tra hồi quy tên topic sau khi cập nhật repo:
+
+~~~bash
+cd ~/ros2_ws
+python3 tools/test_ai_topic_contract.py
+~~~
+
+
 ## Pipeline baseline theo stage
 
 CLI hỗ trợ ba stage độc lập:
@@ -480,7 +638,7 @@ sau đó YOLO11 Pose chạy trên batch crop và keypoint được ánh xạ v�
 python main.py \
   --backend rtmpose \
   --source 0 \
-  --device cuda:0
+  --device cpu
 ```
 
 ```text
@@ -492,6 +650,8 @@ YOLO11n detect + ByteTrack
 -> temporal filter
 ```
 
+Trên Jetson dùng `--device cpu` trừ khi đã cài ONNX Runtime có `CUDAExecutionProvider`. Bộ tham số dòng lệnh của `main.py` không đồng nghĩa với mặc định của node ROS 2.
+
 Backend này chỉ chạy RTMPose cho 5 người đã chọn. Các crop được ghép thành một batch động và chạy bằng một lần gọi ONNX Runtime; TensorRT là bước tối ưu production tiếp theo.
 
 ### Video và lưu kết quả
@@ -500,7 +660,7 @@ Backend này chỉ chạy RTMPose cho 5 người đã chọn. Các crop được
 python main.py \
   --backend rtmpose \
   --source input.mp4 \
-  --device cuda:0 \
+  --device cpu \
   --output outputs/rtmpose.mp4 \
   --no-display
 ```
