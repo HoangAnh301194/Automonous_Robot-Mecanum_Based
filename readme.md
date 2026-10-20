@@ -126,107 +126,155 @@ ros2 run depth_obstacle_detector obstacle_detector \
   --ros-args -p config_file:="$WS/my_map/cam.yaml"
 ```
 
-## 6) AI Pipeline (Camera + YOLO11 + Hand Wave RTMPose)
+## 6) Jetson AI Pipeline (3 Cameras + YOLO11 + Hand Wave RTMPose)
 
-### Step 0: Build AI Packages
+This is the current, recommended **main**-branch bringup for the real Jetson
+Orin robot. Run each launch in a separate terminal (ROS 2 Humble). Keep
+previously started processes running.
+
+### 6.1 Build and source the workspace
 
 ```bash
+export WS="$HOME/ros2_ws"
 cd "$WS"
-colcon build --symlink-install \
-  --packages-select yolo_msgs yolo_ros yolo_bringup hand_wave_detection
+git status --short
+git switch main
+git pull --ff-only origin main
+
+source /opt/ros/humble/setup.bash
+sudo apt install -y ros-humble-usb-cam
+colcon build --symlink-install --packages-up-to \
+  mo_hinh yolo_bringup hand_wave_detection robot_ui
 source "$WS/install/setup.bash"
 ```
 
-### Step 1: Launch Camera Driver (Orbbec Astra Pro)
+Do not discard uncommitted files if Git reports a conflict when switching
+branches. The Astra driver, PyTorch with Jetson CUDA support, Ultralytics,
+RTMLib and ONNX Runtime must already be available.
+
+Before any ROS command in **each new terminal**:
 
 ```bash
-source "$WS/install/setup.bash"
-ros2 launch astra_camera astra_pro.launch.xml
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 ```
 
-Published topics include:
-- `/camera/color/image_raw`
-- `/camera/depth/image_raw`
-- `/camera/depth/camera_info`
-
-### Step 2: Launch YOLO11 Detection (TensorRT)
-
-Export the TensorRT engine once on the Jetson:
+### 6.2 Terminal 1 — Three cameras
 
 ```bash
-yolo export model=yolo11n.pt format=engine imgsz=384,640 half=True device=0
+ros2 launch mo_hinh three_astra.launch.py \
+  front_depth_fps:=15 \
+  rear_depth_fps:=15 \
+  ai_color_fps:=30
 ```
 
-Launch detection:
+Camera streams:
+- Front Depth: `/front_camera/depth/image_raw` — serial-pinned OpenNI.
+- Rear Depth: `/rear_camera/depth/image_raw` — serial-pinned OpenNI.
+- AI RGB: `/ai_camera/color/image_raw` — `usb_cam`, MJPEG to RGB.
+
+The RGB camera is selected by physical USB port, not OpenNI serial:
+`/dev/v4l/by-path/platform-3610000.usb-usb-0:2.2.1:1.0-video-index0`.
+Override `ai_video_device:=...` if the camera is moved to another port.
+
+Astra may reject 640x480@15 and fall back to a supported mode such as
+640x480@30. Treat 15 FPS as **requested** until actual FPS and driver
+`set depth video mode` messages are checked.
+
+To run AI RGB alone for a lightweight test:
 
 ```bash
-source "$WS/install/setup.bash"
+ros2 launch mo_hinh three_astra.launch.py \
+  enable_front:=false enable_rear:=false enable_ai:=true
+```
 
+### 6.3 Terminal 2 — YOLO11 person detection + tracking on GPU
+
+```bash
 ros2 launch yolo_bringup yolo.launch.py \
-  model:=yolo11n.engine \
-  use_tracking:=False \
-  skip_frames:=0 \
-  use_debug:=True \
+  model:=yolo11n.pt \
   device:=cuda:0 \
+  input_image_topic:=/ai_camera/color/image_raw \
+  image_reliability:=2 \
   classes:=0 \
   imgsz_height:=384 \
   imgsz_width:=640 \
   max_det:=10 \
-  namespace:=yolo \
-  input_image_topic:=/camera/color/image_raw
+  use_tracking:=True \
+  use_3d:=False \
+  use_debug:=True
 ```
 
-The optimized path performs person-only detection at 384x640 and publishes
-`/yolo/detections`. Debug output is available on `/yolo/dbg_image`.
+Outputs: `/yolo/detections`, `/yolo/tracking`, `/yolo/dbg_image`.
+The RGB camera is not registered to a depth camera, so 3D detection is
+disabled here. `image_reliability:=2` uses Best Effort QoS on the image
+subscriber. Replace `yolo11n.pt` with `yolo11n.engine` only if that
+TensorRT engine has already been exported and validated on this Jetson.
 
-### Step 3: Launch Hand Wave Detection (RTMPose)
+### 6.4 Terminal 3 — RTMPose skeleton + hand wave on CPU
 
 ```bash
-source "$WS/install/setup.bash"
-
 ros2 launch hand_wave_detection hand_wave_detection.launch.py \
   backend:=rtmpose \
   device:=cpu \
-  max_people:=5 \
-  image_topic:=/camera/color/image_raw \
-  tracking_topic:=/yolo/detections
+  image_topic:=/ai_camera/color/image_raw \
+  tracking_topic:=/yolo/tracking \
+  max_people:=3
 ```
 
-Notes:
-- The default RTMPose path uses ONNX Runtime on CPU.
-- `max_people` limits the number of people passed to pose inference.
-- The main branch keeps the FPS instrumentation, nearest-person selection, and
-  asynchronous latest-frame worker used by the optimized hand-wave pipeline.
+**Critical:** YOLO uses the GPU, but RTMPose uses **ONNX Runtime CPU** in
+the current Jetson environment. RTMPose `device:=cuda:0` fails because
+`CUDAExecutionProvider` is absent (the installed providers were reported
+as `AzureExecutionProvider` and `CPUExecutionProvider`). Do not
+mistake the PyTorch GPU setting for an ONNX Runtime GPU setting.
 
-### Step 4: Verify Output Topics & Visualization
+Unlike the older backend branch, the main-branch HandWave launch **does**
+support `max_people`. The skeleton image is published at
+`/pose/image_debug` **only while a subscriber is connected**;
+the hand-wave results are `/pose/wave_detected` and
+`/pose/wave_status`.
+
+### 6.5 Terminal 4 — View skeleton debug image
+
+For a working graphical desktop/X11:
 
 ```bash
-ros2 topic echo /pose/wave_status
-ros2 topic echo /pose/wave_detected
-ros2 topic echo /person_tracking
-ros2 topic echo /yolo/detections_3d
 ros2 run rqt_image_view rqt_image_view /pose/image_debug
 ```
 
-### Step 5: Run the Automated AI Pipeline
-
-The startup script now resolves the workspace from its own location and defaults
-to `yolo11n.engine`, RTMPose on CPU, person class only, and the optimized image
-size.
+For SSH-only/headless operation, start a browser video server on Jetson:
 
 ```bash
-cd "$WS"
-bash start_person_following.sh
+sudo apt install -y ros-humble-web-video-server
+ros2 run web_video_server web_video_server --ros-args -p port:=8080
 ```
 
-Example override:
+Open from a laptop on the trusted LAN:
+
+```text
+http://<JETSON_IP>:8080/stream_viewer?topic=/pose/image_debug
+```
+
+Check:
 
 ```bash
-YOLO_DEVICE=cuda:0 \
-HAND_WAVE_DEVICE=cpu \
-HAND_WAVE_MAX_PEOPLE=5 \
-bash "$WS/start_person_following.sh"
+ros2 topic list | grep -E '^/(ai_camera|yolo|pose)/'
+ros2 topic hz /yolo/tracking
+ros2 topic hz /pose/image_debug
+ros2 topic echo /pose/wave_detected
 ```
+
+Do not expose the unauthenticated video server directly to the Internet.
+A plain SSH session without X forwarding cannot display `rqt_image_view`.
+
+### 6.6 Legacy all-in-one script
+
+The existing `start_person_following.sh` is **not** the recommended
+entrypoint for the new three-camera setup. It still launches a single
+`astra_pro.launch.xml` with old `/camera/*` topics, and it can forcefully
+terminate other camera/YOLO processes. Use the four terminal steps above
+instead; migrate the script separately before using it with three cameras.
+
 
 ## 7) Robot UI
 
@@ -422,41 +470,56 @@ The current web configuration is primarily for monitoring and diagnostics.
 Navigation controls, process controls, and teleoperation are disabled in
 src/robot_ui/config/robot_ui.yaml.
 
-### 7.7 Configure Chat / LLM / RAG
+### 7.7 Configure Chat / LLM / RAG — use saved 9router settings
 
-The native kiosk contains the LLM client, but it does **not** start the LLM server.
-A compatible 9router/OpenAI-style endpoint must already be running.
+The native kiosk contains the LLM client, but does **not** start the 9router
+service. 9router must already be running and reachable.
 
-Set the environment variables in the same terminal that launches the kiosk:
+The Jetson's locally saved, **untracked** configuration is normally at
+`/home/orin/ros2_ws/config/llm.local.env`. It should provide
+`LLM_BASE_URL`, `LLM_API_KEY`, and `LLM_MODEL`. Never commit that file
+or paste the API key into the repository.
+
+If those variables are not exported automatically in the launching terminal,
+load the existing file, without entering or printing the key:
 
 ~~~bash
-export LLM_BASE_URL="http://localhost:20128/v1"
-export LLM_API_KEY="YOUR_9ROUTER_API_KEY"
-export LLM_MODEL="hehe"
+set -a
+source ~/ros2_ws/config/llm.local.env
+set +a
+
+printf 'LLM_BASE_URL=%s\nLLM_MODEL=%s\n' "$LLM_BASE_URL" "$LLM_MODEL"
+if [ -n "$LLM_API_KEY" ]; then
+  echo "LLM_API_KEY: configured"
+else
+  echo "LLM_API_KEY: missing"
+fi
 ~~~
 
-If 9router runs on another machine, replace localhost with that machine's IP.
+If `~/.bashrc` already loads this file, sourcing it again is unnecessary.
+A variable in one terminal is **not** automatically inherited by a
+separately launched GUI process. Load the file in the **same terminal**
+used to launch the kiosk.
 
-Verify the endpoint:
+Verify the endpoint without exposing the key:
 
 ~~~bash
 curl -sS "$LLM_BASE_URL/models" \
   -H "Authorization: Bearer $LLM_API_KEY"
 ~~~
 
-Then launch the kiosk:
+Then, on a Jetson with a graphical desktop or working X11:
 
 ~~~bash
-ros2 launch robot_ui kiosk.launch.py
+ros2 launch robot_ui kiosk.launch.py \
+  windowed:=true hide_cursor:=false use_sim_time:=false
 ~~~
 
-Local RAG documents are stored in:
+If 9router is on a different machine, the `LLM_BASE_URL` in the env file
+must point to that host rather than `localhost`.
 
-~~~text
-src/robot_ui/robot_ui/kiosk/rag_docs/
-~~~
-
-Rebuild robot_ui after changing Python code or RAG documents.
+Local RAG documents: `src/robot_ui/robot_ui/kiosk/rag_docs/`.
+Rebuild `robot_ui` after modifying Python code or RAG documents.
 
 ### 7.8 ROS Interfaces Used by the Native UI
 
