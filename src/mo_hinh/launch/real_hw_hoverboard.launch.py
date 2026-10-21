@@ -34,8 +34,31 @@ def launch_setup(context, *args, **kwargs):
     with open(urdf_file, 'r', encoding='utf-8') as f:
         urdf_text = f.read()
 
-    # Tự động thay thế cổng nếu người dùng truyền cổng khác /dev/hoverboard
-    if hoverboard_port_val and hoverboard_port_val != '/dev/hoverboard':
+    # Đảm bảo có thẻ <ros2_control> cho Hoverboard
+    if '<ros2_control' not in urdf_text:
+        device_port = hoverboard_port_val if hoverboard_port_val else '/dev/hoverboard'
+        ros2_ctrl_block = f"""
+  <ros2_control name="hoverboard_system" type="system">
+    <hardware>
+      <plugin>hoverboard_driver/hoverboard_driver</plugin>
+      <param name="wheel_radius">0.08255</param>
+      <param name="max_velocity">1.0</param>
+      <param name="device">{device_port}</param>
+    </hardware>
+    <joint name="wheel_left_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+    <joint name="wheel_right_joint">
+      <command_interface name="velocity"/>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </ros2_control>
+</robot>"""
+        urdf_text = urdf_text.replace('</robot>', ros2_ctrl_block)
+    elif hoverboard_port_val and hoverboard_port_val != '/dev/hoverboard':
         urdf_text = urdf_text.replace(
             '<param name="device">/dev/hoverboard</param>',
             f'<param name="device">{hoverboard_port_val}</param>'
