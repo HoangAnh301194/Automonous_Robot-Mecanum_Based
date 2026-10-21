@@ -14,7 +14,7 @@
           </RecoveryNode>
         </RateController>
 
-        <RecoveryNode number_of_retries="1" name="FollowPath">
+        <RecoveryNode number_of_retries="3" name="FollowPath">
           <FollowPath path="{path}" controller_id="FollowPath"/>
           
           <ReactiveFallback name="ControllerRecoveryFallback">

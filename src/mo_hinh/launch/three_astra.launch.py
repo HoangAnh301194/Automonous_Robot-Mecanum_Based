@@ -172,12 +172,12 @@ def generate_launch_description():
             description='Serial of front depth camera.',
         ),
         DeclareLaunchArgument(
-            'front_depth_width', default_value='640',
-            description='Front depth width (default: 640).',
+            'front_depth_width', default_value='320',
+            description='Front depth width (default: 320).',
         ),
         DeclareLaunchArgument(
-            'front_depth_height', default_value='480',
-            description='Front depth height (default: 480).',
+            'front_depth_height', default_value='240',
+            description='Front depth height (default: ).',
         ),
         DeclareLaunchArgument(
             'front_depth_fps', default_value='15',

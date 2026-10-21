@@ -79,8 +79,13 @@ class ObstacleDetectorNode(Node):
             
             if self.cam_name == "Rear":
                 self.target_frame = "rear_scan_frame"
+            elif self.cam_name == "Front":
+                if self.target_frame in ['camera_link', 'front_camera_link', 'camera_depth_optical_frame', 'front_camera_depth_optical_frame']:
+                    self.get_logger().warn(f"Front camera target_frame was '{self.target_frame}' (floating at z=0.87m). Auto-switching to 'base_footprint' to project obstacles to ground level.")
+                    self.target_frame = "base_footprint"
                 
             self.pitch_deg = self.config.get('pitch_deg', 0.0)
+            self.distance_offset = float(self.config.get('distance_offset', 0.0))
             self.min_range = self.config.get('min_range', 0.2)
             self.max_range = self.config.get('max_range', 2.5)
             
@@ -105,7 +110,7 @@ class ObstacleDetectorNode(Node):
                 self.get_logger().warn("No valid ground reference loaded. Obstacle detection will be inactive.")
                 
             self.get_logger().info(f"[{self.cam_name}] Topics -> Depth: {self.depth_topic}, Scan: {self.output_topic}")
-            self.get_logger().info(f"[{self.cam_name}] Target Frame: {self.target_frame}, Pitch: {self.pitch_deg} deg")
+            self.get_logger().info(f"[{self.cam_name}] Target Frame: {self.target_frame}, Pitch: {self.pitch_deg} deg, DistOffset: {self.distance_offset:.2f} m")
 
             qos_profile = QoSProfile(
                 reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -299,6 +304,9 @@ class ObstacleDetectorNode(Node):
                     else:
                         thetas = np.arctan2(x_3d, z_3d)
                         planar_ranges = np.sqrt(x_3d**2 + z_3d**2)
+
+                if self.distance_offset != 0.0:
+                    planar_ranges = np.maximum(0.0, planar_ranges + self.distance_offset)
 
                 valid_r = (planar_ranges >= self.min_range) & (planar_ranges <= self.max_range)
                 thetas = thetas[valid_r]
