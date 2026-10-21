@@ -117,29 +117,25 @@ def _is_esp32_port(port, baudrate=115200):
     if serial is None:
         return False
     try:
-        # Mở cổng với timeout ngắn để không bị treo (block) lâu
         ser = serial.Serial(port, baudrate=baudrate, timeout=0.1)
         ser.reset_input_buffer()
-        
-        # Quét liên tục trong tối đa 3 giây
         start_time = time.time()
-        while time.time() - start_time < 3.0:
-            line = ser.readline().decode("utf-8", errors="ignore").strip()
-            if not line:
+        while time.time() - start_time < 1.0:
+            raw = ser.read(64)
+            if not raw:
                 continue
-            
-            # Các dấu hiệu nhận biết chắc chắn 100% là ESP32
-            if line.startswith("V:") and "EL:" in line:
+            # 1. Nhận diện gói nhị phân Hoverboard / ESP32 Bridge (START_FRAME 0xABCD)
+            if b"\xcd\xab" in raw or b"\xab\xcd" in raw:
                 ser.close()
                 return True
-            if line.startswith("E,"):
+            # 2. Dấu hiệu bootloader ESP32
+            if b"ets Jun" in raw or b"rst:0x" in raw or b"boot:" in raw:
                 ser.close()
                 return True
-            # Dấu hiệu bootloader của mạch ESP32 khi vừa mở Serial
-            if "ets Jun" in line or "rst:0x" in line or "boot:" in line:
+            # 3. Dấu hiệu dạng chuỗi cũ (fallback)
+            if b"V:" in raw or b"E," in raw:
                 ser.close()
                 return True
-                
         ser.close()
         return False
     except Exception:

@@ -92,18 +92,23 @@ def _list_serial_ports():
         dedup.append(port)
     return dedup
 
-def _is_esp32_port(port, baudrate=115200, timeout=1.0):
+def _is_esp32_port(port, baudrate=115200, timeout=0.1):
     if serial is None:
         return False
     ser = None
     try:
         ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
-        time.sleep(1.0)
         ser.reset_input_buffer()
-        ser.reset_output_buffer()
-        for _ in range(5):
-            line = ser.readline().decode("utf-8", errors="ignore").strip()
-            if line.startswith("V:") and "EL:" in line:
+        start_time = time.time()
+        while time.time() - start_time < 1.0:
+            raw = ser.read(64)
+            if not raw:
+                continue
+            if b"\xcd\xab" in raw or b"\xab\xcd" in raw:
+                return True
+            if b"ets Jun" in raw or b"rst:0x" in raw or b"boot:" in raw:
+                return True
+            if b"V:" in raw or b"E," in raw:
                 return True
     except Exception:
         return False
