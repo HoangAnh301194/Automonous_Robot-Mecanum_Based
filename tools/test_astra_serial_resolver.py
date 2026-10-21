@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Offline USB topology tests for serial->RGB pairing (no ROS or camera needed)."""
 
+import ctypes
 import importlib.util
+import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,6 +139,86 @@ class SerialRGBResolverTests(unittest.TestCase):
             with self.assertRaisesRegex(module.CameraIdentityError,
                                         "no matching Linux USB"):
                 fixture.resolve(devices=changed)
+
+    def test_orbbec_openni_extension_16_and_vendor_api_2003(self):
+        class FakeFunction:
+            def __init__(self, callback):
+                self.callback = callback
+                self.argtypes = None
+                self.restype = None
+
+            def __call__(self, *args):
+                return self.callback(*args)
+
+        class FakeOpenNI:
+            def __init__(self):
+                self._name = "/mock/Orbbec/libOpenNI2.so"
+                self.version = None
+                self.requested_property = None
+                self.info = module._OniDeviceInfo()
+                self.info.uri = b"2bc5/0403@1/6"
+                self.oniInitialize = FakeFunction(self._init)
+                self.oniGetDeviceList = FakeFunction(self._get_list)
+                self.oniReleaseDeviceList = FakeFunction(lambda _: 0)
+                self.oniDeviceOpen = FakeFunction(self._open)
+                self.oniDeviceGetProperty = FakeFunction(self._property)
+                self.oniDeviceClose = FakeFunction(lambda _: 0)
+                self.oniShutdown = FakeFunction(lambda: None)
+
+            def _init(self, version):
+                self.version = version
+                return 0
+
+            def _get_list(self, address, count_address):
+                ctypes.cast(
+                    address,
+                    ctypes.POINTER(ctypes.POINTER(module._OniDeviceInfo))
+                )[0] = ctypes.pointer(self.info)
+                ctypes.cast(
+                    count_address, ctypes.POINTER(ctypes.c_int)
+                )[0] = 1
+                return 0
+
+            def _open(self, uri, handle_address):
+                if uri != self.info.uri:
+                    return 1
+                ctypes.cast(
+                    handle_address, ctypes.POINTER(ctypes.c_void_p)
+                )[0] = ctypes.c_void_p(123)
+                return 0
+
+            def _property(self, handle, property_id, buffer, size_address):
+                self.requested_property = property_id
+                if property_id != 16:
+                    return 1
+                serial = b"17122611013\x00"
+                ctypes.memmove(buffer, serial, len(serial))
+                ctypes.cast(
+                    size_address, ctypes.POINTER(ctypes.c_int)
+                )[0] = len(serial)
+                return 0
+
+        fake = FakeOpenNI()
+        with patch.object(module, "_openni_library", return_value=fake):
+            devices = module.enumerate_openni_devices()
+        self.assertEqual(fake.version, 2003)
+        self.assertEqual(fake.requested_property, 16)
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0].serial, "17122611013")
+        self.assertEqual((devices[0].usb_bus, devices[0].usb_device), (1, 6))
+
+    def test_openni_loader_uses_matching_orbbec_plugin(self):
+        with tempfile.TemporaryDirectory() as temp:
+            library = Path(temp) / "libOpenNI2.so"
+            plugin = Path(temp) / "OpenNI2" / "Drivers" / "liborbbec.so"
+            plugin.parent.mkdir(parents=True)
+            library.write_bytes(b"fake-lib")
+            plugin.write_bytes(b"fake-orbbec-plugin")
+            with patch.dict(os.environ, {"OPENNI2_LIBRARY": str(library)}):
+                with patch.object(module.ctypes, "CDLL", return_value="vendor") as load:
+                    loaded = module._openni_library()
+            self.assertEqual(loaded, "vendor")
+            load.assert_called_once_with(str(library.resolve()))
 
     def test_launch_uses_all_three_serials_no_fixed_usb_path(self):
         launch = (

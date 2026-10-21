@@ -41,43 +41,64 @@ class _OniDeviceInfo(ctypes.Structure):
 
 
 def _openni_library():
-    """Find the SAME OpenNI2 shared library already used by the Jetson driver."""
+    """Load the vendor OpenNI2 library WITH its matching Orbbec plugin.
+
+    The ROS astra_camera package installs these under:
+      <astra_camera-prefix>/lib/libOpenNI2.so
+      <astra_camera-prefix>/lib/OpenNI2/Drivers/liborbbec.so
+
+    A generic system OpenNI2 may initialize successfully yet enumerate zero
+    Astra devices. Never silently fall back to a library without liborbbec.
+    """
     candidates = []
-    explicit = os.environ.get("OPENNI2_LIBRARY", "")
+    explicit = os.environ.get("OPENNI2_LIBRARY", "").strip()
     if explicit:
         candidates.append(explicit)
     for key in ("OPENNI2_REDIST", "OPENNI2_REDIST64"):
         if os.environ.get(key):
             candidates.append(str(Path(os.environ[key]) / "libOpenNI2.so"))
-    discovered = ctypes.util.find_library("OpenNI2")
-    if discovered:
-        candidates.append(discovered)
-    candidates += [
-        "libOpenNI2.so",
-        "/usr/lib/aarch64-linux-gnu/libOpenNI2.so",
-        "/usr/lib/x86_64-linux-gnu/libOpenNI2.so",
-        "/usr/local/lib/libOpenNI2.so",
-        "/opt/ros/humble/lib/libOpenNI2.so",
-    ]
     try:
         from ament_index_python.packages import get_package_prefix
         prefix = Path(get_package_prefix("astra_camera"))
-        candidates += [
-            str(prefix / "lib" / "libOpenNI2.so"),
-            str(prefix / "lib" / "astra_camera" / "libOpenNI2.so"),
-        ]
+        candidates.append(str(prefix / "lib" / "libOpenNI2.so"))
     except (ImportError, LookupError):
         pass
-    errors = []
+    # Direct source-tree fallback for unbuilt or partially-sourced workspaces.
+    for pkg in (
+        Path.home() / "ros2_ws" / "install" / "astra_camera" / "lib",
+        Path.home() / "ros2_ws" / "src" / "ros2_astra_camera"
+            / "astra_camera" / "openni2_redist" / "arm64",
+        Path.home() / "ros2_ws" / "src" / "ros2_astra_camera"
+            / "astra_camera" / "openni2_redist" / "x64",
+    ):
+        candidates.append(str(pkg / "libOpenNI2.so"))
+    candidates.extend([
+        "/usr/lib/aarch64-linux-gnu/libOpenNI2.so",
+        "/usr/local/lib/libOpenNI2.so",
+        "/usr/lib/x86_64-linux-gnu/libOpenNI2.so",
+        "/opt/ros/humble/lib/libOpenNI2.so",
+    ])
+    failures = []
     for name in dict.fromkeys(candidates):
+        location = Path(name).expanduser()
+        if not location.is_file():
+            failures.append("{} (not found)".format(location))
+            continue
+        plugin = location.parent / "OpenNI2" / "Drivers" / "liborbbec.so"
+        if not plugin.is_file():
+            failures.append("{} (no Orbbec driver at {})".format(location, plugin))
+            continue
         try:
-            return ctypes.CDLL(name)
+            return ctypes.CDLL(str(location.resolve()))
         except OSError as exc:
-            errors.append("{}: {}".format(name, exc))
+            failures.append("{} ({})".format(location, exc))
     raise CameraIdentityError(
-        "Cannot load libOpenNI2.so. Set OPENNI2_LIBRARY to the OpenNI2 "
-        "library used by astra_camera, or install its runtime; no AI RGB "
-        "camera will start. Tried: {}".format("; ".join(errors[-5:]))
+        "No compatible Orbbec OpenNI2 runtime found. The Python resolver "
+        "requires libOpenNI2.so and OpenNI2/Drivers/liborbbec.so from the "
+        "same Astra SDK install. Check "
+        "'ros2 pkg prefix astra_camera' / 'ls <prefix>/lib/OpenNI2/Drivers' "
+        "or set OPENNI2_LIBRARY to the vendor libOpenNI2.so path. "
+        "Candidates: {}".format("; ".join(failures[:8]))
     )
 
 
@@ -105,8 +126,8 @@ def enumerate_openni_devices():
     lib.oniShutdown.argtypes = []
     lib.oniShutdown.restype = None
 
-    # OniVersion.h: ONI_CREATE_API_VERSION(2, 2) = 2002.
-    if lib.oniInitialize(2002) != 0:
+    # Orbbec SDK in this repo uses OpenNI2 2.3 (ONI_API_VERSION=2003).
+    if lib.oniInitialize(2003) != 0:
         raise CameraIdentityError(
             "OpenNI2 could not initialize; check Orbbec drivers, permissions, "
             "or OPENNI2_REDIST for its driver plugins."
@@ -137,13 +158,15 @@ def enumerate_openni_devices():
                 try:
                     buffer = ctypes.create_string_buffer(256)
                     size = ctypes.c_int(ctypes.sizeof(buffer))
-                    # ONI_DEVICE_PROPERTY_SERIAL_NUMBER == 3.
+                    # Orbbec astra_camera/src/list_devices_node.cpp uses
+                    # openni::OBEXTENSION_ID_SERIALNUMBER = 16, not the
+                    # generic DEVICE_PROPERTY_SERIAL_NUMBER = 3.
                     if lib.oniDeviceGetProperty(
-                        handle, 3, buffer, ctypes.byref(size)
+                        handle, 16, buffer, ctypes.byref(size)
                     ) != 0:
                         raise CameraIdentityError(
-                            "OpenNI device {!r} does not expose its serial "
-                            "via property 3.".format(uri)
+                            "Orbbec device {!r} does not expose its serial "
+                            "via OBEXTENSION_ID_SERIALNUMBER (16).".format(uri)
                         )
                     serial = buffer.value.decode("utf-8", errors="replace").strip()
                     if not serial:
@@ -160,6 +183,14 @@ def enumerate_openni_devices():
                 lib.oniReleaseDeviceList(ptr)
     finally:
         lib.oniShutdown()
+    if not result:
+        raise CameraIdentityError(
+            "Orbbec OpenNI2 found zero Depth devices using {}. "
+            "Confirm that all camera launches are stopped, USB devices "
+            "are connected, and the Orbbec OpenNI2 plugin can enumerate "
+            "them. Run 'ros2 run astra_camera list_devices_node' "
+            "to compare.".format(lib._name)
+        )
     if len({d.serial for d in result}) != len(result):
         raise CameraIdentityError(
             "Duplicate OpenNI serials were reported; cannot safely bind RGB."

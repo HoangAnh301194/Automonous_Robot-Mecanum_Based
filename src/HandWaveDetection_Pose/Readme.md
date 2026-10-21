@@ -47,13 +47,21 @@ Front `17110310855`, Rear `17122514440`, AI `17122611013`.
 Với AI RGB/UVC, launch tra serial từ thiết bị Depth rồi ghép giao diện
 RGB nằm cùng hub USB nội bộ của camera đó; nếu không ghép được duy nhất,
 launch dừng và báo lỗi thay vì lấy nhầm RGB của Rear.
+Bộ phân giải sử dụng OpenNI2 cùng plugin Orbbec đi kèm package
+`astra_camera` và đọc serial bằng thuộc tính mở rộng mã `16`.
+Nếu báo không tìm thấy thiết bị, dừng camera ROS đang chạy và thử:
+
+~~~bash
+ros2 run astra_camera list_devices_node
+ros2 pkg prefix astra_camera
+~~~
 Trước khi chạy lần đầu (đã dừng các camera), nghiệm thu ánh xạ:
 
 ~~~bash
 cd ~/ros2_ws
-python3 src/mo_hinh/launch/_astra_serial_resolver.py \\
-  --front-serial 17110310855 \\
-  --rear-serial 17122514440 \\
+python3 src/mo_hinh/launch/_astra_serial_resolver.py \
+  --front-serial 17110310855 \
+  --rear-serial 17122514440 \
   --ai-serial 17122611013
 python3 tools/test_astra_serial_resolver.py
 ~~~

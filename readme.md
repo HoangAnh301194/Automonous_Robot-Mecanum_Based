@@ -199,9 +199,32 @@ python3 src/mo_hinh/launch/_astra_serial_resolver.py \
 ```
 
 The diagnostic prints three `serial -> /dev/videoN` mappings.
-If it reports missing `libOpenNI2.so`, point `OPENNI2_LIBRARY` to the
-library already used by `astra_camera` (ensure its OpenNI driver plugins
-are installed). If a USB pairing is ambiguous, inspect `lsusb -t` and
+It now loads the **Orbbec OpenNI2 runtime bundled with `astra_camera`**
+(`install/astra_camera/lib/libOpenNI2.so` together with
+`install/astra_camera/lib/OpenNI2/Drivers/liborbbec.so`), **not** a generic
+system OpenNI2 library. Orbbec's serial device property is extension
+`OBEXTENSION_ID_SERIALNUMBER=16`, as used by
+`astra_camera/src/list_devices_node.cpp`.
+
+If the resolver reports **zero OpenNI devices**, stop any previously running
+camera processes first and compare with the vendor's enumeration command:
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+ros2 run astra_camera list_devices_node
+ros2 pkg prefix astra_camera
+ls -l "$(ros2 pkg prefix astra_camera)/lib/OpenNI2/Drivers/"
+```
+
+If necessary, explicitly select the vendor runtime:
+
+```bash
+OPENNI2_LIBRARY="$(ros2 pkg prefix astra_camera)/lib/libOpenNI2.so" \
+python3 src/mo_hinh/launch/_astra_serial_resolver.py
+```
+
+If USB RGB pairing is still ambiguous, inspect `lsusb -t` and
 `v4l2-ctl --list-devices`; do not force an unverified RGB device.
 
 Unit tests (no hardware required):
