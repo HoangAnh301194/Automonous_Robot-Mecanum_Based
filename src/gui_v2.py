@@ -1169,22 +1169,27 @@ class MainWindow(QWidget):
             self.cmb_esp_port.addItem(p)
             self.cmb_lidar_port.addItem(p)
 
-        if curr_esp and curr_esp in combined:
-            self.cmb_esp_port.setCurrentText(curr_esp)
-        elif detected_esp:
+        # Tự động chọn cổng phát hiện tốt nhất
+        if detected_esp:
             self.cmb_esp_port.setCurrentText(detected_esp)
-
-        if curr_lidar and curr_lidar in combined:
-            self.cmb_lidar_port.setCurrentText(curr_lidar)
-        elif detected_lidar:
+        if detected_lidar:
             self.cmb_lidar_port.setCurrentText(detected_lidar)
+
+        # Đảm bảo ESP và LiDAR không bị trùng cùng 1 cổng vật lý
+        real_esp = os.path.realpath(self.cmb_esp_port.currentText().strip())
+        real_lidar = os.path.realpath(self.cmb_lidar_port.currentText().strip())
+        if real_esp and real_esp == real_lidar:
+            for p in combined:
+                if os.path.realpath(p) != real_esp:
+                    self.cmb_lidar_port.setCurrentText(p)
+                    break
 
         self.cmb_esp_port.blockSignals(False)
         self.cmb_lidar_port.blockSignals(False)
 
         if hasattr(self, "append_log"):
             self.append_log(
-                f"Quét cổng serial ({method}): ESP={self.cmb_esp_port.currentText()}, LiDAR={self.cmb_lidar_port.currentText()}"
+                f"Tự động nhận diện cổng ({method}): ESP={self.cmb_esp_port.currentText()}, LiDAR={self.cmb_lidar_port.currentText()}"
             )
 
     def swap_serial_ports(self):
