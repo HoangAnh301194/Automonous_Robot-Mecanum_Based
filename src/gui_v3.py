@@ -754,6 +754,18 @@ class MainWindow(QWidget):
         system_layout.addWidget(QLabel("Operation mode:"), 2, 0); system_layout.addWidget(self.cmb_operation_mode, 2, 1, 1, 2)
         system_layout.addWidget(QLabel("Localization backend:"), 3, 0); system_layout.addWidget(self.cmb_localization_backend, 3, 1, 1, 2)
         system_layout.addWidget(self.chk_auto_nav2, 4, 0, 1, 3)
+
+        self.cmb_esp_port = QComboBox(); self.cmb_esp_port.setEditable(True)
+        self.cmb_esp_port.setToolTip("Cổng Serial ESP32 / Hoverboard (ví dụ: /dev/ttyUSB0 hoặc /dev/esp32)")
+        self.cmb_lidar_port = QComboBox(); self.cmb_lidar_port.setEditable(True)
+        self.cmb_lidar_port.setToolTip("Cổng Serial LiDAR (ví dụ: /dev/ttyUSB1 hoặc /dev/lidar)")
+        self.btn_refresh_ports = QPushButton("🔄 Quét cổng"); self.btn_refresh_ports.clicked.connect(self.refresh_serial_ports)
+        self.btn_swap_ports = QPushButton("⇄ Đổi ESP ↔ LiDAR"); self.btn_swap_ports.clicked.connect(self.swap_serial_ports)
+
+        system_layout.addWidget(QLabel("Cổng ESP32:"), 5, 0); system_layout.addWidget(self.cmb_esp_port, 5, 1, 1, 2)
+        system_layout.addWidget(QLabel("Cổng LiDAR:"), 6, 0); system_layout.addWidget(self.cmb_lidar_port, 6, 1, 1, 2)
+        port_btns = QHBoxLayout(); port_btns.addWidget(self.btn_refresh_ports); port_btns.addWidget(self.btn_swap_ports)
+        system_layout.addLayout(port_btns, 7, 0, 1, 3)
         system_group.setLayout(system_layout)
         self.lbl_map_folder = QLabel("Map folder: "); self.lbl_map_folder.setWordWrap(True)
         self.cmb_map_files = QComboBox(); self.cmb_map_files.currentIndexChanged.connect(self.on_selected_map_changed)
@@ -833,7 +845,7 @@ class MainWindow(QWidget):
         right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(260)
         root_layout = QHBoxLayout(); root_layout.addWidget(left_scroll, stretch=0); root_layout.addWidget(right_widget, stretch=1)
         root_layout.setContentsMargins(6, 6, 6, 6); root_layout.setSpacing(6); self.setLayout(root_layout)
-        self.on_robot_mode_changed(); self.refresh_batch_waypoint_views()
+        self.on_robot_mode_changed(); self.refresh_batch_waypoint_views(); self.refresh_serial_ports()
 
     def init_ros(self):
         if not rclpy.ok():
@@ -1021,9 +1033,58 @@ class MainWindow(QWidget):
             sim_active = self.is_sim_mode()
             param = rclpy.parameter.Parameter('use_sim_time', rclpy.Parameter.Type.BOOL, sim_active)
             self.ros_node.set_parameters([param])
-        self.cmb_odom_source.setEnabled(not self.is_sim_mode())
+        is_real = not self.is_sim_mode()
+        self.cmb_odom_source.setEnabled(is_real)
+        if hasattr(self, "cmb_esp_port"):
+            self.cmb_esp_port.setEnabled(is_real)
+            self.cmb_lidar_port.setEnabled(is_real)
+            self.btn_refresh_ports.setEnabled(is_real)
+            self.btn_swap_ports.setEnabled(is_real)
         self.on_operation_mode_changed()
         self.on_odom_source_changed()
+
+    def refresh_serial_ports(self):
+        detected_esp, detected_lidar, method = _detect_esp_lidar_ports()
+        all_ports = _list_serial_ports()
+        standard_ports = ["/dev/ttyUSB0", "/dev/ttyUSB1", "/dev/ttyUSB2", "/dev/ttyACM0", "/dev/ttyACM1", "/dev/esp32", "/dev/lidar"]
+        for sp in standard_ports:
+            if sp not in all_ports and os.path.exists(sp):
+                all_ports.append(sp)
+
+        curr_esp = self.cmb_esp_port.currentText().strip() if hasattr(self, "cmb_esp_port") else ""
+        curr_lidar = self.cmb_lidar_port.currentText().strip() if hasattr(self, "cmb_lidar_port") else ""
+
+        self.cmb_esp_port.blockSignals(True); self.cmb_lidar_port.blockSignals(True)
+        self.cmb_esp_port.clear(); self.cmb_lidar_port.clear()
+
+        combined = []
+        for p in [detected_esp, detected_lidar] + all_ports + standard_ports:
+            if p and p not in combined:
+                combined.append(p)
+
+        for p in combined:
+            self.cmb_esp_port.addItem(p)
+            self.cmb_lidar_port.addItem(p)
+
+        if curr_esp and curr_esp in combined:
+            self.cmb_esp_port.setCurrentText(curr_esp)
+        elif detected_esp:
+            self.cmb_esp_port.setCurrentText(detected_esp)
+
+        if curr_lidar and curr_lidar in combined:
+            self.cmb_lidar_port.setCurrentText(curr_lidar)
+        elif detected_lidar:
+            self.cmb_lidar_port.setCurrentText(detected_lidar)
+
+        self.cmb_esp_port.blockSignals(False); self.cmb_lidar_port.blockSignals(False)
+        if hasattr(self, "append_log"):
+            self.append_log(f"Quét cổng serial ({method}): ESP={self.cmb_esp_port.currentText()}, LiDAR={self.cmb_lidar_port.currentText()}")
+
+    def swap_serial_ports(self):
+        esp = self.cmb_esp_port.currentText().strip()
+        lidar = self.cmb_lidar_port.currentText().strip()
+        self.cmb_esp_port.setCurrentText(lidar); self.cmb_lidar_port.setCurrentText(esp)
+        self.append_log(f"Đã hoán đổi cổng: ESP={lidar}, LiDAR={esp}")
 
     def _map_base_stem_from_selected(self):
         stem = os.path.splitext(self.selected_map_file)[0] if self.selected_map_file else os.path.join(self.map_dir, "my_map")
@@ -1091,8 +1152,15 @@ class MainWindow(QWidget):
             QTimer.singleShot(3500, self.unpause_gazebo_physics)
         else:
             self.proc_mgr.stop(self.LAYER1_SIM)
-            esp_port, lidar_port, detect_method = _detect_esp_lidar_ports()
-            self.append_log(f"Auto-detect serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}")
+            esp_port = self.cmb_esp_port.currentText().strip() if hasattr(self, "cmb_esp_port") else ""
+            lidar_port = self.cmb_lidar_port.currentText().strip() if hasattr(self, "cmb_lidar_port") else ""
+            if not esp_port or not lidar_port:
+                detected_esp, detected_lidar, detect_method = _detect_esp_lidar_ports()
+                esp_port = esp_port or detected_esp
+                lidar_port = lidar_port or detected_lidar
+            else:
+                detect_method = "user_selection"
+            self.append_log(f"Khởi động Serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}")
             self.proc_mgr.start(self.LAYER1_REAL, self.ros_prefix() + f"ros2 launch mo_hinh real_odom.launch.py odom_source:={self.get_selected_odom_source()} use_sim_time:={sim_time} hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}")
     def stop_platform(self): self.proc_mgr.stop(self.LAYER1_SIM); self.proc_mgr.stop(self.LAYER1_REAL)
     def start_slam_mapping(self):
