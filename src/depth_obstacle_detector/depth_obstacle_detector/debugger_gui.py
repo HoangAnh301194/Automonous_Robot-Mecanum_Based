@@ -7,12 +7,6 @@ import threading
 import numpy as np
 import cv2
 
-# Fix OpenCV Qt plugin conflict with PyQt5 on Linux/Jetson
-if "QT_QPA_PLATFORM_PLUGIN_PATH" in os.environ and "cv2" in os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"]:
-    del os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"]
-if "QT_QPA_FONTDIR" in os.environ and "cv2" in os.environ["QT_QPA_FONTDIR"]:
-    del os.environ["QT_QPA_FONTDIR"]
-
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton,
@@ -20,12 +14,10 @@ from PyQt5.QtWidgets import (
     QFileDialog, QStatusBar, QMessageBox, QComboBox, QScrollArea
 )
 from PyQt5.QtGui import QImage, QPixmap, QFont
-
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image, CameraInfo, LaserScan
 from cv_bridge import CvBridge
-
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 custom_qos = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
@@ -35,16 +27,12 @@ custom_qos = QoSProfile(
 
 import tf2_ros
 import tf2_geometry_msgs
-
-
 class ImageSignalEmitter(QObject):
     """
     Thread-safe signal emitter to pass image data and camera info parameters
     from the ROS 2 background thread to the PyQt5 GUI main thread.
     """
     image_received = pyqtSignal(np.ndarray, object)
-
-
 class DepthSubscriberNode(Node):
     """
     ROS 2 Node that subscribes to the depth camera stream and camera info topics,
@@ -53,12 +41,10 @@ class DepthSubscriberNode(Node):
     def __init__(self, signal_emitter):
         super().__init__('depth_obstacle_debugger_node')
         self.signal_emitter = signal_emitter
-        self.camera_info = None
-        
+        self.camera_info = None    
         # TF2 buffer and listener
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
-        
         # Subscribe to camera info
         self.info_sub = self.create_subscription(
             CameraInfo,
@@ -399,14 +385,13 @@ class DebuggerGUI(QMainWindow):
         self.cmb_target_frame = QComboBox()
         self.cmb_target_frame.setEditable(True)
         self.cmb_target_frame.addItems([
-            'base_footprint',
-            'base_link',
-            'rear_scan_frame',
+            'camera_depth_optical_frame',
             'camera_link',
             'rear_camera_link',
-            'camera_depth_optical_frame'
+            'base_link',
+            'base_footprint'
         ])
-        self.cmb_target_frame.setCurrentText("base_footprint")
+        self.cmb_target_frame.setCurrentText("base_link")
         self.cmb_target_frame.currentTextChanged.connect(self.on_target_frame_changed)
         tf_layout.addWidget(self.cmb_target_frame)
         ground_layout.addLayout(tf_layout)
@@ -816,34 +801,6 @@ class DebuggerGUI(QMainWindow):
                     'camera_tilt': int(self.sld_tilt_angle.value()),
                     'distance_offset': float(self.sld_dist_offset.value() / 100.0)
                 }
-
-                # Preserve fields from existing target YAML if it exists
-                if os.path.exists(filename):
-                    try:
-                        with open(filename, 'r') as f_old:
-                            old_data = yaml.safe_load(f_old)
-                            if isinstance(old_data, dict):
-                                for k, v in old_data.items():
-                                    if k not in config_data:
-                                        config_data[k] = v
-                    except Exception:
-                        pass
-
-                # Preserve extra fields loaded previously in this session
-                for k, v in getattr(self, 'loaded_config_extra', {}).items():
-                    if k not in config_data:
-                        config_data[k] = v
-
-                # Ensure topics are never left empty / stripped
-                base_name = os.path.basename(filename).lower()
-                is_rear = ('rear' in base_name or 'sau' in base_name or 'rear' in str(self.target_frame).lower())
-                if 'depth_topic' not in config_data:
-                    config_data['depth_topic'] = '/rear_camera/depth/image_raw' if is_rear else '/front_camera/depth/image_raw'
-                if 'camera_info_topic' not in config_data:
-                    config_data['camera_info_topic'] = '/rear_camera/depth/camera_info' if is_rear else '/front_camera/depth/camera_info'
-                if 'output_scan_topic' not in config_data:
-                    config_data['output_scan_topic'] = '/rear_scan_obstacle' if is_rear else '/scan_obstacles'
-
                 with open(filename, 'w') as f:
                     yaml.dump(config_data, f, default_flow_style=False)
                 QMessageBox.information(self, "Success", f"Configuration saved successfully to {os.path.basename(filename)}!")
@@ -860,16 +817,6 @@ class DebuggerGUI(QMainWindow):
                 with open(filename, 'r') as f:
                     config_data = yaml.safe_load(f)
                 
-                # Retain non-slider metadata (such as topics) so saving does not lose them
-                self.loaded_config_extra = {
-                    k: v for k, v in config_data.items()
-                    if k not in [
-                        'roi_x', 'roi_y', 'roi_width', 'roi_height',
-                        'threshold', 'min_area', 'median_filter', 'morphology_size',
-                        'ground_file_path', 'target_frame', 'camera_tilt', 'distance_offset'
-                    ]
-                }
-
                 # Update GUI parameters (Block signals to update without multiple refreshes)
                 self.sld_roi_x.blockSignals(True)
                 self.sld_roi_y.blockSignals(True)
@@ -1472,15 +1419,6 @@ class DebuggerGUI(QMainWindow):
 
 
 def main(args=None):
-    # Ensure OpenCV Qt plugin paths don't conflict
-    if "QT_QPA_PLATFORM_PLUGIN_PATH" in os.environ and "cv2" in os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"]:
-        del os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"]
-    if "QT_QPA_FONTDIR" in os.environ and "cv2" in os.environ["QT_QPA_FONTDIR"]:
-        del os.environ["QT_QPA_FONTDIR"]
-
-    # Start the standard PyQt5 App event loop first to establish thread affinity
-    app = QApplication(sys.argv)
-
     # Initialize rclpy
     rclpy.init(args=args)
 
@@ -1494,6 +1432,8 @@ def main(args=None):
     ros_thread = threading.Thread(target=rclpy.spin, args=(ros_node,), daemon=True)
     ros_thread.start()
 
+    # Start the standard PyQt5 App event loop
+    app = QApplication(sys.argv)
     gui = DebuggerGUI(ros_node)
     
     # Connect the signal emitter to the GUI slot
@@ -1503,13 +1443,11 @@ def main(args=None):
     gui.show()
 
     # Block on GUI thread exit
-    exit_code = app.exec_()
+    sys.exit(app.exec_())
 
     # Shutdown ROS
     ros_node.destroy_node()
     rclpy.shutdown()
-
-    sys.exit(exit_code)
 
 
 if __name__ == '__main__':
