@@ -4,7 +4,7 @@ scan_to_scan_filter_chain:
       name: box_filter
       type: laser_filters/LaserScanBoxFilter
       params:
-        box_frame: "base_link"
+        box_frame: "base_footprint"
         max_x: 0.35
         max_y: 0.35
         max_z: 1.0

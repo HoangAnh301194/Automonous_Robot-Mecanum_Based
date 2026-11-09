@@ -1,0 +1,40 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <model name="map_a2">
+    <static>true</static>
+    <link name="link">
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://map_a2/meshes/map.stl</uri>
+            <scale>0.0004 0.0004 0.0004</scale>
+          </mesh>
+        </geometry>
+        <surface>
+          <friction>
+            <ode>
+              <mu>100</mu>
+              <mu2>50</mu2>
+            </ode>
+          </friction>
+          <contact>
+            <collide_without_contact>false</collide_without_contact>
+          </contact>
+        </surface>
+      </collision>
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://map_a2/meshes/map.stl</uri>
+            <scale>0.0004 0.0004 0.0004</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.75 0.75 0.8 1.0</ambient>
+          <diffuse>0.75 0.75 0.8 1.0</diffuse>
+          <specular>0.2 0.2 0.2 1.0</specular>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

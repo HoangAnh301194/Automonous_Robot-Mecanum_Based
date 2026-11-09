@@ -138,6 +138,8 @@ def launch_setup(context, *args, **kwargs):
         output='screen',
     )
 
+    enable_imu_val = context.perform_substitution(LaunchConfiguration('enable_imu')).lower() == 'true'
+
     # Đợi joint_state_broadcaster khởi động xong rồi mới kích hoạt hoverboard_base_controller
     delay_hoverboard_controller_spawner = RegisterEventHandler(
         event_handler=OnProcessExit(
@@ -146,15 +148,18 @@ def launch_setup(context, *args, **kwargs):
         )
     )
 
-    return [
+    nodes = [
         robot_state_publisher_node,
         sllidar_node,
         laser_filter_node,
-        bno055_node,
         control_node,
         joint_state_broadcaster_spawner,
         delay_hoverboard_controller_spawner,
     ]
+    if enable_imu_val:
+        nodes.append(bno055_node)
+
+    return nodes
 
 
 def generate_launch_description():
@@ -178,6 +183,11 @@ def generate_launch_description():
             'lidar_baudrate',
             default_value='115200',
             description='RPLidar baudrate.'
+        ),
+        DeclareLaunchArgument(
+            'enable_imu',
+            default_value='false',
+            description='Launch BNO055 IMU node.'
         ),
         OpaqueFunction(function=launch_setup)
     ])

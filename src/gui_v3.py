@@ -27,7 +27,8 @@ from PyQt5.QtWidgets import (
 )
 
 import rclpy
-from geometry_msgs.msg import PoseStamped
+from action_msgs.srv import CancelGoal
+from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid
 from rclpy.action import ActionClient
@@ -181,8 +182,12 @@ class RosInterface(Node):
         self.dataenc_sub = self.create_subscription(Int32MultiArray, "/dataenc", self.on_dataenc, 20)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
-        self.edited_map_pub = self.create_publisher(OccupancyGrid, "/map", QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=1))
+        self.edited_map_pub = self.create_publisher(OccupancyGrid, "/map", QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, history=HistoryPolicy.KEEP_LAST, depth=1))
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
+        self.current_goal_handle = None
+        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cancel_nav_client = self.create_client(CancelGoal, "/navigate_to_pose/_action/cancel_goal")
+        self.cancel_through_poses_client = self.create_client(CancelGoal, "/navigate_through_poses/_action/cancel_goal")
         self.pose_timer = self.create_timer(0.05, self.publish_pose_from_tf)
 
     def log(self, msg):
@@ -204,38 +209,48 @@ class RosInterface(Node):
         self.last_tf_warn_time = now
         self.get_logger().warn(message)
 
+    def _get_active_target_frame(self):
+        all_frames = self.tf_buffer.all_frames_as_string()
+        if self.target_map_frame in all_frames:
+            return self.target_map_frame
+        if "odom" in all_frames:
+            return "odom"
+        return None
+
     def publish_pose_from_tf(self):
         if not self.pose_callback:
             return
-        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
-            return
-        if not self.tf_buffer.can_transform(self.target_map_frame, self.target_base_frame, Time(), timeout=Duration(seconds=0.02)):
+        target_frame = self._get_active_target_frame()
+        if not target_frame or not self.tf_buffer.can_transform(target_frame, self.target_base_frame, Time(), timeout=Duration(seconds=0.02)):
             return
         try:
-            tf_msg = self.tf_buffer.lookup_transform(self.target_map_frame, self.target_base_frame, Time(), timeout=Duration(seconds=0.05))
+            tf_msg = self.tf_buffer.lookup_transform(target_frame, self.target_base_frame, Time(), timeout=Duration(seconds=0.05))
         except TransformException as exc:
             self._warn_tf(f"TF pose lookup lỗi: {exc}")
             return
         t = tf_msg.transform.translation
         q = tf_msg.transform.rotation
-        self.pose_callback("tf2", t.x, t.y, self._pose_to_xyyaw(q.x, q.y, q.z, q.w))
+        self.pose_callback(target_frame, t.x, t.y, self._pose_to_xyyaw(q.x, q.y, q.z, q.w))
 
     def _scan_to_world_points(self, msg):
         ranges = msg.ranges
         if not ranges:
             return []
-        if self.target_map_frame not in self.tf_buffer.all_frames_as_string():
+        target_frame = self._get_active_target_frame()
+        if not target_frame:
             return []
         source_frame = msg.header.frame_id if msg.header.frame_id else self.target_base_frame
+        tf_msg = None
         scan_time = Time.from_msg(msg.header.stamp)
         try:
-            tf_msg = self.tf_buffer.lookup_transform(self.target_map_frame, source_frame, scan_time, timeout=Duration(seconds=0.05))
+            tf_msg = self.tf_buffer.lookup_transform(target_frame, source_frame, scan_time, timeout=Duration(seconds=0.03))
         except TransformException:
             try:
-                tf_msg = self.tf_buffer.lookup_transform(self.target_map_frame, source_frame, Time(), timeout=Duration(seconds=0.05))
-            except TransformException as exc:
-                self._warn_tf(f"TF scan lookup lỗi: {exc}")
+                tf_msg = self.tf_buffer.lookup_transform(target_frame, source_frame, Time(), timeout=Duration(seconds=0.03))
+            except TransformException:
                 return []
+        if tf_msg is None:
+            return []
         tr = tf_msg.transform.translation
         rot = tf_msg.transform.rotation
         qx, qy, qz, qw = rot.x, rot.y, rot.z, rot.w
@@ -279,7 +294,53 @@ class RosInterface(Node):
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
         self.log(f"Gửi goal Nav2: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
-        self.nav_to_pose_client.send_goal_async(goal_msg)
+        send_goal_future = self.nav_to_pose_client.send_goal_async(goal_msg)
+
+        def _on_goal_response(fut):
+            try:
+                self.current_goal_handle = fut.result()
+                if not self.current_goal_handle.accepted:
+                    self.log("Goal bị từ chối bởi Nav2 server.")
+                    self.current_goal_handle = None
+                else:
+                    self.log("Goal đã được Nav2 chấp nhận.")
+            except Exception as e:
+                self.log(f"Lỗi khi gửi goal Nav2: {e}")
+
+        send_goal_future.add_done_callback(_on_goal_response)
+        return True
+
+    def cancel_nav_goal(self):
+        """Hủy ngay lập tức mục tiêu Nav2 đang chạy và phanh dừng robot"""
+        self.log("⛔ [CANCEL GOAL] Đang gửi lệnh dừng khẩn cấp và hủy mục tiêu Nav2...")
+        # 1. Phát liên tục vận tốc 0.0 vào /cmd_vel để phanh dừng bánh lập tức
+        stop_twist = Twist()
+        for _ in range(5):
+            self.cmd_vel_pub.publish(stop_twist)
+            time.sleep(0.01)
+
+        # 2. Hủy goal qua action handle nếu có
+        if hasattr(self, 'current_goal_handle') and self.current_goal_handle is not None:
+            try:
+                self.current_goal_handle.cancel_goal_async()
+            except Exception as e:
+                self.log(f"Lỗi cancel goal handle: {e}")
+            self.current_goal_handle = None
+
+        # 3. Hủy toàn bộ goal qua service cancel_goal của Action Server
+        req = CancelGoal.Request()
+        if self.cancel_nav_client.service_is_ready():
+            self.cancel_nav_client.call_async(req)
+        elif self.cancel_nav_client.wait_for_service(timeout_sec=0.2):
+            self.cancel_nav_client.call_async(req)
+
+        if hasattr(self, 'cancel_through_poses_client'):
+            if self.cancel_through_poses_client.service_is_ready():
+                self.cancel_through_poses_client.call_async(req)
+            elif self.cancel_through_poses_client.wait_for_service(timeout_sec=0.2):
+                self.cancel_through_poses_client.call_async(req)
+
+        self.log("✅ Đã phanh xe và gửi lệnh CancelGoal tới Nav2.")
         return True
 
     def publish_edited_map(self, occ_grid_msg):
@@ -484,7 +545,7 @@ class MapViewer(QLabel):
 
     def update_scan(self, scan_msg, scan_points_world=None):
         self.latest_scan = scan_msg
-        if scan_points_world is None:
+        if not scan_points_world:
             self.scan_points_from_tf = False
             self._recompute_scan_points()
         else:
@@ -498,18 +559,27 @@ class MapViewer(QLabel):
 
     def _recompute_scan_points(self):
         self.scan_points_world = []
-        if self.latest_scan is None or self.robot_x is None or self.robot_y is None:
+        if self.latest_scan is None or self.robot_x is None or self.robot_y is None or self.robot_yaw is None:
             return
         ranges = self.latest_scan.ranges
         if not ranges:
             return
+        cos_yaw = math.cos(self.robot_yaw)
+        sin_yaw = math.sin(self.robot_yaw)
+        # laser_link offset in base_footprint coordinate: (+0.175, 0.0)
+        lx_base = 0.175
+        ly_base = 0.0
+        laser_origin_x = self.robot_x + cos_yaw * lx_base - sin_yaw * ly_base
+        laser_origin_y = self.robot_y + sin_yaw * lx_base + cos_yaw * ly_base
+
         step = max(1, len(ranges) // 720)
         for i in range(0, len(ranges), step):
             r = ranges[i]
             if not math.isfinite(r) or r < self.latest_scan.range_min or r > self.latest_scan.range_max:
                 continue
-            beam = self.latest_scan.angle_min + i * self.latest_scan.angle_increment + self.robot_yaw
-            self.scan_points_world.append((self.robot_x + r * math.cos(beam), self.robot_y + r * math.sin(beam)))
+            angle = self.latest_scan.angle_min + i * self.latest_scan.angle_increment
+            beam = self.robot_yaw - angle
+            self.scan_points_world.append((laser_origin_x + r * math.cos(beam), laser_origin_y + r * math.sin(beam)))
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -714,6 +784,8 @@ class MainWindow(QWidget):
         self.one_shot_lock = threading.Lock()
         self.map_mode = MAP_MODE_GOAL
         self.proc_mgr = ProcessManager(self.append_log)
+        # Tự động dọn dẹp các tiến trình ROS2 & Gazebo chạy ngầm từ trước
+        self.force_kill_known_ros_processes()
         self.ros_node = None
         self.ros_spin_thread = None
         self.map_editor = None
@@ -723,6 +795,7 @@ class MainWindow(QWidget):
         self.scan_signal.connect(self._on_new_scan_ui)
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
         self.init_ui()
+        self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 & Gazebo cũ trước khi khởi động.")
         self.init_ros()
         self.refresh_map_list()
         self.map_editor = MapEditor(self.get_ros_node, self.append_log)
@@ -816,13 +889,21 @@ class MainWindow(QWidget):
         self.btn_start_mode = QPushButton("Start Layer 2 (Mode)"); self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
         self.btn_switch_mode = QPushButton("Switch Layer 2 Mode")
         self.btn_start_nav2 = QPushButton("Start Nav2"); self.btn_stop_nav2 = QPushButton("Stop Nav2")
+        self.btn_cancel_nav2 = QPushButton("⛔ DỪNG KHẨN CẤP / HỦY GOAL")
+        self.btn_cancel_nav2.setStyleSheet("background-color: #dc2626; color: white; font-weight: bold; padding: 7px; border-radius: 4px;")
+        self.btn_cancel_nav2.setToolTip("Hủy mục tiêu Nav2 lập tức và phanh robot đứng im tại chỗ (không tắt Nav2)")
         self.btn_start_all = QPushButton("Start All"); self.btn_stop_all = QPushButton("Stop All")
         self.edt_kill_node = QLineEdit("rviz2"); self.btn_kill_node = QPushButton("Kill Node")
+        self.btn_cleanup_all = QPushButton("Dọn sạch ROS2 / Gazebo")
+        self.btn_cleanup_all.setStyleSheet("background-color: #fee2e2; color: #b91c1c; font-weight: bold;")
+        self.btn_cleanup_all.setToolTip("Quét và đóng sạch tất cả tiến trình ROS 2, Gazebo và reset daemon")
         self.btn_start_platform.clicked.connect(self.start_platform); self.btn_stop_platform.clicked.connect(self.stop_platform)
         self.btn_start_mode.clicked.connect(self.start_operation_mode); self.btn_stop_mode.clicked.connect(self.stop_operation_mode)
         self.btn_switch_mode.clicked.connect(self.switch_operation_mode)
         self.btn_start_nav2.clicked.connect(self.start_nav2); self.btn_stop_nav2.clicked.connect(self.stop_nav2)
-        self.btn_start_all.clicked.connect(self.start_all); self.btn_stop_all.clicked.connect(self.stop_all); self.btn_kill_node.clicked.connect(self.kill_node)
+        self.btn_cancel_nav2.clicked.connect(self.cancel_nav2_goal)
+        self.btn_start_all.clicked.connect(self.start_all); self.btn_stop_all.clicked.connect(self.stop_all)
+        self.btn_kill_node.clicked.connect(self.kill_node); self.btn_cleanup_all.clicked.connect(self.manual_cleanup)
         self.lbl_platform_status = QLabel("Layer1 Odom: OFF"); self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
         self.lbl_nav2_status = QLabel("Nav2: OFF"); self.lbl_odom_status = QLabel("Odom source: esp -> /odom"); self.lbl_dataenc = QLabel("Encoder /dataenc: -")
         control_group = QGroupBox("Điều khiển"); control_layout = QGridLayout()
@@ -830,12 +911,13 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.btn_start_mode, 1, 0); control_layout.addWidget(self.btn_stop_mode, 1, 1)
         control_layout.addWidget(self.btn_switch_mode, 2, 0, 1, 2)
         control_layout.addWidget(self.btn_start_nav2, 3, 0); control_layout.addWidget(self.btn_stop_nav2, 3, 1)
-        control_layout.addWidget(self.btn_start_all, 4, 0); control_layout.addWidget(self.btn_stop_all, 4, 1)
-        control_layout.addWidget(QLabel("Node/pattern to kill:"), 5, 0); control_layout.addWidget(self.edt_kill_node, 5, 1)
-        control_layout.addWidget(self.btn_kill_node, 6, 0, 1, 2)
-        control_layout.addWidget(self.lbl_platform_status, 7, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 8, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nav2_status, 9, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 10, 0, 1, 2)
-        control_layout.addWidget(self.lbl_dataenc, 11, 0, 1, 2)
+        control_layout.addWidget(self.btn_cancel_nav2, 4, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_all, 5, 0); control_layout.addWidget(self.btn_stop_all, 5, 1)
+        control_layout.addWidget(QLabel("Node/pattern to kill:"), 6, 0); control_layout.addWidget(self.edt_kill_node, 6, 1)
+        control_layout.addWidget(self.btn_kill_node, 7, 0); control_layout.addWidget(self.btn_cleanup_all, 7, 1)
+        control_layout.addWidget(self.lbl_platform_status, 8, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 9, 0, 1, 2)
+        control_layout.addWidget(self.lbl_nav2_status, 10, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 11, 0, 1, 2)
+        control_layout.addWidget(self.lbl_dataenc, 12, 0, 1, 2)
         control_group.setLayout(control_layout)
         self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setMinimumHeight(140)
         log_group = QGroupBox("Log"); log_layout = QVBoxLayout(); log_layout.addWidget(self.log_box); log_group.setLayout(log_layout)
@@ -1022,7 +1104,9 @@ class MainWindow(QWidget):
         if fpath: self.selected_map_file = fpath; self.lbl_selected_map.setText(f"Map đang dùng: {fpath}")
 
     def is_sim_mode(self): return self.rb_sim.isChecked()
-    def ros_prefix(self): return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
+    def ros_prefix(self):
+        nav2_plugins_lib = os.path.join(WS_ROOT, "install", "nav2_custom_plugins", "lib")
+        return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && export LD_LIBRARY_PATH='{nav2_plugins_lib}':$LD_LIBRARY_PATH && "
     def get_selected_odom_source(self): return self.cmb_odom_source.currentData() or "esp"
     def get_selected_odom_topic(self): return "/odom"
     def on_odom_source_changed(self):
@@ -1136,8 +1220,87 @@ class MainWindow(QWidget):
         data = self._load_yaml(NAV2_PARAMS_BASE)
         topic = self.get_selected_odom_topic()
         changed = _replace_key_recursive(data, "odom_topic", topic)
+
+        # Tự động thay thế mọi đường dẫn chứa /home/.../ros2_ws thành đường dẫn thực tế của máy
+        def _fix_user_paths(obj):
+            if isinstance(obj, dict):
+                return {k: _fix_user_paths(v) for k, v in obj.items()}
+            elif isinstance(obj, list):
+                return [_fix_user_paths(v) for v in obj]
+            elif isinstance(obj, str):
+                import re
+                return re.sub(r"/home/[^/]+/ros2_ws", WS_ROOT, obj)
+            return obj
+
+        data = _fix_user_paths(data)
+
+        if "bt_navigator" in data and "ros__parameters" in data["bt_navigator"]:
+            bt_params = data["bt_navigator"]["ros__parameters"]
+            # Su dung Behavior Tree va Recovery chuan goc cua ROS 2 Humble
+            bt_params.pop("default_nav_to_pose_bt_xml", None)
+            bt_params.pop("default_nav_through_poses_bt_xml", None)
+            bt_params.pop("navigators", None)
+            bt_params.pop("navigate_to_pose", None)
+            bt_params["plugin_lib_names"] = [
+                "nav2_compute_path_to_pose_action_bt_node",
+                "nav2_compute_path_through_poses_action_bt_node",
+                "nav2_smooth_path_action_bt_node",
+                "nav2_follow_path_action_bt_node",
+                "nav2_spin_action_bt_node",
+                "nav2_wait_action_bt_node",
+                "nav2_assisted_teleop_action_bt_node",
+                "nav2_back_up_action_bt_node",
+                "nav2_drive_on_heading_bt_node",
+                "nav2_clear_costmap_service_bt_node",
+                "nav2_is_stuck_condition_bt_node",
+                "nav2_goal_reached_condition_bt_node",
+                "nav2_goal_updated_condition_bt_node",
+                "nav2_globally_updated_goal_condition_bt_node",
+                "nav2_is_path_valid_condition_bt_node",
+                "nav2_initial_pose_received_condition_bt_node",
+                "nav2_reinitialize_global_localization_service_bt_node",
+                "nav2_rate_controller_bt_node",
+                "nav2_distance_controller_bt_node",
+                "nav2_speed_controller_bt_node",
+                "nav2_truncate_path_action_bt_node",
+                "nav2_truncate_path_local_action_bt_node",
+                "nav2_goal_updater_node_bt_node",
+                "nav2_recovery_node_bt_node",
+                "nav2_pipeline_sequence_bt_node",
+                "nav2_round_robin_node_bt_node",
+                "nav2_transform_available_condition_bt_node",
+                "nav2_time_expired_condition_bt_node",
+                "nav2_path_expiring_timer_condition",
+                "nav2_distance_traveled_condition_bt_node",
+                "nav2_single_trigger_bt_node",
+                "nav2_goal_updated_controller_bt_node",
+                "nav2_is_battery_low_condition_bt_node",
+                "nav2_navigate_through_poses_action_bt_node",
+                "nav2_navigate_to_pose_action_bt_node",
+                "nav2_remove_passed_goals_action_bt_node",
+                "nav2_planner_selector_bt_node",
+                "nav2_controller_selector_bt_node",
+                "nav2_goal_checker_selector_bt_node",
+                "nav2_controller_cancel_bt_node",
+                "nav2_path_longer_on_approach_bt_node",
+                "nav2_wait_cancel_bt_node",
+                "nav2_spin_cancel_bt_node",
+                "nav2_back_up_cancel_bt_node",
+                "nav2_assisted_teleop_cancel_bt_node",
+            ]
+
+        if "behavior_server" in data and "ros__parameters" in data["behavior_server"]:
+            bs_params = data["behavior_server"]["ros__parameters"]
+            bs_params["behavior_plugins"] = ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+            bs_params["spin"] = {"plugin": "nav2_behaviors/Spin"}
+            bs_params["backup"] = {"plugin": "nav2_behaviors/BackUp"}
+            bs_params["drive_on_heading"] = {"plugin": "nav2_behaviors/DriveOnHeading"}
+            bs_params["wait"] = {"plugin": "nav2_behaviors/Wait"}
+            bs_params["assisted_teleop"] = {"plugin": "nav2_behaviors/AssistedTeleop"}
+
         temp_path = self._write_temp_yaml(data, "nav2_gui_v3_")
-        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí)"); return temp_path
+        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, chuẩn Nav2 Humble gốc)")
+        return temp_path
     def build_slam_mapping_params(self):
         data = self._load_yaml(SLAM_MAPPING_PARAMS_BASE)
         if "slam_toolbox" not in data: data["slam_toolbox"] = {"ros__parameters": {}}
@@ -1219,6 +1382,13 @@ class MainWindow(QWidget):
         nav2_params = self.build_nav2_params_for_selected_odom()
         self.proc_mgr.start(self.NAV2, self.ros_prefix() + f"ros2 launch nav2_bringup navigation_launch.py use_sim_time:={sim_time} params_file:='{nav2_params}'")
     def stop_nav2(self): self.proc_mgr.stop(self.NAV2)
+    def cancel_nav2_goal(self):
+        ros_node = self.get_ros_node()
+        if ros_node is not None:
+            ros_node.cancel_nav_goal()
+            self.append_log("⛔ Đã kích hoạt DỪNG KHẨN CẤP / HỦY GOAL Nav2!")
+        else:
+            self.append_log("ROS Interface chưa sẵn sàng.")
     def unpause_gazebo_physics(self):
         if self.proc_mgr.is_running(self.LAYER1_SIM):
             self.run_one_shot_command("unpause_physics", self.ros_prefix() + 'ros2 service call /unpause_physics std_srvs/srv/Empty "{}"')
@@ -1310,15 +1480,37 @@ class MainWindow(QWidget):
     def force_kill_known_ros_processes(self):
         # Direct pkill without login bash subshells to avoid freezing the GUI event loop
         patterns = [
+            "gz sim",
+            "gz_sim",
+            "parameter_bridge",
+            "ros_gz_bridge",
             "virtual_robot_gazebo",
+            "robot_state_publisher",
+            "dummy_unpause",
+            "scan_to_scan_filter_chain",
             "real_odom",
             "real_slam",
             "real_localization_nav2",
             "slam_toolbox",
+            "async_slam_toolbox",
             "nav2_bringup",
+            "bt_navigator",
+            "controller_server",
+            "planner_server",
+            "behavior_server",
+            "lifecycle_manager",
+            "amcl",
+            "map_server",
             "hoverboard_driver",
+            "sllidar_node",
+            "esp_bridge_node",
+            "rviz2",
             "unpause_physics",
         ]
+        try:
+            subprocess.run(["pkill", "-TERM", "-x", "gz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
+        except Exception:
+            pass
         combined = "|".join(patterns)
         try:
             subprocess.run(
@@ -1333,6 +1525,7 @@ class MainWindow(QWidget):
         time.sleep(0.15)
 
         try:
+            subprocess.run(["pkill", "-KILL", "-x", "gz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             subprocess.run(
                 ["pkill", "-KILL", "-f", combined],
                 stdout=subprocess.DEVNULL,
@@ -1341,6 +1534,17 @@ class MainWindow(QWidget):
             )
         except Exception:
             pass
+
+        # Stop ROS 2 daemon to refresh discovery
+        try:
+            subprocess.run(["ros2", "daemon", "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=1.0)
+        except Exception:
+            pass
+
+    def manual_cleanup(self):
+        self.stop_all()
+        self.force_kill_known_ros_processes()
+        self.append_log("Đã hoàn tất dọn dẹp sạch sẽ toàn bộ các tiến trình ROS2 & Gazebo.")
 
     def cleanup_temp_files(self):
         for path in self.temp_files:
@@ -1431,4 +1635,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main()

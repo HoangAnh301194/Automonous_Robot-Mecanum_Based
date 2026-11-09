@@ -23,6 +23,7 @@ def generate_launch_description():
     esp_baudrate = LaunchConfiguration('esp_baudrate')
     lidar_baudrate = LaunchConfiguration('lidar_baudrate')
     rf2o_freq = LaunchConfiguration('rf2o_freq')
+    enable_imu = LaunchConfiguration('enable_imu')
 
     use_hoverboard = IfCondition(PythonExpression(["'", odom_source, "' == 'hoverboard'"]))
     use_esp = IfCondition(PythonExpression(["'", odom_source, "' == 'esp'"]))
@@ -36,6 +37,7 @@ def generate_launch_description():
             'hoverboard_port': hoverboard_port,
             'lidar_port': lidar_port,
             'lidar_baudrate': lidar_baudrate,
+            'enable_imu': enable_imu,
         }.items(),
         condition=use_hoverboard,
     )
@@ -127,6 +129,11 @@ def generate_launch_description():
             'rf2o_freq',
             default_value='20.0',
             description='RF2O update frequency in Hz.'
+        ),
+        DeclareLaunchArgument(
+            'enable_imu',
+            default_value='false',
+            description='Launch BNO055 IMU node.'
         ),
         hw_with_hoverboard_odom,
         hw_with_esp_odom,

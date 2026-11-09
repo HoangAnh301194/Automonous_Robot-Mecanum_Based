@@ -3,6 +3,7 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Time
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import EnvironmentVariable, LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
 
 import os
@@ -25,7 +26,9 @@ def generate_launch_description():
     urdf_file = resolve_path('urdf', 'xe.urdf')
     default_world = resolve_path('worlds', 'map_a2.world')
     worlds_dir = os.path.dirname(default_world)
-    workspace_root = os.environ.get('WS', os.path.expanduser('~/robot_ws'))
+    workspace_root = os.environ.get('WS', os.path.expanduser('~/ros2_ws'))
+    ws_src_dir = os.path.join(workspace_root, 'src')
+    ws_install_dir = os.path.join(workspace_root, 'install')
     map_models_dir = os.path.join(workspace_root, 'my_map')
 
     with open(urdf_file, 'r', encoding='utf-8') as urdf:
@@ -44,7 +47,7 @@ def generate_launch_description():
         output='screen',
         parameters=[{
             'robot_description': robot_description,
-            'use_sim_time': use_sim_time
+            'use_sim_time': ParameterValue(use_sim_time, value_type=bool)
         }]
     )
 
@@ -101,14 +104,17 @@ def generate_launch_description():
         remappings=[
             ('/scan', '/scan_raw'),
         ],
-        parameters=[{'use_sim_time': use_sim_time}],
+        parameters=[{'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}],
         output='screen'
     )
 
     laser_filter_node = Node(
         package='laser_filters',
         executable='scan_to_scan_filter_chain',
-        parameters=[scan_filter_config],
+        parameters=[
+            scan_filter_config,
+            {'use_sim_time': ParameterValue(use_sim_time, value_type=bool)}
+        ],
         remappings=[
             ('scan', 'scan_raw'),
             ('scan_filtered', 'scan')
@@ -119,12 +125,12 @@ def generate_launch_description():
     return LaunchDescription([
         SetEnvironmentVariable(
             'GZ_SIM_RESOURCE_PATH',
-            [map_models_dir, os.pathsep, worlds_dir, os.pathsep,
+            [ws_src_dir, os.pathsep, ws_install_dir, os.pathsep, map_models_dir, os.pathsep, worlds_dir, os.pathsep,
              EnvironmentVariable('GZ_SIM_RESOURCE_PATH', default_value='')],
         ),
         SetEnvironmentVariable(
             'IGN_GAZEBO_RESOURCE_PATH',
-            [map_models_dir, os.pathsep, worlds_dir, os.pathsep,
+            [ws_src_dir, os.pathsep, ws_install_dir, os.pathsep, map_models_dir, os.pathsep, worlds_dir, os.pathsep,
              EnvironmentVariable('IGN_GAZEBO_RESOURCE_PATH', default_value='')],
         ),
         DeclareLaunchArgument('use_sim_time', default_value='true'),

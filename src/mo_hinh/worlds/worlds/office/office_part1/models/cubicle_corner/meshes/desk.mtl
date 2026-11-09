@@ -1,0 +1,6 @@
+newmtl wood_desk
+Ka 0.6 0.5 0.4
+Kd 0.7 0.55 0.4
+Ks 0.1 0.1 0.1
+d 1.0
+illum 2

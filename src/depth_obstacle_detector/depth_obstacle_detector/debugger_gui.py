@@ -1,11 +1,13 @@
-#!/usr/bin/env python3
-
 import sys
 import os
 import time
 import threading
 import numpy as np
 import cv2
+
+# Prevent OpenCV pip package from breaking system PyQt5 plugins
+if 'QT_QPA_PLATFORM_PLUGIN_PATH' in os.environ:
+    del os.environ['QT_QPA_PLATFORM_PLUGIN_PATH']
 
 from PyQt5.QtCore import Qt, QObject, pyqtSignal, pyqtSlot
 from PyQt5.QtWidgets import (
@@ -56,7 +58,7 @@ class DepthSubscriberNode(Node):
         # Subscribe to camera info
         self.info_sub = self.create_subscription(
             CameraInfo,
-            '/front_camera/depth/camera_info',
+            '/camera/depth/camera_info',
             self.info_callback,
             custom_qos
         )
@@ -64,7 +66,7 @@ class DepthSubscriberNode(Node):
         # Subscribe to depth raw topic (typically 16-bit unsigned in millimeters)
         self.subscription = self.create_subscription(
             Image,
-            '/front_camera/depth/image_raw',
+            '/camera/depth/image_raw',
             self.listener_callback,
             custom_qos
         )
@@ -74,15 +76,19 @@ class DepthSubscriberNode(Node):
         
         self.bridge = CvBridge()
         self.get_logger().info("Depth Obstacle Debugger ROS 2 Node initialized.")
-        self.get_logger().info("Subscribed to /front_camera/depth/image_raw & /front_camera/depth/camera_info")
+        self.get_logger().info("Subscribed to /camera/depth/image_raw & /camera/depth/camera_info")
         self.get_logger().info("Publishing LaserScan on /scan_obstacles")
 
-    def switch_camera(self, prefix='front_'):
+    def switch_camera(self, prefix=''):
         self.destroy_subscription(self.info_sub)
         self.destroy_subscription(self.subscription)
         
-        info_topic = f'/{prefix}camera/depth/camera_info'
-        img_topic = f'/{prefix}camera/depth/image_raw'
+        if not prefix or prefix == 'camera':
+            info_topic = '/camera/depth/camera_info'
+            img_topic = '/camera/depth/image_raw'
+        else:
+            info_topic = f'/{prefix}camera/depth/camera_info'
+            img_topic = f'/{prefix}camera/depth/image_raw'
         
         self.info_sub = self.create_subscription(CameraInfo, info_topic, self.info_callback, custom_qos)
         self.subscription = self.create_subscription(Image, img_topic, self.listener_callback, custom_qos)
@@ -238,7 +244,7 @@ class DebuggerGUI(QMainWindow):
         
         lbl_cam = QLabel("Camera:")
         self.cmb_cam = QComboBox()
-        self.cmb_cam.addItems(["Front", "Rear"])
+        self.cmb_cam.addItems(["Astra (/camera)", "Front (/front_camera)", "Rear (/rear_camera)"])
         self.cmb_cam.currentIndexChanged.connect(self.on_camera_changed)
         zoom_layout.addWidget(lbl_cam)
         zoom_layout.addWidget(self.cmb_cam)
@@ -379,6 +385,16 @@ class DebuggerGUI(QMainWindow):
         params_grid.addWidget(self.sld_morph, 3, 1)
         self.lbl_morph_val = QLabel("3")
         params_grid.addWidget(self.lbl_morph_val, 3, 2)
+
+        # Distance Penalty (mm/m) - Adaptive threshold for far distances
+        params_grid.addWidget(QLabel("Penalty (mm/m):"), 4, 0)
+        self.sld_penalty = QSlider(Qt.Horizontal)
+        self.sld_penalty.setRange(0, 100)
+        self.sld_penalty.setValue(25)
+        self.sld_penalty.valueChanged.connect(self.on_param_changed)
+        params_grid.addWidget(self.sld_penalty, 4, 1)
+        self.lbl_penalty_val = QLabel("25")
+        params_grid.addWidget(self.lbl_penalty_val, 4, 2)
 
         controls_layout.addWidget(grp_params)
 
@@ -678,6 +694,7 @@ class DebuggerGUI(QMainWindow):
         self.lbl_min_area_val.setText(str(self.sld_min_area.value()))
         self.lbl_median_val.setText(str(self.sld_median.value()))
         self.lbl_morph_val.setText(str(self.sld_morph.value()))
+        self.lbl_penalty_val.setText(str(self.sld_penalty.value()))
         self.lbl_tilt_val.setText(f"{self.sld_tilt_angle.value()}°")
         offset_m = self.sld_dist_offset.value() / 100.0
         self.lbl_dist_offset_val.setText(f"{offset_m:+.2f} m")
@@ -801,6 +818,7 @@ class DebuggerGUI(QMainWindow):
                     'roi_width': int(self.sld_roi_w.value()),
                     'roi_height': int(self.sld_roi_h.value()),
                     'threshold': int(self.sld_threshold.value()),
+                    'penalty_k': int(self.sld_penalty.value()),
                     'min_area': int(self.sld_min_area.value()),
                     'median_filter': int(self.sld_median.value()),
                     'morphology_size': int(self.sld_morph.value()),
@@ -831,6 +849,7 @@ class DebuggerGUI(QMainWindow):
                 self.sld_roi_w.blockSignals(True)
                 self.sld_roi_h.blockSignals(True)
                 self.sld_threshold.blockSignals(True)
+                self.sld_penalty.blockSignals(True)
                 self.sld_min_area.blockSignals(True)
                 self.sld_median.blockSignals(True)
                 self.sld_morph.blockSignals(True)
@@ -842,6 +861,7 @@ class DebuggerGUI(QMainWindow):
                 self.sld_roi_w.setValue(config_data.get('roi_width', 100))
                 self.sld_roi_h.setValue(config_data.get('roi_height', 100))
                 self.sld_threshold.setValue(config_data.get('threshold', 80))
+                self.sld_penalty.setValue(config_data.get('penalty_k', 25))
                 self.sld_min_area.setValue(config_data.get('min_area', 150))
                 self.sld_median.setValue(config_data.get('median_filter', 3))
                 self.sld_morph.setValue(config_data.get('morphology_size', 3))
@@ -855,6 +875,7 @@ class DebuggerGUI(QMainWindow):
                 self.sld_roi_w.blockSignals(False)
                 self.sld_roi_h.blockSignals(False)
                 self.sld_threshold.blockSignals(False)
+                self.sld_penalty.blockSignals(False)
                 self.sld_min_area.blockSignals(False)
                 self.sld_median.blockSignals(False)
                 self.sld_morph.blockSignals(False)
@@ -1019,6 +1040,7 @@ class DebuggerGUI(QMainWindow):
             rh = max(1, min(rh, self.raw_height - ry))
 
             thresh_val = self.sld_threshold.value()
+            penalty_k = self.sld_penalty.value()
             min_area = self.sld_min_area.value()
             k_median = self.sld_median.value()
             k_morph = self.sld_morph.value()
@@ -1061,9 +1083,16 @@ class DebuggerGUI(QMainWindow):
                 # Fill invalid pixels with black in visualization
                 diff_disp[~valid_mask] = 0
 
-                # 5. Threshold to create Binary Mask
-                obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
-                obstacle_mask[valid_mask & (diff > thresh_val)] = 255
+                # 5. Adaptive Threshold with Distance Penalty to create Binary Mask
+                if penalty_k > 0:
+                    ground_dist_m = ground_roi.astype(np.float32) / 1000.0
+                    extra_thresh = penalty_k * np.maximum(0.0, ground_dist_m - 0.7)
+                    adaptive_thresh = thresh_val + extra_thresh
+                    obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
+                    obstacle_mask[valid_mask & (diff > adaptive_thresh)] = 255
+                else:
+                    obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
+                    obstacle_mask[valid_mask & (diff > thresh_val)] = 255
 
                 # 6. Apply Morphology Filters (Noise Reduction)
                 # A. Median filter (must be odd size)
@@ -1408,7 +1437,9 @@ class DebuggerGUI(QMainWindow):
 
     def on_camera_changed(self):
         text = self.cmb_cam.currentText()
-        if text == "Front":
+        if "Astra" in text or text == "/camera":
+            self.ros_node.switch_camera('camera')
+        elif "Front" in text:
             self.ros_node.switch_camera('front_')
         else:
             self.ros_node.switch_camera('rear_')
@@ -1430,6 +1461,9 @@ def main(args=None):
     # Initialize rclpy
     rclpy.init(args=args)
 
+    # Start the standard PyQt5 App event loop first
+    app = QApplication(sys.argv)
+
     # Signal emitter for thread-safe cross-talk
     signal_emitter = ImageSignalEmitter()
 
@@ -1440,8 +1474,6 @@ def main(args=None):
     ros_thread = threading.Thread(target=rclpy.spin, args=(ros_node,), daemon=True)
     ros_thread.start()
 
-    # Start the standard PyQt5 App event loop
-    app = QApplication(sys.argv)
     gui = DebuggerGUI(ros_node)
     
     # Connect the signal emitter to the GUI slot

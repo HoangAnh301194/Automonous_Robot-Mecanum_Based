@@ -90,6 +90,7 @@ class ObstacleDetectorNode(Node):
             self.roi_h = int(self.config.get('roi_height', 480))
             
             self.thresh_val = int(self.config.get('threshold', 80))
+            self.penalty_k = float(self.config.get('penalty_k', 25.0))
             self.min_area = int(self.config.get('min_area', 150))
             self.k_median = int(self.config.get('median_filter', 3))
             self.k_morph = int(self.config.get('morphology_size', 3))
@@ -242,8 +243,16 @@ class ObstacleDetectorNode(Node):
         valid_mask = (current_roi > 0) & (ground_roi > 0)
         diff = ground_roi.astype(np.int32) - current_roi.astype(np.int32)
         
-        obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
-        obstacle_mask[valid_mask & (diff > self.thresh_val)] = 255
+        # Adaptive distance penalty: threshold increases with ground distance
+        if self.penalty_k > 0:
+            ground_dist_m = ground_roi.astype(np.float32) / 1000.0
+            extra_thresh = self.penalty_k * np.maximum(0.0, ground_dist_m - 0.7)
+            adaptive_thresh = self.thresh_val + extra_thresh
+            obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
+            obstacle_mask[valid_mask & (diff > adaptive_thresh)] = 255
+        else:
+            obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
+            obstacle_mask[valid_mask & (diff > self.thresh_val)] = 255
         
         if self.k_median > 1:
             obstacle_mask = cv2.medianBlur(obstacle_mask, self.k_median)

@@ -1,15 +1,17 @@
 camera_tilt: 0
-depth_topic: /front_camera/depth/image_raw
-camera_info_topic: /front_camera/depth/camera_info
+depth_topic: /camera/depth/image_raw
+camera_info_topic: /camera/depth/camera_info
 output_scan_topic: /scan_obstacles
 distance_offset: 0.0
 ground_file_path: cam_truoc.npy
 median_filter: 3
-min_area: 150
+min_area: 15
 morphology_size: 3
-roi_height: 211
-roi_width: 638
-roi_x: 1
-roi_y: 195
+penalty_k: 25
+roi_height: 95
+roi_width: 160
+roi_x: 0
+roi_y: 25
 target_frame: base_footprint
-threshold: 80
+threshold: 55
+

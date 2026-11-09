@@ -1,0 +1,203 @@
+<?xml version="1.0" ?>
+<sdf version="1.8">
+  <world name="uwb_room_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Standard Gazebo Systems -->
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
+    <!-- Custom UWB DWM3000 Simulation System Plugin -->
+    <plugin filename="libuwb_system.so" name="uwb_dwm3000_sim::UwbSystem">
+      <update_rate>20.0</update_rate>
+      <z_height>1.0</z_height>
+      <max_range>35.0</max_range>
+      <sigma_los>0.05</sigma_los>
+      <sigma_nlos>0.25</sigma_nlos>
+      <nlos_bias_base>0.15</nlos_bias_base>
+      <k_attenuation>1.5</k_attenuation>
+      <target_model>uwb_diffbot</target_model>
+      <anchors>
+        <anchor name="anchor_0" x="0.5" y="0.5" z="1.0"/>
+        <anchor name="anchor_1" x="7.5" y="5.5" z="1.0"/>
+      </anchors>
+    </plugin>
+
+    <!-- Sun Light -->
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>4 3 10 0 0 0</pose>
+      <diffuse>1.0 1.0 1.0 1</diffuse>
+      <specular>0.3 0.3 0.3 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <!-- Ground Plane -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>50 50</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>50 50</size></plane></geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 1 ROOM: 8m x 6m Room Boundary Walls -->
+    <model name="wall_south">
+      <static>true</static>
+      <pose>4.0 0.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.0 0.3 3.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>8.0 0.3 3.0</size></box></geometry>
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_north">
+      <static>true</static>
+      <pose>4.0 6.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>8.0 0.3 3.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>8.0 0.3 3.0</size></box></geometry>
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_west">
+      <static>true</static>
+      <pose>0.0 3.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.3 6.0 3.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.3 6.0 3.0</size></box></geometry>
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="wall_east">
+      <static>true</static>
+      <pose>8.0 3.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.3 6.0 3.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.3 6.0 3.0</size></box></geometry>
+          <material>
+            <ambient>0.7 0.7 0.7 1</ambient>
+            <diffuse>0.7 0.7 0.7 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <include>
+      <uri>model://Walking_actor</uri>
+      <name>walking_actor</name>
+      <pose>2.0 2.0 1.0 0 0 0</pose>
+    </include>
+
+    <!-- Physical Collision Body for Walking Actor (Synchronized by UwbSystem plugin) -->
+    <model name="actor_collider">
+      <pose>2.0 2.0 1.0 0 0 0</pose>
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>75.0</mass>
+          <inertia>
+            <ixx>15.0</ixx><ixy>0</ixy><ixz>0</ixz>
+            <iyy>15.0</iyy><iyz>0</iyz>
+            <izz>2.5</izz>
+          </inertia>
+        </inertial>
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.25</radius>
+              <length>1.75</length>
+            </cylinder>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+    
+    <!-- Partition Wall in Room Center for NLOS Testing -->
+    <model name="wall_middle">
+      <static>true</static>
+      <pose>4.0 3.0 1.5 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.4 4.0 3.0</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.4 4.0 3.0</size></box></geometry>
+          <material>
+            <ambient>0.9 0.2 0.2 1</ambient>
+            <diffuse>0.9 0.2 0.2 1</diffuse>
+            <specular>0.2 0.2 0.2 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Visual UWB Anchor 0 -->
+    <model name="visual_anchor_0">
+      <static>true</static>
+      <pose>0.5 0.5 0.5 0 0 0</pose>
+      <link name="link">
+        <visual name="stand">
+          <geometry><cylinder><radius>0.05</radius><length>1.0</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="antenna">
+          <pose>0 0 0.5 0 0 0</pose>
+          <geometry><sphere><radius>0.15</radius></sphere></geometry>
+          <material><ambient>0.0 0.5 1.0 1</ambient><diffuse>0.0 0.5 1.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Visual UWB Anchor 1 -->
+    <model name="visual_anchor_1">
+      <static>true</static>
+      <pose>7.5 5.5 0.5 0 0 0</pose>
+      <link name="link">
+        <visual name="stand">
+          <geometry><cylinder><radius>0.05</radius><length>1.0</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="antenna">
+          <pose>0 0 0.5 0 0 0</pose>
+          <geometry><sphere><radius>0.15</radius></sphere></geometry>
+          <material><ambient>0.0 0.5 1.0 1</ambient><diffuse>0.0 0.5 1.0 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Robot model uwb_diffbot is spawned dynamically from URDF via ros_gz_sim -->
+
+
+  </world>
+</sdf>

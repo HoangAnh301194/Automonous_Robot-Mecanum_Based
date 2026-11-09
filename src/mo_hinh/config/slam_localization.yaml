@@ -16,10 +16,7 @@ slam_toolbox:
     scan_topic: /scan
     use_map_saver: true
     mode: localization #mapping localization
-    laser_min_angle: 0.0
-    laser_max_angle: 6.28164529800415
-    laser_angle_increment: 0.02416
-    ignore_scan_mismatch: true
+
 
 
     # if you'd like to immediately start continuing a map at a given pose

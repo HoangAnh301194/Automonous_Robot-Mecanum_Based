@@ -13,7 +13,7 @@ hoverboard_base_controller:
     left_wheel_names: ["wheel_left_joint"]
     right_wheel_names: ["wheel_right_joint"]
 
-    wheel_separation: 0.58
+    wheel_separation: 0.43
     wheel_radius: 0.08255
 
     wheel_separation_multiplier: 1.0

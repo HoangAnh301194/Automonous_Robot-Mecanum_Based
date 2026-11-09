@@ -26,7 +26,7 @@ install(
 
 # Install URDF files
 install(
-  DIRECTORY urdf
+  DIRECTORY urdf meshes
   DESTINATION share/${PROJECT_NAME}
 )
 

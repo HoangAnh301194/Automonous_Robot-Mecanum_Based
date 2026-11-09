@@ -1,89 +1,83 @@
-<?xml version="1.0"?>
-<robot name="my_diff_drive_robot">
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="robot_urdf">
 
   <!-- ========================= -->
-  <!-- Materials -->
-  <!-- ========================= -->
-  <material name="blue">
-    <color rgba="0 0 0.8 1"/>
-  </material>
-
-  <material name="green">
-    <color rgba="0 1 0 1"/>
-  </material>
-
-  <material name="red">
-    <color rgba="1 0 0 1"/>
-  </material>
-
-  <material name="grey">
-    <color rgba="0.5 0.5 0.5 1"/>
-  </material>
-
-  <material name="silver">
-    <color rgba="0.75 0.75 0.75 1"/>
-  </material>
-
-  <material name="black">
-    <color rgba="0 0 0 1"/>
-  </material>
-
-  <!-- ========================= -->
-  <!-- Base Footprint -->
+  <!-- Base Footprint            -->
   <!-- ========================= -->
   <link name="base_footprint"/>
 
+  <!-- Dịch chuyển gốc SolidWorks về đúng tâm trục bánh xe tiếp xúc mặt đất và xoay 180 độ để 2 bánh phụ là đầu xe (+X) -->
   <joint name="base_joint" type="fixed">
     <parent link="base_footprint"/>
     <child link="base_link"/>
-    <origin xyz="0 0 0.08255" rpy="0 0 0"/>
+    <origin xyz="0.18805 0.213 0.03053" rpy="0 0 3.14159265"/>
   </joint>
 
   <!-- ========================= -->
-  <!-- Base Link -->
+  <!-- Base Link                 -->
   <!-- ========================= -->
-  <link name="base_link">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.221410511244576 0.213001695317811 0.0353870595177748"
+        rpy="0 0 0" />
+      <mass
+        value="1.25495204933382" />
+      <inertia
+        ixx="0.0204204507187595"
+        ixy="1.1493563950929E-06"
+        ixz="0.0013146649430653"
+        iyy="0.0297599172739004"
+        iyz="1.673289518977E-08"
+        izz="0.0493374014049096" />
+    </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <box size="0.6 0.6 0.1"/>
+        <mesh
+          filename="package://robot_urdf/meshes/base_link.STL" />
       </geometry>
-      <material name="blue"/>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
     </visual>
-
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <box size="0.6 0.6 0.1"/>
+        <mesh
+          filename="package://robot_urdf/meshes/base_link.STL" />
       </geometry>
     </collision>
-
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="8.0"/>
-      <inertia ixx="0.25" ixy="0.0" ixz="0.0"
-               iyy="0.25" iyz="0.0"
-               izz="0.35"/>
-    </inertial>
   </link>
 
   <!-- ========================= -->
-  <!-- IMU -->
+  <!-- IMU Link (Center of Robot)-->
   <!-- ========================= -->
   <link name="imu_link">
     <visual>
       <geometry>
         <box size="0.02 0.02 0.01"/>
       </geometry>
-      <material name="green"/>
+      <material name="imu_green">
+        <color rgba="0 1 0 1"/>
+      </material>
     </visual>
-
     <collision>
       <geometry>
         <box size="0.02 0.02 0.01"/>
       </geometry>
     </collision>
-
     <inertial>
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <mass value="0.02"/>
@@ -96,327 +90,387 @@
   <joint name="imu_joint" type="fixed">
     <parent link="base_link"/>
     <child link="imu_link"/>
-    <origin xyz="0 0 0.055" rpy="0 0 0"/>
+    <origin xyz="0.18805 0.213 0.08" rpy="0 0 3.14159265"/>
   </joint>
 
   <!-- ========================= -->
-  <!-- 2D LiDAR Link -->
+  <!-- 2D LiDAR (laser_link)     -->
   <!-- ========================= -->
-  <link name="laser_link">
-    <visual>
-      <origin xyz="0 0 -0.04" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.05" length="0.05"/>
-      </geometry>
-      <material name="red"/>
-    </visual>
-
+  <link
+    name="laser_link">
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.10"/>
-      <inertia ixx="1e-4" ixy="0.0" ixz="0.0"
-               iyy="1e-4" iyz="0.0"
-               izz="1e-4"/>
+      <origin
+        xyz="0.011792 -0.00036789 -0.035501"
+        rpy="0 0 0" />
+      <mass
+        value="0.094104" />
+      <inertia
+        ixx="2.7909E-05"
+        ixy="-5.2518E-08"
+        ixz="-3.3534E-07"
+        iyy="4.4353E-05"
+        iyz="2.4873E-08"
+        izz="6.9475E-05" />
     </inertial>
-  </link>
-
-  <joint name="laser_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="laser_link"/>
-    <origin xyz="0 0 0.15" rpy="0 0 0"/>
-  </joint>
-
-  <!-- ========================= -->
-  <!-- Support Link -->
-  <!-- ========================= -->
-  <link name="support_link">
     <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <box size="0.02 0.02 0.87"/>
+        <mesh
+          filename="package://robot_urdf/meshes/laser_Link.STL" />
       </geometry>
-      <material name="grey"/>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
     </visual>
-
     <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <box size="0.02 0.02 0.87"/>
+        <mesh
+          filename="package://robot_urdf/meshes/laser_Link.STL" />
       </geometry>
     </collision>
-
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.15"/>
-      <inertia ixx="2e-4" ixy="0.0" ixz="0.0"
-               iyy="2e-4" iyz="0.0"
-               izz="1e-5"/>
-    </inertial>
   </link>
 
-  <joint name="support_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="support_link"/>
-    <origin xyz="0.25 0.14 0.435" rpy="0 0 0"/>
+  <joint
+    name="laser_joint"
+    type="fixed">
+    <origin
+      xyz="0.01305 0.213 0.24949"
+      rpy="3.14159265 0 3.14159265" />
+    <parent
+      link="base_link" />
+    <child
+      link="laser_link" />
+    <axis
+      xyz="0 0 0" />
   </joint>
 
-  <!-- ========================= -->
-  <!-- Camera Link -->
-  <!-- ========================= -->
+  <!-- ============================================================== -->
+  <!-- Depth Camera (Height: 66cm on base_link, Pitch down 30 deg)   -->
+  <!-- ============================================================== -->
   <link name="camera_link">
     <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.025 0.09 0.025"/>
+        <box size="0.04 0.165 0.03" />
       </geometry>
-      <material name="silver"/>
+      <material name="camera_black">
+        <color rgba="0.1 0.1 0.1 1" />
+      </material>
     </visual>
-
     <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <box size="0.025 0.09 0.025"/>
+        <box size="0.04 0.165 0.03" />
       </geometry>
     </collision>
-
     <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.10"/>
-      <inertia ixx="5e-5" ixy="0.0" ixz="0.0"
-               iyy="5e-5" iyz="0.0"
-               izz="5e-5"/>
+      <mass value="0.15" />
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001" />
     </inertial>
   </link>
 
   <joint name="camera_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="camera_link"/>
-    <origin xyz="0.28 0.14 0.87" rpy="0 0.698132 0"/>
+    <origin xyz="0.01305 0.213 0.72947" rpy="0 0.52359878 3.14159265" />
+    <parent link="base_link" />
+    <child link="camera_link" />
   </joint>
 
-  <!-- Optical frame -->
-  <link name="camera_color_optical_frame">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.0001"/>
-      <inertia ixx="1e-9" ixy="0.0" ixz="0.0"
-               iyy="1e-9" iyz="0.0"
-               izz="1e-9"/>
-    </inertial>
-  </link>
-
-  <joint name="camera_optical_joint" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_color_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
-  </joint>
-
-  <!-- Depth Optical frame -->
-  <link name="camera_depth_optical_frame">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.0001"/>
-      <inertia ixx="1e-9" ixy="0.0" ixz="0.0"
-               iyy="1e-9" iyz="0.0"
-               izz="1e-9"/>
-    </inertial>
-  </link>
-
+  <!-- Standard optical frame for image/pointcloud processing -->
+  <link name="camera_depth_optical_frame"/>
   <joint name="camera_depth_optical_joint" type="fixed">
-    <parent link="camera_link"/>
-    <child link="camera_depth_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+    <origin xyz="0 0 0" rpy="-1.5707963 0 -1.5707963" />
+    <parent link="camera_link" />
+    <child link="camera_depth_optical_frame" />
   </joint>
 
   <!-- ========================= -->
-  <!-- Rear Camera Link -->
+  <!-- Left Wheel (Active, 43cm) -->
   <!-- ========================= -->
-  <link name="rear_camera_link">
+  <link
+    name="wheel_left_link">
+    <inertial>
+      <origin
+        xyz="-5.0984E-06 -0.033015 7.7331E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.79711" />
+      <inertia
+        ixx="0.0016716"
+        ixy="3.0102E-08"
+        ixz="-3.8937E-08"
+        iyy="0.0030919"
+        iyz="1.8966E-07"
+        izz="0.0016716" />
+    </inertial>
     <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <box size="0.025 0.09 0.025"/>
+        <mesh
+          filename="package://robot_urdf/meshes/wheel_left_link.STL" />
       </geometry>
-      <material name="silver"/>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
     </visual>
     <collision>
+      <origin
+        xyz="0 -0.0567 0"
+        rpy="1.5707963 0 0" />
       <geometry>
-        <box size="0.025 0.09 0.025"/>
+        <cylinder radius="0.086" length="0.05" />
       </geometry>
     </collision>
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.10"/>
-      <inertia ixx="5e-5" ixy="0.0" ixz="0.0"
-               iyy="5e-5" iyz="0.0"
-               izz="5e-5"/>
-    </inertial>
   </link>
 
-  <joint name="rear_camera_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="rear_camera_link"/>
-    <!-- Positioned at the back (-0.28 on X) and facing backward (yaw = 3.14159) -->
-    <origin xyz="-0.28 0.14 0.87" rpy="0 0.698132 3.14159265"/>
-  </joint>
-
-  <!-- Rear Depth Optical frame -->
-  <link name="rear_camera_depth_optical_frame">
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.0001"/>
-      <inertia ixx="1e-9" ixy="0.0" ixz="0.0"
-               iyy="1e-9" iyz="0.0"
-               izz="1e-9"/>
-    </inertial>
-  </link>
-
-  <joint name="rear_camera_depth_optical_joint" type="fixed">
-    <parent link="rear_camera_link"/>
-    <child link="rear_camera_depth_optical_frame"/>
-    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
-  </joint>
-
-  <!-- Rear Scan Frame (Horizontal projection for rear camera) -->
-  <link name="rear_scan_frame"/>
-
-  <joint name="rear_scan_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="rear_scan_frame"/>
-    <origin xyz="-0.28 0.14 0.0" rpy="0 0 3.14159265"/>
-  </joint>
-
-
-  <!-- ========================= -->
-  <!-- Drive Wheels (Diff Drive) -->
-  <!-- ========================= -->
-  <link name="wheel_left_link">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.08255" length="0.05"/>
-      </geometry>
-      <material name="black"/>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.08255" length="0.05"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.50"/>
-      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
-               iyy="0.001" iyz="0.0"
-               izz="0.0005"/>
-    </inertial>
-  </link>
-
-  <joint name="wheel_left_joint" type="continuous">
-    <parent link="base_link"/>
-    <child link="wheel_left_link"/>
-    <origin xyz="0 0.29 -0.02" rpy="-1.5708 0 0"/>
-    <axis xyz="0 0 1"/>
-  </joint>
-
-  <link name="wheel_right_link">
-    <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.08255" length="0.05"/>
-      </geometry>
-      <material name="black"/>
-    </visual>
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <cylinder radius="0.08255" length="0.05"/>
-      </geometry>
-    </collision>
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.50"/>
-      <inertia ixx="0.001" ixy="0.0" ixz="0.0"
-               iyy="0.001" iyz="0.0"
-               izz="0.0005"/>
-    </inertial>
-  </link>
-
-  <joint name="wheel_right_joint" type="continuous">
-    <parent link="base_link"/>
-    <child link="wheel_right_link"/>
-    <origin xyz="0 -0.29 -0.02" rpy="-1.5708 0 0"/>
-    <axis xyz="0 0 1"/>
+  <joint
+    name="wheel_left_joint"
+    type="continuous">
+    <origin
+      xyz="0.18805 -0.002 0.055472"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="wheel_right_link" />
+    <axis
+      xyz="0 -1 0" />
   </joint>
 
   <!-- ========================= -->
-  <!-- Caster Wheels (Bánh phụ) -->
+  <!-- Right Wheel (Active, 43cm)-->
   <!-- ========================= -->
-  <link name="caster_front_link">
+  <link
+    name="wheel_right_link">
+    <inertial>
+      <origin
+        xyz="5.0984E-06 0.033015 7.7331E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.79711" />
+      <inertia
+        ixx="0.0016716"
+        ixy="3.0102E-08"
+        ixz="3.8937E-08"
+        iyy="0.0030919"
+        iyz="-1.8966E-07"
+        izz="0.0016716" />
+    </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.05"/>
+        <mesh
+          filename="package://robot_urdf/meshes/wheel_right_link.STL" />
       </geometry>
-      <material name="black"/>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="0 0.0567 0"
+        rpy="1.5707963 0 0" />
       <geometry>
-        <sphere radius="0.05"/>
+        <cylinder radius="0.086" length="0.05" />
       </geometry>
     </collision>
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.1"/>
-      <inertia ixx="1e-4" ixy="0.0" ixz="0.0"
-               iyy="1e-4" iyz="0.0"
-               izz="1e-4"/>
-    </inertial>
   </link>
 
-  <joint name="caster_front_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="caster_front_link"/>
-    <origin xyz="0.22 0 -0.05255" rpy="0 0 0"/>
+  <joint
+    name="wheel_right_joint"
+    type="continuous">
+    <origin
+      xyz="0.18805 0.428 0.055472"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="wheel_left_link" />
+    <axis
+      xyz="0 -1 0" />
   </joint>
 
-  <link name="caster_rear_link">
+  <!-- ========================= -->
+  <!-- Front Caster Wheel        -->
+  <!-- ========================= -->
+  <link
+    name="caster_front_link">
+    <inertial>
+      <origin
+        xyz="-0.0051384 -0.019049 0.0083478"
+        rpy="0 0 0" />
+      <mass
+        value="0.06026" />
+      <inertia
+        ixx="2.3601E-05"
+        ixy="1.4688E-08"
+        ixz="7.1694E-06"
+        iyy="3.2253E-05"
+        iyz="-2.4004E-08"
+        izz="1.8571E-05" />
+    </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.05"/>
+        <mesh
+          filename="package://robot_urdf/meshes/caster_front_Link.STL" />
       </geometry>
-      <material name="black"/>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <origin
+        xyz="-0.0137 -0.019 -0.012"
+        rpy="0 0 0" />
       <geometry>
-        <sphere radius="0.05"/>
+        <sphere radius="0.0125" />
       </geometry>
     </collision>
-    <inertial>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <mass value="0.1"/>
-      <inertia ixx="1e-4" ixy="0.0" ixz="0.0"
-               iyy="1e-4" iyz="0.0"
-               izz="1e-4"/>
-    </inertial>
   </link>
 
-  <joint name="caster_rear_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="caster_rear_link"/>
-    <origin xyz="-0.22 0 -0.05255" rpy="0 0 0"/>
+  <joint
+    name="caster_front_joint"
+    type="fixed">
+    <origin
+      xyz="0.46183 0.232 -0.0023223"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_front_link" />
   </joint>
 
-  <!-- Friction settings for caster wheels -->
-  <gazebo reference="caster_front_link">
-    <mu1>0.001</mu1>
-    <mu2>0.001</mu2>
-  </gazebo>
+  <!-- ========================= -->
+  <!-- Rear Left Caster Wheel    -->
+  <!-- ========================= -->
+  <link
+    name="caster_left_link">
+    <inertial>
+      <origin
+        xyz="-0.0080178 -0.019209 0.06248"
+        rpy="0 0 0" />
+      <mass
+        value="0.12754" />
+      <inertia
+        ixx="6.4519E-05"
+        ixy="1.3465E-08"
+        ixz="7.1762E-06"
+        iyy="7.2379E-05"
+        iyz="-2.3834E-08"
+        izz="3.9114E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_urdf/meshes/caster_left_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0.0117 -0.019 -0.012"
+        rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0125" />
+      </geometry>
+    </collision>
+  </link>
 
-  <gazebo reference="caster_rear_link">
-    <mu1>0.001</mu1>
-    <mu2>0.001</mu2>
-  </gazebo>
+  <joint
+    name="caster_left_joint"
+    type="fixed">
+    <origin
+      xyz="0 0.42198 -3.3809E-05"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_left_link" />
+  </joint>
 
+  <!-- ========================= -->
+  <!-- Rear Right Caster Wheel   -->
+  <!-- ========================= -->
+  <link
+    name="caster_right_link">
+    <inertial>
+      <origin
+        xyz="-0.0080095 0.022791 0.062472"
+        rpy="0 0 0" />
+      <mass
+        value="0.12754" />
+      <inertia
+        ixx="6.4519E-05"
+        ixy="1.3465E-08"
+        ixz="7.1762E-06"
+        iyy="7.2379E-05"
+        iyz="-2.3834E-08"
+        izz="3.9114E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_urdf/meshes/caster_right_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0.0117 0.023 -0.012"
+        rpy="0 0 0" />
+      <geometry>
+        <sphere radius="0.0125" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint
+    name="caster_right_joint"
+    type="fixed">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_right_link" />
+  </joint>
+
+  <!-- ========================= -->
+  <!-- Gazebo Physics & Sensors  -->
   <!-- ========================= -->
   <!-- Gazebo Sim (gz-sim) Plugins -->
   <!-- ========================= -->
@@ -424,8 +478,8 @@
     <plugin filename="gz-sim-diff-drive-system" name="gz::sim::systems::DiffDrive">
       <left_joint>wheel_left_joint</left_joint>
       <right_joint>wheel_right_joint</right_joint>
-      <wheel_separation>0.58</wheel_separation>
-      <wheel_radius>0.08255</wheel_radius>
+      <wheel_separation>0.43</wheel_separation>
+      <wheel_radius>0.086</wheel_radius>
       <max_linear_acceleration>1.0</max_linear_acceleration>
       <min_linear_acceleration>-1.0</min_linear_acceleration>
       <max_angular_acceleration>2.0</max_angular_acceleration>
@@ -503,52 +557,41 @@
     </sensor>
   </gazebo>
 
-  <!-- Front Camera Sensors (RGB & Depth) -->
-  <gazebo reference="camera_link">
-
-
-    <sensor name="front_depth_camera" type="depth_camera">
-      <always_on>true</always_on>
-      <visualize>false</visualize>
-      <update_rate>15.0</update_rate>
-      <topic>front_camera/depth/image_raw</topic>
-      <gz_frame_id>camera_link</gz_frame_id>
-      <camera name="front_depth_camera">
-        <horizontal_fov>1.3962634</horizontal_fov>
-        <image>
-          <width>640</width>
-          <height>480</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.1</near>
-          <far>10.0</far>
-        </clip>
-      </camera>
-    </sensor>
+  <!-- Friction settings for active drive wheels -->
+  <gazebo reference="wheel_left_link">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
   </gazebo>
 
-  <!-- Rear Camera Sensors (Depth Only) -->
-  <gazebo reference="rear_camera_link">
-    <sensor name="rear_depth_camera" type="depth_camera">
-      <always_on>true</always_on>
-      <visualize>false</visualize>
-      <update_rate>15.0</update_rate>
-      <topic>rear_camera/depth/image_raw</topic>
-      <gz_frame_id>rear_camera_link</gz_frame_id>
-      <camera name="rear_depth_camera">
-        <horizontal_fov>1.3962634</horizontal_fov>
-        <image>
-          <width>640</width>
-          <height>480</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.1</near>
-          <far>10.0</far>
-        </clip>
-      </camera>
-    </sensor>
+  <gazebo reference="wheel_right_link">
+    <mu1>1.0</mu1>
+    <mu2>1.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+  </gazebo>
+
+  <!-- Friction settings for passive caster wheels (friction = 0) -->
+  <gazebo reference="caster_front_link">
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+  </gazebo>
+
+  <gazebo reference="caster_left_link">
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
+  </gazebo>
+
+  <gazebo reference="caster_right_link">
+    <mu1>0.0</mu1>
+    <mu2>0.0</mu2>
+    <kp>1000000.0</kp>
+    <kd>1.0</kd>
   </gazebo>
 
   <!-- ========================= -->
@@ -557,7 +600,7 @@
   <ros2_control name="hoverboard_system" type="system">
     <hardware>
       <plugin>hoverboard_driver/hoverboard_driver</plugin>
-      <param name="wheel_radius">0.08255</param>
+      <param name="wheel_radius">0.086</param>
       <param name="max_velocity">1.0</param>
       <param name="device">/dev/hoverboard</param>
     </hardware>
