@@ -44,21 +44,33 @@ On the Jetson, reuse the existing local, untracked configuration
 `LLM_API_KEY`, and `LLM_MODEL`. Never commit this file or copy the API
 key into documentation.
 
-In the **same terminal** that will launch the kiosk, run (unless those
-variables are already loaded from `~/.bashrc`):
+The Kiosk **automatically loads this file on every launch**. No manual
+`source` or API key export is required. Both `KEY=value` and
+`export KEY=value` lines are supported, including quoted values and comments.
+The file must contain `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL`.
+
+A safe example layout (do not commit actual credentials):
 
 ```bash
-set -a
-source ~/ros2_ws/config/llm.local.env
-set +a
-
-printf 'LLM_BASE_URL=%s\nLLM_MODEL=%s\n' "$LLM_BASE_URL" "$LLM_MODEL"
-if [ -n "$LLM_API_KEY" ]; then
-  echo "LLM_API_KEY: configured"
-else
-  echo "LLM_API_KEY: missing"
-fi
+LLM_BASE_URL=http://localhost:20128/v1
+LLM_API_KEY=replace-with-your-local-key
+LLM_MODEL=replace-with-an-available-model
 ```
+
+Edit only this file to change the 9router endpoint/key/model, then **restart
+Kiosk** to apply changes. The Kiosk loads the credentials, but does not start
+the external 9router server. The server must already be running.
+
+If your file is stored elsewhere, pass its path on launch:
+
+```bash
+ros2 launch robot_ui kiosk.launch.py \
+  llm_env_file:=/absolute/path/to/llm.local.env
+```
+
+Configuration is parsed as plain data, **not executed as shell code**. Shell
+expansion and commands inside the file are intentionally unsupported. No
+credentials are printed in the Kiosk logs.
 
 Check 9router access (without printing the key):
 
@@ -114,8 +126,8 @@ ros2 launch robot_ui kiosk.launch.py \
 ```
 
 The Chat screen is available from the same kiosk process. For a complete
-chatbot test, start 9router first, export the three `LLM_*` variables above,
-then launch the kiosk and send a message from the Chat screen.
+chatbot test, ensure 9router is running, launch the Kiosk (which reads the
+configuration file automatically), and send a message from the Chat screen.
 
 ## Run Fullscreen with Gazebo
 

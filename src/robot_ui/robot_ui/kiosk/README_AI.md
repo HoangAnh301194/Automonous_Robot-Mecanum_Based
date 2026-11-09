@@ -96,3 +96,23 @@ time and is not guaranteed to render document citations as clickable links.
 To make these documents available, pull the feature branch, rebuild robot_ui,
 and restart the kiosk process. No 9router endpoint or model configuration
 changes are required solely for updating the local RAG corpus.
+
+## Automatic 9router environment loading
+
+The ROS 2 Kiosk entry point loads the existing untracked
+`~/ros2_ws/config/llm.local.env` before importing the chatbot, so launching
+`ros2 launch robot_ui kiosk.launch.py` no longer requires sourcing the file
+in the terminal. You may override the file path using
+`llm_env_file:=/absolute/path/to/llm.local.env` or the
+`KIOSK_LLM_ENV_FILE` environment variable.
+
+Supported entries: `LLM_BASE_URL=`, `LLM_API_KEY=`, and `LLM_MODEL=`,
+with optional `export` prefix, quotes and comments. Parsing is data-only;
+shell commands and environment substitutions are NOT evaluated. Values in the
+file overwrite inherited values for these three keys. The file should be kept
+outside Git and protected with `chmod 600 ~/ros2_ws/config/llm.local.env`.
+
+Change the file and restart the Kiosk to use the updated endpoint, API key
+or model. The application loads configuration but does not manage the
+9router server itself. If the file is missing or malformed, a warning is
+printed without revealing the key; the non-chat Kiosk can still open.

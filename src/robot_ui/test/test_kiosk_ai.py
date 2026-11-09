@@ -1,5 +1,6 @@
 """Pure Python unit tests for kiosk AI. No ROS, Qt, GPU or external API needed."""
 import json
+import os
 import tempfile
 import threading
 import time
@@ -9,6 +10,7 @@ from unittest.mock import patch
 
 from robot_ui.kiosk.knowledge import KnowledgeRetriever, chunk_document
 from robot_ui.kiosk.llm_client import LLMWorker, call_llm, format_robot_context
+from robot_ui.kiosk.llm_env import load_llm_env_file
 
 
 class FakeEncoder:
@@ -28,6 +30,50 @@ class FakeResponse:
 
 
 class TestKioskAI(unittest.TestCase):
+    def test_9router_env_file_autoload_and_override(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "llm.local.env")
+            path.write_text(
+                "# 9router configuration\\n"
+                "export LLM_BASE_URL='http://127.0.0.1:20128/v1'\\n"
+                'LLM_MODEL="my-model" # inline comment\\n'
+                "LLM_API_KEY='test#key'\\n",
+                encoding="utf-8",
+            )
+            environ = {
+                "LLM_MODEL": "previous-model",
+                "LLM_API_KEY": "previous-key",
+                "UNRELATED": "unchanged",
+            }
+            values = load_llm_env_file(path, environ=environ)
+            self.assertEqual(values["LLM_BASE_URL"], "http://127.0.0.1:20128/v1")
+            self.assertEqual(environ["LLM_MODEL"], "my-model")
+            self.assertEqual(environ["LLM_API_KEY"], "test#key")
+            self.assertEqual(environ["UNRELATED"], "unchanged")
+            path.write_text("LLM_MODEL=updated-model\\n", encoding="utf-8")
+            load_llm_env_file(path, environ=environ)
+            self.assertEqual(environ["LLM_MODEL"], "updated-model")
+
+    def test_9router_env_file_rejects_shell_execution(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "llm.local.env")
+            path.write_text("LLM_API_KEY=$(echo_secret)\\n", encoding="utf-8")
+            before = {"LLM_API_KEY": "original"}
+            with self.assertRaises(ValueError):
+                load_llm_env_file(path, environ=before)
+            self.assertEqual(before["LLM_API_KEY"], "original")
+
+    def test_9router_env_file_missing_and_malformed_is_atomic(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder, "llm.local.env")
+            with self.assertRaises(FileNotFoundError):
+                load_llm_env_file(path, environ={})
+            path.write_text("LLM_MODEL=test\\nLLM_API_KEY='unterminated\\n", encoding="utf-8")
+            environment = {"LLM_MODEL": "old-model"}
+            with self.assertRaises(ValueError):
+                load_llm_env_file(path, environ=environment)
+            self.assertEqual(environment["LLM_MODEL"], "old-model")
+
     def test_chunking_with_overlap(self):
         text = " ".join(["Robot co cam bien va pin."] * 90)
         chunks = chunk_document(text, "robot.txt", size=170, overlap=30)
