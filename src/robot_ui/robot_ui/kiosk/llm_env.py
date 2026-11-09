@@ -52,7 +52,7 @@ def load_llm_env_file(
         if len(values) > 1:
             raise ValueError(f"Multiple values at line {number} ({key})")
         value = values[0] if values else ""
-        if "$(" in value or "\`" in value or "\${" in value or "$" in value:
+        if "$" in value or chr(96) in value:
             raise ValueError(f"Shell expansion not supported at line {number} ({key})")
         parsed[key] = value
 
