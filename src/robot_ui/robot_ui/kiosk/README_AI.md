@@ -55,3 +55,27 @@ LLM request and verify that no earlier reply leaks into the new session.
 Streaming token output, citations rendered as clickable UI links, persistent
 vector indexing, reranking, semantic evaluation dataset, speech I/O and LLM
 tool-based navigation. Do not use LLM text as a robot command.
+
+
+## Local PTIT / Faculty of Electronics Engineering 1 knowledge (09 Nov 2026)
+
+The knowledge directory now contains these *additional* offline text documents:
+- rag_docs/ptit_hanoi_overview.txt: PTIT history, Hanoi campuses and official portals
+- rag_docs/fee1_overview_contact.txt: Faculty introduction, A2/Floor 9 location, contacts
+- rag_docs/fee1_programs_departments.txt: majors, departments and leadership
+- rag_docs/fee1_labs_research_students.txt: laboratories, research areas, electronics club
+- rag_docs/fee1_quick_faq.txt: quick answers for recurring visitor questions
+
+Each file includes its original PTIT/SEA website URLs and a verification date.
+The faculty is the focus; the PTIT overview serves as background. When official
+pages disagree on contact methods, the texts preserve both and request checking
+the most current source. Do not present changing admissions/people/office-hours
+information as a live lookup.
+
+These files match the existing setup.py package_data pattern
+kiosk/rag_docs/*.txt; no new Python dependency is needed. KnowledgeRetriever
+builds its local index once per kiosk process; after git pull and colcon build,
+restart the Kiosk process so new documents are included. Optionally configure
+RAG_EMBEDDING_MODEL to a local multilingual embedding model; otherwise keyword
+retrieval works automatically. The UI cannot browse these source URLs at run
+time and is not guaranteed to render document citations as clickable links.
