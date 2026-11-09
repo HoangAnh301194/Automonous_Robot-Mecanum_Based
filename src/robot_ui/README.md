@@ -398,3 +398,10 @@ them:
 colcon build --symlink-install --packages-select robot_ui
 source install/setup.bash
 ```
+
+
+## Kiosk AI upgrades (feature/main_interface)
+
+For visitor-scoped conversation memory, inactivity reset, ROS telemetry freshness,
+chunked knowledge search, optional local embeddings, and test commands, see
+[the Kiosk AI guide](robot_ui/kiosk/README_AI.md).
