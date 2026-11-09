@@ -51,6 +51,24 @@ class TestKioskAI(unittest.TestCase):
             retriever = KnowledgeRetriever(Path(folder), embedder=FakeEncoder())
             self.assertEqual(retriever.retrieve("Cảm biến", top_k=1)[0].source, "sensors.txt")
 
+    def test_ptit_faculty_local_corpus(self):
+        """The checked-in PTIT/FEE1 knowledge is discoverable without embeddings."""
+        docs = Path(__file__).resolve().parents[1] / "robot_ui" / "kiosk" / "rag_docs"
+        expected = {
+            "ptit_hanoi_overview.txt",
+            "fee1_overview_contact.txt",
+            "fee1_programs_departments.txt",
+            "fee1_labs_research_students.txt",
+            "fee1_quick_faq.txt",
+        }
+        self.assertTrue(all((docs / filename).is_file() for filename in expected))
+        retriever = KnowledgeRetriever(docs, embedding_model="")
+        labs = retriever.retrieve("Lab Rạng Đông phòng 402 A3", top_k=4)
+        self.assertIn("fee1_labs_research_students.txt", [item.source for item in labs])
+        courses = retriever.retrieve("Kỹ thuật Điều khiển và Tự động hóa 7520216", top_k=4)
+        self.assertIn("fee1_programs_departments.txt", [item.source for item in courses])
+        self.assertIn("Nguồn:", retriever.context("Khoa Kỹ thuật Điện tử 1 ở đâu?"))
+
     def test_stale_or_missing_robot_state(self):
         fresh = format_robot_context({"battery_percent": 42}, 98, now=100, max_age=4)
         stale = format_robot_context({"battery_percent": 42}, 90, now=100, max_age=4)
