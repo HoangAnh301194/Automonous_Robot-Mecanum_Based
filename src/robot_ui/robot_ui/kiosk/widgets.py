@@ -706,6 +706,16 @@ class ChatPage(QWidget):
     # Public API – được gọi từ KioskWindow để wire LLM
     # ------------------------------------------------------------------
 
+    def reset_conversation(self) -> None:
+        # Keep the trailing stretch and remove all visible message widgets.
+        while self._messages_layout.count() > 1:
+            item = self._messages_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.set_busy(False)
+        self.input.clear()
+        self._add_message("Souta", "Xin chào! Tôi là Souta. Tôi có thể giúp gì cho bạn?")
+
     def set_llm_status(self, status: str) -> None:
         """Cập nhật label trạng thái LLM ở header."""
         self._llm_status_label.setText(status)

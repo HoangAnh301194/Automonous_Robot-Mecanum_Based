@@ -1,3 +1,5 @@
+import os
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -8,6 +10,7 @@ def generate_launch_description() -> LaunchDescription:
     windowed = LaunchConfiguration("windowed")
     hide_cursor = LaunchConfiguration("hide_cursor")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    llm_env_file = LaunchConfiguration("llm_env_file")
 
     return LaunchDescription(
         [
@@ -26,6 +29,13 @@ def generate_launch_description() -> LaunchDescription:
                 default_value="false",
                 description="Use the Gazebo simulation clock.",
             ),
+            DeclareLaunchArgument(
+                "llm_env_file",
+                default_value=os.environ.get(
+                    "KIOSK_LLM_ENV_FILE", "~/ros2_ws/config/llm.local.env"
+                ),
+                description="Local 9router config file loaded by the kiosk process.",
+            ),
             Node(
                 package="robot_ui",
                 executable="robot_ui_kiosk",
@@ -36,6 +46,8 @@ def generate_launch_description() -> LaunchDescription:
                     windowed,
                     "--hide-cursor",
                     hide_cursor,
+                    "--llm-env-file",
+                    llm_env_file,
                 ],
                 parameters=[{"use_sim_time": use_sim_time}],
             ),

@@ -1,0 +1,28 @@
+KHOA KỸ THUẬT ĐIỆN TỬ 1 — LAB, NGHIÊN CỨU, SINH VIÊN VÀ CLB
+Kiểm tra nguồn: 09/11/2026. Từ khóa: Khoa Kỹ thuật Điện tử 1, FEE1, KTĐT1, lab, robot, nghiên cứu, EC, CLB Điện tử PTIT.
+Nguồn chính thức:
+https://sea.ptit.edu.vn/phong-lab/
+https://sea.ptit.edu.vn/nghien-cuu/huong-nghien-cuu/
+https://sea.ptit.edu.vn/gioi-thieu/gioi-thieu-chung/
+https://sea.ptit.edu.vn/sinh-vien/lien-chi-doan-clb/clb-dien-tu-ptit/
+
+CÁC PHÒNG LAB VÀ NHÓM NGHIÊN CỨU KHOA KỸ THUẬT ĐIỆN TỬ 1:
+- Lab Tự động hóa và Robot: nghiên cứu tự động hóa và robotics; trang Khoa ghi trưởng nhóm TS. Nguyễn Thế Vĩnh, địa điểm liên quan tầng 9 khu vực Khoa, 96A Trần Phú, Hà Đông.
+- Lab Phương tiện tự hành và Hệ thống thông minh: nghiên cứu phương tiện tự hành không người lái, UAV, robot thông minh, robot STEM; trang Khoa ghi trưởng nhóm TS. Phạm Hoàng Anh, địa điểm tầng 9 khu vực Khoa.
+- Lab Công nghệ bán dẫn: nghiên cứu lĩnh vực bán dẫn; trang Khoa ghi trưởng nhóm TS. Phan Thị Lan.
+- Lab nghiên cứu công nghệ điều khiển và giám sát vật thể bay trong không gian: trang Khoa ghi trưởng nhóm TS. Nguyễn Đức Việt.
+- Lab Rạng Đông: trang Khoa ghi phòng 402, nhà A3, 96A Trần Phú, Hà Đông. Hướng nghiên cứu gồm hệ thống nhúng, IoT, FPGA, Edge AI và xử lý tín hiệu số; trưởng nhóm TS. Nguyễn Ngọc Minh.
+- Lab nghiên cứu Hệ thống nhúng và IoT: lĩnh vực hệ thống nhúng, IoT, thiết kế phần cứng, vi mạch số; trang Khoa ghi địa điểm phòng 105, ký túc xá B5.
+- Trang giới thiệu chung của Khoa cũng nhắc đến lab Thiết kế điện tử tự động (EDA) và lab Điện tử và Điều khiển thông minh (EIC).
+Đây là thông tin công khai từ trang Khoa, không phải bản đồ điều hướng chính xác tới cửa phòng.
+
+HOẠT ĐỘNG NGHIÊN CỨU:
+Các hướng trọng tâm: điện tử và hệ thống nhúng; vi mạch; điều khiển thông minh; robot tự hành và UAV. Khoa công bố các hướng nghiên cứu, đề tài và bài báo trên website Khoa. Không khẳng định tất cả nhóm đang tuyển thành viên hoặc chấp nhận khách tham quan nếu chưa có thông báo.
+
+CLB ĐIỆN TỬ PTIT (EC):
+Trang Khoa giới thiệu CLB Điện tử PTIT được thành lập năm 2018. CLB là cộng đồng sinh viên quan tâm điện tử, lập trình nhúng, FPGA, thiết kế mạch và robot; có tham gia/tổ chức hoạt động kỹ thuật và cuộc thi như EC Challenge, lập trình robot, thiết kế điện tử. Website Khoa đặt liên kết CLB trong mục Sinh viên → Liên chi đoàn, CLB → CLB Điện tử PTIT.
+Trang tham khảo: https://sea.ptit.edu.vn/sinh-vien/lien-chi-doan-clb/clb-dien-tu-ptit/
+Không tự công bố tên ban chủ nhiệm hiện tại, giờ sinh hoạt, lệ phí hoặc điều kiện tuyển thành viên nếu không có thông báo mới.
+
+GỢI Ý CHO KHÁCH:
+Nếu muốn tìm hiểu lab, nghiên cứu, tham gia CLB hoặc gặp giảng viên, hãy liên hệ Khoa qua trang https://sea.ptit.edu.vn và làm theo hướng dẫn của đơn vị. Không suy đoán lịch mở cửa hay vị trí lối vào bên trong tòa nhà.

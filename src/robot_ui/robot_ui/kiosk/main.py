@@ -13,6 +13,7 @@ from rclpy.utilities import remove_ros_args
 
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
+from robot_ui.kiosk.llm_env import load_llm_env_file
 
 
 def boolean_argument(value: str | bool) -> bool:
@@ -44,6 +45,11 @@ def parse_args(arguments: list[str]) -> argparse.Namespace:
         default=False,
         help="Hide the mouse pointer for the deployed touchscreen.",
     )
+    parser.add_argument(
+        "--llm-env-file",
+        default=os.environ.get("KIOSK_LLM_ENV_FILE", "~/ros2_ws/config/llm.local.env"),
+        help="Local 9router settings file; read before importing the chatbot.",
+    )
     return parser.parse_args(arguments[1:])
 
 
@@ -51,6 +57,23 @@ def main(args: list[str] | None = None) -> int:
     raw_args = list(sys.argv if args is None else args)
     app_args = remove_ros_args(args=raw_args)
     options = parse_args(app_args)
+
+    # Must happen before importing KioskWindow -> llm_client, whose defaults
+    # are taken from the environment at module import time.
+    try:
+        loaded = load_llm_env_file(options.llm_env_file)
+        configured = bool(os.environ.get("LLM_API_KEY"))
+        print(
+            "[robot_ui] 9router config loaded from "
+            f"{os.path.expanduser(options.llm_env_file)} "
+            f"(URL/model loaded; API key {'configured' if configured else 'missing'})",
+            flush=True,
+        )
+        if not all(os.environ.get(key) for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")):
+            print("[robot_ui] Warning: some LLM settings are empty.", file=sys.stderr)
+    except (OSError, ValueError) as exc:
+        # The navigation UI may still be useful without 9router.
+        print(f"[robot_ui] Warning: 9router settings not loaded: {exc}", file=sys.stderr)
 
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
     qt_plugin_path = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "")

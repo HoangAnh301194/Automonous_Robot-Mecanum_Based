@@ -1,0 +1,28 @@
+name: Kiosk AI unit tests
+
+on:
+  push:
+    branches: [feature/main_interface]
+  pull_request:
+    paths:
+      - 'src/robot_ui/**'
+      - '.github/workflows/kiosk-ai.yml'
+
+jobs:
+  kiosk-ai:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Compile Kiosk entry point, ROS launch and 9router config loader
+        run: |
+          python3 -m compileall -q \
+            src/robot_ui/robot_ui/kiosk/main.py \
+            src/robot_ui/robot_ui/kiosk/llm_env.py \
+            src/robot_ui/launch/kiosk.launch.py
+      - name: Test pure-Python knowledge and session code
+        run: |
+          PYTHONPATH=src/robot_ui python3 -m unittest discover \
+            -s src/robot_ui/test -p 'test_kiosk_ai.py' -v

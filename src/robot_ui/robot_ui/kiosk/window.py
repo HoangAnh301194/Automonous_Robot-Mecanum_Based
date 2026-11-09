@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from typing import Any
+import os
+import time
 
-from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
-from PyQt5.QtWidgets import QMainWindow, QStackedWidget, QWidget
+from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.llm_client import LLMWorker
@@ -296,6 +298,12 @@ class KioskWindow(QMainWindow):
         self._navigation_status: dict[str, Any] = {}
         self._connected = False
         self._active_page = "home"
+        self._robot_status_received_at: float | None = None
+        try:
+            self._idle_timeout_seconds = max(30, int(os.getenv("KIOSK_IDLE_TIMEOUT_SECONDS", "180")))
+        except ValueError:
+            self._idle_timeout_seconds = 180
+        self._last_activity_at = time.monotonic()
 
         self.setWindowTitle("Robot Assistant")
         self.setMinimumSize(800, 480)
@@ -346,18 +354,15 @@ class KioskWindow(QMainWindow):
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         # LLM signals
-        signals.llm_response_ready.connect(self.chat_page.receive_response)
+        signals.llm_response_ready.connect(self._receive_llm_response)
         signals.llm_status_changed.connect(self.chat_page.set_llm_status)
 
         # LLM worker – thread-safe callbacks emit vào signals (an toàn với Qt)
-        def _on_llm_response(text: str) -> None:
-            signals.llm_response_ready.emit(text)
-            signals.llm_status_changed.emit("●  LLM: SẵN SÀNG")
+        def _on_llm_response(session_id: int, text: str) -> None:
+            signals.llm_response_ready.emit(session_id, text)
 
-        def _on_llm_error(err: str) -> None:
-            signals.llm_status_changed.emit("●  LLM: LỖI")
-            # emit qua signal để gọi receive_error trên main thread
-            signals.llm_response_ready.emit(f"⚠️ {err}")
+        def _on_llm_error(session_id: int, err: str) -> None:
+            signals.llm_response_ready.emit(session_id, f"⚠️ {err}")
 
         self._llm_worker = LLMWorker(
             on_response=_on_llm_response,
@@ -369,6 +374,11 @@ class KioskWindow(QMainWindow):
         self.home_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
         self.home_page.video.set_video(self.emotions.path("idle"))
         self.show_page("home")
+        # Application-level event filter captures touches/keys in child widgets.
+        QApplication.instance().installEventFilter(self)
+        self._session_timer = QTimer(self)
+        self._session_timer.timeout.connect(self._expire_idle_session)
+        self._session_timer.start(1000)
         QTimer.singleShot(800, self.ros_node.request_locations)
 
     def resizeEvent(self, event: Any) -> None:
@@ -410,6 +420,7 @@ class KioskWindow(QMainWindow):
 
     def _on_robot_status(self, status: dict[str, Any]) -> None:
         self._robot_status = status
+        self._robot_status_received_at = time.monotonic()
         self.home_page.set_robot_status(status)
         self.navigation_page.set_robot_status(status)
         self._update_emotion()
@@ -422,10 +433,36 @@ class KioskWindow(QMainWindow):
     def _on_chat_submitted(self, message: str) -> None:
         """Nhận tin nhắn từ ChatPage và gửi cho LLM worker."""
         self.signals.llm_status_changed.emit("●  LLM: ĐANG XỬ LÝ...")
-        sent = self._llm_worker.send(message, robot_status=self._robot_status)
+        sent = self._llm_worker.send(
+            message, robot_status=self._robot_status,
+            status_updated_at=self._robot_status_received_at,
+        )
         if not sent:
-            # Worker bận, trả lời ngay trên UI
-            self.signals.llm_response_ready.emit("⏳ Robot đang xử lý tin nhắn trước, vui lòng chờ giây lát.")
+            self.chat_page.receive_response("Robot đang xử lý một câu hỏi khác.")
+
+    def _receive_llm_response(self, session_id: int, response: str) -> None:
+        # A queued response from a prior visitor must never enter this session.
+        if session_id != self._llm_worker.session_id:
+            return
+        self.chat_page.receive_response(response)
+        self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
+
+    def eventFilter(self, watched: Any, event: QEvent) -> bool:
+        if event.type() in (
+            QEvent.MouseButtonPress, QEvent.KeyPress,
+            QEvent.TouchBegin, QEvent.Wheel,
+        ):
+            self._last_activity_at = time.monotonic()
+        return super().eventFilter(watched, event)
+
+    def _expire_idle_session(self) -> None:
+        if time.monotonic() - self._last_activity_at < self._idle_timeout_seconds:
+            return
+        self._last_activity_at = time.monotonic()
+        self._llm_worker.reset_session()
+        self.chat_page.reset_conversation()
+        self.signals.llm_status_changed.emit("LLM: ĐÃ LÀM MỚI PHIÊN")
+        self.show_page("home")
 
     def _update_emotion(self) -> None:
         if self._active_page != "home":
@@ -455,5 +492,7 @@ class KioskWindow(QMainWindow):
         super().keyPressEvent(event)
 
     def closeEvent(self, event: Any) -> None:
+        QApplication.instance().removeEventFilter(self)
+        self._llm_worker.reset_session()
         self.home_page.video.stop()
         super().closeEvent(event)
