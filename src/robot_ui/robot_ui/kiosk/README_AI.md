@@ -79,3 +79,20 @@ restart the Kiosk process so new documents are included. Optionally configure
 RAG_EMBEDDING_MODEL to a local multilingual embedding model; otherwise keyword
 retrieval works automatically. The UI cannot browse these source URLs at run
 time and is not guaranteed to render document citations as clickable links.
+
+
+## Lecturer knowledge: Dr. Hoang Son (checked 09 Nov 2026)
+- rag_docs/fee1_faculty_hoang_son.txt: verified lecturer profile, department,
+  doctoral bio (with a source inconsistency noted), teaching, research,
+  representative publications and 2026 ARL Cobot research role.
+- rag_docs/fee1_faculty_hoang_son_faq.txt: short visitor-facing answers,
+  including uncertainty about unverified lab leadership and live schedules.
+- Primary sources:
+  https://sea.ptit.edu.vn/ts-hoang-son/
+  https://sea.ptit.edu.vn/gioi-thieu/doi-ngu-giang-vien/
+  https://sea.ptit.edu.vn/gioi-thieu/co-cau-to-chuc/
+  https://sea.ptit.edu.vn/wp-content/uploads/sites/18/2026/04/ARL-Lab-profi.pdf
+
+To make these documents available, pull the feature branch, rebuild robot_ui,
+and restart the kiosk process. No 9router endpoint or model configuration
+changes are required solely for updating the local RAG corpus.

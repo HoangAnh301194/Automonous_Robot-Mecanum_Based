@@ -69,6 +69,26 @@ class TestKioskAI(unittest.TestCase):
         self.assertIn("fee1_programs_departments.txt", [item.source for item in courses])
         self.assertIn("Nguồn:", retriever.context("Khoa Kỹ thuật Điện tử 1 ở đâu?"))
 
+    def test_hoang_son_rag_profile_and_faq(self):
+        """Teacher facts are retrievable by lexical search without external models."""
+        docs = Path(__file__).resolve().parents[1] / "robot_ui" / "kiosk" / "rag_docs"
+        names = ("fee1_faculty_hoang_son.txt", "fee1_faculty_hoang_son_faq.txt")
+        self.assertTrue(all((docs / name).is_file() for name in names))
+        profile = (docs / names[0]).read_text(encoding="utf-8")
+        faq = (docs / names[1]).read_text(encoding="utf-8")
+        self.assertIn("https://sea.ptit.edu.vn/ts-hoang-son/", profile)
+        self.assertIn("hoangson@ptit.edu.vn", profile)
+        self.assertIn("Cobot", faq)
+        retriever = KnowledgeRetriever(docs, embedding_model="")
+        questions = [
+            "Thầy Hoàng Sơn nghiên cứu điều khiển Cobot phân tán?",
+            "TS. Hoàng Sơn dạy môn Robot công nghiệp không?",
+            "Hoàng Sơn bảo vệ tiến sĩ tại Đại học Tứ Xuyên năm nào?",
+        ]
+        for question in questions:
+            sources = [part.source for part in retriever.retrieve(question, top_k=6)]
+            self.assertTrue(any(name in sources for name in names), (question, sources))
+
     def test_stale_or_missing_robot_state(self):
         fresh = format_robot_context({"battery_percent": 42}, 98, now=100, max_age=4)
         stale = format_robot_context({"battery_percent": 42}, 90, now=100, max_age=4)

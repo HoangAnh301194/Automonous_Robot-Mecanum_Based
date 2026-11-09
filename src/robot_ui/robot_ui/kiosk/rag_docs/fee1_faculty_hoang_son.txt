@@ -1,0 +1,55 @@
+TS. HOÀNG SƠN — HỒ SƠ GIẢNG VIÊN KHOA KỸ THUẬT ĐIỆN TỬ 1, PTIT
+Tên dùng tìm kiếm: thầy Hoàng Sơn; Tiến sĩ Hoàng Sơn; TS. Hoàng Sơn; Dr. Hoang Son; Hoang Son PTIT.
+Kiểm chứng nguồn công khai ngày: 09/11/2026.
+Nguồn S1 — hồ sơ giảng viên chính thức: https://sea.ptit.edu.vn/ts-hoang-son/
+Nguồn S2 — danh sách giảng viên: https://sea.ptit.edu.vn/gioi-thieu/doi-ngu-giang-vien/
+Nguồn S3 — cơ cấu bộ môn: https://sea.ptit.edu.vn/gioi-thieu/co-cau-to-chuc/
+Nguồn S4 — tài liệu ARL Lab công khai năm 2026: https://sea.ptit.edu.vn/wp-content/uploads/sites/18/2026/04/ARL-Lab-profi.pdf
+
+[HO_SO_01 — DANH TÍNH VÀ ĐƠN VỊ]
+TS. Hoàng Sơn là giảng viên chính tại Khoa Kỹ thuật Điện tử 1, Học viện Công nghệ Bưu chính Viễn thông (PTIT). Theo cơ cấu tổ chức công khai, thầy thuộc Bộ môn Điều khiển và Tự động hóa. Không nhầm TS. Hoàng Sơn với TS. Dương Ngọc Sơn (giảng viên khác của Khoa).
+Nguồn: S1, S2, S3.
+
+[HO_SO_02 — HỌC VẤN]
+Theo đoạn tiểu sử trong hồ sơ giảng viên, TS. Hoàng Sơn bảo vệ luận án tiến sĩ ngành Tự động hóa tại Đại học Tứ Xuyên, Trung Quốc, năm 2016. Trang hồ sơ đồng thời có một dòng tiêu đề ghi "Tiến sĩ ... PTIT, 2024" không khớp với đoạn tiểu sử; khi được hỏi nơi và năm bảo vệ, nêu rõ "theo phần tiểu sử" là Đại học Tứ Xuyên, 2016, và khuyến nghị đối chiếu trực tiếp nếu cần chứng nhận chính thức.
+Nguồn: S1.
+
+[HO_SO_03 — HƯỚNG NGHIÊN CỨU]
+TS. Hoàng Sơn quan tâm khoa học robot, ứng dụng trí tuệ nhân tạo (AI) trong robot, dây chuyền tự động hóa sản xuất công nghiệp, cơ giới hóa và tự động hóa trong nông lâm nghiệp. Các bài báo và sản phẩm nghiên cứu công khai còn liên quan robot chữa cháy, robot cứu hộ, robot thu hoạch, điều khiển chuyển động và độ ổn định.
+Nguồn: S1.
+
+[HO_SO_04 — CÁC MÔN GIẢNG DẠY]
+Hồ sơ TS. Hoàng Sơn liệt kê các học phần: Robot công nghiệp; Cơ sở điều khiển tự động; Nhập môn điều khiển và tự động hóa; Xử lý ảnh; Điều khiển thủy lực – khí nén; Điều khiển logic và PLC. Danh sách là các môn được công bố trong hồ sơ, KHÔNG có nghĩa thầy chắc chắn dạy các môn đó trong học kỳ hiện tại.
+Nguồn: S1.
+
+[HO_SO_05 — HOẠT ĐỘNG KHOA HỌC VÀ HƯỚNG DẪN]
+Trang hồ sơ giảng viên công bố TS. Hoàng Sơn từng chủ nhiệm 01 nhiệm vụ khoa học công nghệ cấp quốc gia, là thành viên nghiên cứu chính của 04 nhiệm vụ cấp quốc gia và nhiều đề tài khác. Trang cũng ghi số lượng hướng dẫn học viên thạc sĩ 06 và nghiên cứu sinh 03, đây là số liệu tại thời điểm hồ sơ được đăng, không phải số liệu thời gian thực.
+Nguồn: S1.
+
+[HO_SO_06 — SẢN PHẨM ỨNG DỤNG]
+Theo giới thiệu chính thức, TS. Hoàng Sơn tham gia nghiên cứu những sản phẩm có ứng dụng thực tế tại Việt Nam như xe máy chữa cháy rừng, xe máy chữa cháy phố cổ và robot chữa cháy. Trang giảng viên cũng đề cập giải thưởng VIFOTEC năm 2013. Không tự suy ra thầy là tác giả duy nhất, chủ sở hữu độc quyền hay trưởng dự án của từng sản phẩm.
+Nguồn: S1.
+
+[HO_SO_07 — ARL LAB VÀ COBOT]
+Tài liệu giới thiệu ARL Lab do Khoa công bố năm 2026 liệt kê Dr. Hoang Son trong các thành viên; tại trang 13, tài liệu ghi TS. Hoàng Sơn CHỦ TRÌ hướng "nghiên cứu động lực học và điều khiển cho Cobot": động lực học robot cộng tác với người trong công nghiệp và điều khiển phân tán Cobot ứng dụng công nghiệp.
+Đây là vai trò chủ trì HƯỚNG NGHIÊN CỨU, không tự đồng nhất với chức danh Trưởng ARL Lab. Tài liệu ARL có mô tả địa điểm và tình trạng cơ sở vật chất chưa hoàn toàn nhất quán; không khẳng định thầy có văn phòng riêng ở tầng 9, nhà A2.
+Nguồn: S4, trang 13 (số trang in trên slide).
+
+[HO_SO_08 — CÔNG BỐ KHOA HỌC: ROBOT VÀ ĐIỀU KHIỂN]
+Các công trình tiêu biểu được hồ sơ Khoa liệt kê:
+1. "Building an Anti-Tip System for Robots Transporting People Up and Down the Stairs" — Engineering, Technology & Applied Science Research, 2025.
+2. "Research on the Overturning Phenomenon of Firefighting and Rescue Crawler Robots When Climbing Up and Down Stairs" — International Journal of Intelligent Robotics and Applications, 2024. Tiêu đề trên trang Khoa có lỗi chính tả tiếng Anh; đây là cách viết đã chuẩn hóa để tra cứu.
+3. "Event-Based Model-Free Sliding Mode Control for an Inspection Robot" — 2020; trang Khoa chưa mô tả rõ tên tạp chí ở mục trích dẫn này.
+4. "Dynamics and Motion Control of a Pineapple Harvesting Robotic System" — International Conference on Advanced Mechatronic Systems, 2020.
+Nguồn: S1; đây là danh sách tiêu biểu, không phải toàn bộ công bố của thầy.
+
+[HO_SO_09 — CÔNG BỐ KHÁC]
+Trang Khoa còn liệt kê công trình về dao động ngang giá đỡ trong dây chuyền cưa gỗ (Engineering Solid Mechanics, 2024), đánh giá tải nhận thức khi học CNC (International Journal of Mechanical Engineering Education, 2024), độ bám đường của xe máy cứu hỏa (Engineering Solid Mechanics, 2022), và thiết kế hệ thống tự động xén mép gỗ điều khiển PLC tại hội nghị GTSD 2022.
+Nguồn: S1.
+
+[HO_SO_10 — LIÊN HỆ]
+Email công tác công khai của TS. Hoàng Sơn: hoangson@ptit.edu.vn. Số điện thoại ghi trên hồ sơ giảng viên: 0868 147 686. Cách liên hệ chính thức khác là thông qua Khoa Kỹ thuật Điện tử 1 và trang https://sea.ptit.edu.vn/. Đây là thông tin công khai từ trang Khoa, nhưng có thể thay đổi theo thời gian; không cung cấp lịch cá nhân hoặc vị trí hiện thời của thầy.
+Nguồn: S1, S2.
+
+[LƯU Ý VỀ PHẠM VI KIẾN THỨC]
+Chỉ dùng dữ liệu đã được nguồn công khai hỗ trợ. Chưa xác minh độc lập chức danh "Trưởng OpenWorkShop LAB" hoặc người chỉ đạo chính thức của phòng lab này từ các nguồn S1–S4; nếu người dùng hỏi, nói "chưa có thông tin xác nhận trong nguồn chính thức đã kiểm tra", thay vì khẳng định hoặc phủ nhận. Không dự đoán lịch dạy, lịch gặp, tình trạng tuyển nghiên cứu sinh hay quan hệ riêng tư. Thông tin liên hệ và chức danh cần được kiểm tra lại trên website khoa.

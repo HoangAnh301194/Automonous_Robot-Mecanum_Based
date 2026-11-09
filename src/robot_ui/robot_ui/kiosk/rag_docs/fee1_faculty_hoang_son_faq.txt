@@ -1,0 +1,41 @@
+HỎI ĐÁP LOCAL RAG — TS. HOÀNG SƠN — KHOA KỸ THUẬT ĐIỆN TỬ 1, PTIT
+Kiểm chứng: 09/11/2026.
+Nguồn hồ sơ: https://sea.ptit.edu.vn/ts-hoang-son/
+Nguồn bộ môn: https://sea.ptit.edu.vn/gioi-thieu/co-cau-to-chuc/
+Nguồn ARL: https://sea.ptit.edu.vn/wp-content/uploads/sites/18/2026/04/ARL-Lab-profi.pdf
+
+Hỏi: Thầy Hoàng Sơn là ai? TS. Hoàng Sơn đang công tác ở đâu?
+Đáp: TS. Hoàng Sơn là giảng viên chính của Khoa Kỹ thuật Điện tử 1, PTIT, thuộc Bộ môn Điều khiển và Tự động hóa. Nguồn: hồ sơ giảng viên và cơ cấu tổ chức Khoa.
+
+Hỏi: Thầy Hoàng Sơn nghiên cứu về gì?
+Đáp: Các hướng công khai gồm khoa học robot, AI ứng dụng cho robot, tự động hóa dây chuyền công nghiệp, cơ giới hóa nông lâm nghiệp. Các công trình liên quan robot chữa cháy, robot thu hoạch, điều khiển chuyển động và ổn định robot. Nguồn: hồ sơ giảng viên.
+
+Hỏi: TS. Hoàng Sơn có nghiên cứu Cobot, robot cộng tác không?
+Đáp: Có. Theo tài liệu ARL Lab năm 2026, thầy chủ trì hướng nghiên cứu động lực học và điều khiển cho Cobot, gồm robot làm việc với con người trong công nghiệp và điều khiển phân tán. Nguồn: ARL Lab profile, trang 13.
+
+Hỏi: Thầy Hoàng Sơn là trưởng ARL Lab hoặc trưởng OpenWorkShop LAB à?
+Đáp: Nguồn ARL chỉ xác nhận thầy là thành viên và chủ trì hướng nghiên cứu Cobot; chưa xác nhận thầy giữ chức danh Trưởng ARL. Các nguồn đang có cũng chưa đủ để khẳng định chức danh Trưởng OpenWorkShop LAB. Nên hỏi trực tiếp Khoa để xác minh.
+
+Hỏi: Thầy Hoàng Sơn tốt nghiệp tiến sĩ ở đâu, năm bao nhiêu?
+Đáp: Theo phần tiểu sử trong hồ sơ Khoa, thầy bảo vệ tiến sĩ ngành Tự động hóa tại Đại học Tứ Xuyên, Trung Quốc, năm 2016. Trang hồ sơ cũng có dòng thông tin khác ghi năm 2024, nên cần xác nhận lại khi dùng làm giấy tờ học thuật.
+
+Hỏi: Thầy Hoàng Sơn dạy môn gì?
+Đáp: Theo hồ sơ Khoa, các học phần gồm Robot công nghiệp, Cơ sở điều khiển tự động, Nhập môn điều khiển và tự động hóa, Xử lý ảnh, Điều khiển thủy lực – khí nén, Điều khiển logic và PLC. Chưa có lịch giảng dạy theo học kỳ hiện tại.
+
+Hỏi: Thầy Hoàng Sơn có nghiên cứu Sliding Mode Control không?
+Đáp: Hồ sơ công bố có bài "Event-Based Model-Free Sliding Mode Control for an Inspection Robot" năm 2020. Có thể nói điều khiển trượt (SMC) xuất hiện trong công trình được Khoa liệt kê; không suy ra mọi đề tài hiện nay đều dùng SMC.
+
+Hỏi: Công trình nào của thầy Hoàng Sơn liên quan robot chữa cháy và cứu hộ?
+Đáp: Hồ sơ liệt kê công trình nghiên cứu hiện tượng lật của robot bánh xích chữa cháy, cứu hộ khi lên xuống cầu thang (2024); công trình chống lật cho robot chở người trên cầu thang (2025); và các sản phẩm robot chữa cháy ứng dụng tại Việt Nam.
+
+Hỏi: Thầy Hoàng Sơn có công trình về robot nông nghiệp không?
+Đáp: Có công trình "Dynamics and Motion Control of a Pineapple Harvesting Robotic System", hội nghị Advanced Mechatronic Systems, 2020. Trang Khoa còn nêu hướng cơ giới hóa và tự động hóa nông lâm nghiệp.
+
+Hỏi: Liên hệ thầy Hoàng Sơn qua đâu?
+Đáp: Email công tác công khai là hoangson@ptit.edu.vn, điện thoại do Khoa công bố là 0868 147 686. Để xác nhận thông tin mới nhất, xem https://sea.ptit.edu.vn/ts-hoang-son/.
+
+Hỏi: Thầy Hoàng Sơn hôm nay có ở lab hoặc đang nhận sinh viên nghiên cứu không?
+Đáp: Bộ dữ liệu local không có lịch theo thời gian thực và chưa xác minh thông báo tuyển nghiên cứu sinh hiện hành. Hãy liên hệ trực tiếp thầy hoặc Khoa, không suy đoán lịch cá nhân.
+
+Hỏi: Thầy Hoàng Sơn có phải TS. Dương Ngọc Sơn không?
+Đáp: Không. TS. Hoàng Sơn thuộc Bộ môn Điều khiển và Tự động hóa, còn TS. Dương Ngọc Sơn là giảng viên khác của Khoa. Nên phân biệt theo đầy đủ họ tên và hồ sơ chính thức.
