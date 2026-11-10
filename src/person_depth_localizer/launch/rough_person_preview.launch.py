@@ -44,7 +44,8 @@ def generate_launch_description():
             parameters=[{
                 'base_frame': LaunchConfiguration('base_frame'),
                 'map_frame': LaunchConfiguration('map_frame'),
-                'depth_frame_override': LaunchConfiguration('depth_frame'),
+                # Respect image.header.frame_id; wrong TF names must fail closed.
+                'depth_frame_override': '',
                 'rgb_width': ParameterValue('640', value_type=int),
                 'rgb_height': ParameterValue('480', value_type=int),
             }],
