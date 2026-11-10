@@ -30,6 +30,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install meshes
+install(
+  DIRECTORY meshes
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install Gazebo worlds
 install(
   DIRECTORY worlds

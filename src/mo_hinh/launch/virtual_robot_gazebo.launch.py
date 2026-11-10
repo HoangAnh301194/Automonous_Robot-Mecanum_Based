@@ -1,7 +1,7 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction, SetEnvironmentVariable
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction, AppendEnvironmentVariable, OpaqueFunction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import EnvironmentVariable, LaunchConfiguration
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -9,24 +9,31 @@ import os
 
 
 def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
+    for ws in ['robot_ws', 'office_robot_ws', 'ros2_ws']:
+        ws_src_path = os.path.expanduser(f'~/{ws}/src/{pkg_name}/{sub_dir}/{file_name}')
+        if os.path.exists(ws_src_path):
+            return ws_src_path
+
     try:
-        return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+        pkg_path = os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
+        if os.path.exists(pkg_path):
+            return pkg_path
     except Exception:
         pass
-    user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
-    if os.path.exists(user_src_path):
-        return user_src_path
-    return os.path.expanduser(f'~/ros2_ws/{sub_dir}/{file_name}')
+
+    return os.path.expanduser(f'~/robot_ws/src/{pkg_name}/{sub_dir}/{file_name}')
 
 
-def generate_launch_description():
+def launch_setup(context, *args, **kwargs):
     ros_gz_sim_share = get_package_share_directory('ros_gz_sim')
 
-    urdf_file = resolve_path('urdf', 'xe.urdf')
+    urdf_arg = context.perform_substitution(LaunchConfiguration('urdf_file'))
+    if os.path.isabs(urdf_arg) and os.path.exists(urdf_arg):
+        urdf_file = urdf_arg
+    else:
+        urdf_file = resolve_path('urdf', urdf_arg)
+
     default_world = resolve_path('worlds', 'map_a2.world')
-    worlds_dir = os.path.dirname(default_world)
-    workspace_root = os.environ.get('WS', os.path.expanduser('~/robot_ws'))
-    map_models_dir = os.path.join(workspace_root, 'my_map')
 
     with open(urdf_file, 'r', encoding='utf-8') as urdf:
         robot_description = urdf.read()
@@ -116,17 +123,53 @@ def generate_launch_description():
         output='screen'
     )
 
+    return [
+        robot_state_publisher_node,
+        gz_sim,
+        delayed_spawn,
+        unpause_service_node,
+        bridge,
+        laser_filter_node,
+    ]
+
+
+def generate_launch_description():
+    workspace_root = os.environ.get('WS', os.path.expanduser('~/robot_ws'))
+    map_models_dir = os.path.join(workspace_root, 'my_map')
+    default_world = resolve_path('worlds', 'map_a2.world')
+    worlds_dir = os.path.dirname(default_world)
+
+    office_models_dir = os.path.expanduser('~/office_robot_ws/src/mo_hinh/models')
+    try:
+        share_dir = get_package_share_directory('mo_hinh')
+        share_models_dir = os.path.join(share_dir, 'models')
+        share_worlds_dir = os.path.join(share_dir, 'worlds')
+        share_parent = os.path.dirname(share_dir)
+    except Exception:
+        share_models_dir = office_models_dir
+        share_worlds_dir = worlds_dir
+        share_parent = os.path.join(workspace_root, 'install', 'mo_hinh', 'share')
+
+    robot_ws_src = os.path.expanduser('~/robot_ws/src')
+    office_ws_src = os.path.expanduser('~/office_robot_ws/src')
+    robot_worlds = os.path.expanduser('~/robot_ws/src/mo_hinh/worlds')
+    office_worlds = os.path.expanduser('~/office_robot_ws/src/mo_hinh/worlds')
+
+    all_paths = f"{map_models_dir}:{office_models_dir}:{share_models_dir}:{worlds_dir}:{share_worlds_dir}:{robot_worlds}:{office_worlds}:{share_parent}:{robot_ws_src}:{office_ws_src}"
+
+    gz_resource_env = AppendEnvironmentVariable(
+        name='GZ_SIM_RESOURCE_PATH',
+        value=all_paths
+    )
+    ign_resource_env = AppendEnvironmentVariable(
+        name='IGN_GAZEBO_RESOURCE_PATH',
+        value=all_paths
+    )
+
     return LaunchDescription([
-        SetEnvironmentVariable(
-            'GZ_SIM_RESOURCE_PATH',
-            [map_models_dir, os.pathsep, worlds_dir, os.pathsep,
-             EnvironmentVariable('GZ_SIM_RESOURCE_PATH', default_value='')],
-        ),
-        SetEnvironmentVariable(
-            'IGN_GAZEBO_RESOURCE_PATH',
-            [map_models_dir, os.pathsep, worlds_dir, os.pathsep,
-             EnvironmentVariable('IGN_GAZEBO_RESOURCE_PATH', default_value='')],
-        ),
+        gz_resource_env,
+        ign_resource_env,
+        DeclareLaunchArgument('urdf_file', default_value='xe.urdf', description='URDF file name or path'),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('world', default_value=default_world),
         DeclareLaunchArgument('x_pose', default_value='-2.0'),
@@ -134,10 +177,5 @@ def generate_launch_description():
         DeclareLaunchArgument('z_pose', default_value='0.10'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
 
-        robot_state_publisher_node,
-        gz_sim,
-        delayed_spawn,
-        unpause_service_node,
-        bridge,
-        laser_filter_node,
+        OpaqueFunction(function=launch_setup)
     ])

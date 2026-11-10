@@ -1,0 +1,378 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="robot_URDF.SLDASM">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.221410511244576 0.213001695317811 0.0353870595177748"
+        rpy="0 0 0" />
+      <mass
+        value="1.25495204933382" />
+      <inertia
+        ixx="0.0204204507187595"
+        ixy="1.1493563950929E-06"
+        ixz="0.0013146649430653"
+        iyy="0.0297599172739004"
+        iyz="1.673289518977E-08"
+        izz="0.0493374014049096" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="caster_right"
+    type="continuous">
+    <origin
+      xyz="-0.19548 -0.213 -0.026192"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_right_Link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="laser_Link">
+    <inertial>
+      <origin
+        xyz="0.011792 -0.00036789 -0.035501"
+        rpy="0 0 0" />
+      <mass
+        value="0.094104" />
+      <inertia
+        ixx="2.7909E-05"
+        ixy="-5.2518E-08"
+        ixz="-3.3534E-07"
+        iyy="4.4353E-05"
+        iyz="2.4873E-08"
+        izz="6.9475E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/laser_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/laser_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="laser"
+    type="fixed">
+    <origin
+      xyz="-0.07209 0.21422 0.24949"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="laser_Link" />
+    <axis
+      xyz="0 0 0" />
+  </joint>
+  <link
+    name="wheel_left_link">
+    <inertial>
+      <origin
+        xyz="-5.0984E-06 -0.033015 7.7331E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.79711" />
+      <inertia
+        ixx="0.0016716"
+        ixy="3.0102E-08"
+        ixz="-3.8937E-08"
+        iyy="0.0030919"
+        iyz="1.8966E-07"
+        izz="0.0016716" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/wheel_left_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/wheel_left_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="left"
+    type="continuous">
+    <origin
+      xyz="0.18805 0.4664 0.055472"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="wheel_left_link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="wheel_right_link">
+    <inertial>
+      <origin
+        xyz="5.0984E-06 0.033015 7.7331E-06"
+        rpy="0 0 0" />
+      <mass
+        value="0.79711" />
+      <inertia
+        ixx="0.0016716"
+        ixy="3.0102E-08"
+        ixz="3.8937E-08"
+        iyy="0.0030919"
+        iyz="-1.8966E-07"
+        izz="0.0016716" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/wheel_right_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/wheel_right_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="right"
+    type="continuous">
+    <origin
+      xyz="0.18805 -0.0404 0.055472"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="wheel_right_link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="caster_front_Link">
+    <inertial>
+      <origin
+        xyz="-0.0051384 -0.019049 0.0083478"
+        rpy="0 0 0" />
+      <mass
+        value="0.06026" />
+      <inertia
+        ixx="2.3601E-05"
+        ixy="1.4688E-08"
+        ixz="7.1694E-06"
+        iyy="3.2253E-05"
+        iyz="-2.4004E-08"
+        izz="1.8571E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_front_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_front_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="front"
+    type="continuous">
+    <origin
+      xyz="0.46183 0.232 -0.0023223"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_front_Link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="caster_left_link">
+    <inertial>
+      <origin
+        xyz="-0.0080178 -0.019209 0.06248"
+        rpy="0 0 0" />
+      <mass
+        value="0.12754" />
+      <inertia
+        ixx="6.4519E-05"
+        ixy="1.3465E-08"
+        ixz="7.1762E-06"
+        iyy="7.2379E-05"
+        iyz="-2.3834E-08"
+        izz="3.9114E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_left_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_left_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="caster_left"
+    type="continuous">
+    <origin
+      xyz="0 0.42198 -3.3809E-05"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_left_link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+  <link
+    name="caster_right_Link">
+    <inertial>
+      <origin
+        xyz="-0.0080095 0.022791 0.062472"
+        rpy="0 0 0" />
+      <mass
+        value="0.12754" />
+      <inertia
+        ixx="6.4519E-05"
+        ixy="1.3465E-08"
+        ixz="7.1762E-06"
+        iyy="7.2379E-05"
+        iyz="-2.3834E-08"
+        izz="3.9114E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_right_Link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.75294 0.75294 0.75294 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://robot_URDF.SLDASM/meshes/caster_right_Link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="caster_right"
+    type="continuous">
+    <origin
+      xyz="0 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="caster_right_Link" />
+    <axis
+      xyz="0 1 0" />
+  </joint>
+</robot>
