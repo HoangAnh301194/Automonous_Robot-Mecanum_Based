@@ -9,12 +9,17 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(action_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/RobotStatus.msg"
   "msg/WaterStatus.msg"
   "msg/NavigationStatus.msg"
   "msg/CustomerStatus.msg"
+  "msg/TrackedPerson.msg"
+  "msg/TrackedPersonArray.msg"
   "srv/SaveLocation.srv"
   "srv/GetLocation.srv"
   "srv/DeleteLocation.srv"
@@ -25,17 +30,12 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetRoute.srv"
   "action/Patrol.action"
   "action/DirectGo.action"
-  DEPENDENCIES action_msgs
+  DEPENDENCIES action_msgs std_msgs geometry_msgs builtin_interfaces
 )
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
   set(ament_cmake_copyright_FOUND TRUE)
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
 endif()
