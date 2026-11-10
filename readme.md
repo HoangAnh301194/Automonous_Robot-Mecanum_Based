@@ -365,36 +365,12 @@ All image subscribers in this AI pipeline must use
 the UVC camera is the intended physical device: verify the
 `ai_video_device` USB-by-path mapping if the image looks like Rear RGB.
 
-The web Vision dashboard monitors these camera information topics:
-`/ai_camera/color/camera_info`, `/front_camera/depth/camera_info`,
-and `/rear_camera/depth/camera_info`.
 
 
-### 6.8 Refresh web Vision dashboard assets (optional)
-
-Only required when using the web dashboard at port 8000, not for
-the camera/YOLO/RTMPose runtime:
-
-```bash
-cd ~/ros2_ws/src/robot_ui/frontend
-npm ci
-npm run build
-cd ~/ros2_ws
-colcon build --symlink-install --packages-select robot_ui
-source ~/ros2_ws/install/setup.bash
-```
-
-Requires Node.js 20.19+ as described in the UI README. The updated Vision
-screen distinguishes AI RGB, Front Depth and Rear Depth CameraInfo topics.
-Simply building the Python ROS package without compiling the React frontend
-may leave an older web page visible.
 
 ## 7) Robot UI
 
-The repository provides two UI modes:
-
-- **Native touchscreen kiosk**: Home, Navigation, and Chat/LLM screens.
-- **Web diagnostics/dashboard**: browser-based monitoring and diagnostics.
+The repository provides one **native PyQt5 touchscreen kiosk**, with Home, Navigation, and Chat/LLM screens.
 
 ### 7.1 Install UI Dependencies
 
@@ -562,28 +538,8 @@ Terminal 3: Robot backend
 Terminal 4: Robot UI
 ~~~
 
-### 7.6 Run the Web Diagnostics UI
 
-The web UI is separate from the native kiosk:
-
-~~~bash
-source /opt/ros/humble/setup.bash
-source "$WS/install/setup.bash"
-
-ros2 launch robot_ui robot_ui.launch.py
-~~~
-
-By default the server binds to:
-
-~~~text
-0.0.0.0:8000
-~~~
-
-The current web configuration is primarily for monitoring and diagnostics.
-Navigation controls, process controls, and teleoperation are disabled in
-src/robot_ui/config/robot_ui.yaml.
-
-### 7.7 Configure Chat / LLM / RAG — use saved 9router settings
+### 7.6 Configure Chat / LLM / RAG — use saved 9router settings
 
 The native kiosk contains the LLM client, but does **not** start the 9router
 service. 9router must already be running and reachable.
@@ -634,7 +590,7 @@ must point to that host rather than `localhost`.
 Local RAG documents: `src/robot_ui/robot_ui/kiosk/rag_docs/`.
 Rebuild `robot_ui` after modifying Python code or RAG documents.
 
-### 7.8 ROS Interfaces Used by the Native UI
+### 7.7 ROS Interfaces Used by the Native UI
 
 The kiosk subscribes to:
 

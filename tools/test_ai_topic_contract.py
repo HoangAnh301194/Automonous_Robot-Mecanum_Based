@@ -67,22 +67,24 @@ class AITopicContractTests(unittest.TestCase):
         self.assertNotIn("rm -rf /dev/shm", text)
         self.assertNotIn("astra_pro.launch.xml", text)
 
-    def test_ui_monitors_correct_three_camera_info_topics(self):
-        files = (
-            "src/robot_ui/config/robot_ui.yaml",
-            "src/robot_ui/robot_ui/config.py",
-            "src/robot_ui/frontend/src/pages/VisionPage.tsx",
-        )
-        for path in files:
-            text = source(path)
-            with self.subTest(path=path):
-                self.assertIn("/ai_camera/color/camera_info", text)
-                self.assertIn("/front_camera/depth/camera_info", text)
-                self.assertIn("/rear_camera/depth/camera_info", text)
-                self.assertNotIn("/camera/color/camera_info", text)
-        bridge = source("src/robot_ui/robot_ui/ros_bridge.py")
-        self.assertIn('self._topics["camera_rear_depth_info"]', bridge)
-        self.assertIn("self._on_rear_depth_camera_info", bridge)
+    def test_native_kiosk_entrypoint_and_ros_interfaces(self):
+        setup = source("src/robot_ui/setup.py")
+        launch = source("src/robot_ui/launch/kiosk.launch.py")
+        ros_node = source("src/robot_ui/robot_ui/kiosk/ros_node.py")
+
+        self.assertIn("robot_ui_kiosk = robot_ui.kiosk.main:main", setup)
+        self.assertNotIn("robot_ui_server", setup)
+        self.assertIn('executable="robot_ui_kiosk"', launch)
+        for topic in (
+            "/robot_status",
+            "/navigation/status",
+            "/map",
+            "/amcl_pose",
+            "/odom",
+            "/plan",
+        ):
+            with self.subTest(topic=topic):
+                self.assertIn(f'"{topic}"', ros_node)
 
 
 if __name__ == "__main__":
