@@ -1,6 +1,6 @@
 """Launch three Astra Pro cameras bound by their OpenNI hardware serials.
 
-Front/Rear Depth use astra_camera with serial_number. The AI RGB UVC stream
+Front/Rear/AI Depth use astra_camera with serial_number. The AI RGB UVC stream
 is resolved from ai_serial via the Depth USB device and its internal hub.
 Ambiguous or missing physical device identity aborts startup (no guessing).
 """
@@ -37,7 +37,7 @@ def generate_launch_description():
                     LaunchConfiguration(serial_arg), value_type=str
                 ),
                 # Number of *Astra driver processes* in this launch.
-                # The AI RGB interface is owned by usb_cam, not Astra.
+                # RGB AI is managed by usb_cam separately.
                 'device_num': ParameterValue(
                     LaunchConfiguration('device_num'), value_type=int
                 ),
@@ -143,11 +143,25 @@ def generate_launch_description():
                                  'rear_depth_fps', 'rear_depth_width', 'rear_depth_height'),
                 ],
             ),
-            TimerAction(period=4.0, actions=ai_actions) if start_ai
+            TimerAction(
+                period=4.0,
+                actions=[
+                    depth_camera('ai_camera', 'ai_serial', 'enable_ai_depth',
+                                 'ai_depth_fps', 'ai_depth_width', 'ai_depth_height'),
+                ],
+            ) if start_ai else LogInfo(msg='[three_astra] AI camera disabled'),
+            TimerAction(period=6.0, actions=ai_actions) if start_ai
             else LogInfo(msg='[three_astra] AI RGB disabled'),
         ]
 
     return LaunchDescription([
+        # AI Depth is a separate OpenNI stream from the UVC RGB image.
+        # Depth and RGB pixels are NOT assumed registered.
+        DeclareLaunchArgument('enable_ai_depth', default_value='true'),
+        DeclareLaunchArgument('ai_depth_width', default_value='640'),
+        DeclareLaunchArgument('ai_depth_height', default_value='480'),
+        DeclareLaunchArgument('ai_depth_fps', default_value='15'),
+
         # AI RGB Camera parameters
         DeclareLaunchArgument(
             'ai_color_width', default_value='640',
@@ -204,8 +218,8 @@ def generate_launch_description():
 
         # System arguments
         DeclareLaunchArgument(
-            'device_num', default_value='2',
-            description='Number of Astra Depth driver nodes (default: 2).',
+            'device_num', default_value='3',
+            description='Number of Astra Depth driver nodes (default: 3).',
         ),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_front', default_value='true'),
