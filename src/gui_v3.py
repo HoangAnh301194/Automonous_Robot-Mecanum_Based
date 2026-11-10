@@ -1173,8 +1173,7 @@ class MainWindow(QWidget):
 
     def is_sim_mode(self): return self.rb_sim.isChecked()
     def ros_prefix(self):
-        nav2_plugins_lib = os.path.join(WS_ROOT, "install", "nav2_custom_plugins", "lib")
-        return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && export LD_LIBRARY_PATH='{nav2_plugins_lib}':$LD_LIBRARY_PATH && "
+        return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
     def get_selected_odom_source(self): return self.cmb_odom_source.currentData() or "esp"
     def get_selected_odom_topic(self): return "/odom"
     def on_odom_source_changed(self):
