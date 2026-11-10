@@ -4,6 +4,7 @@ from launch import LaunchDescription, LaunchContext
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch.conditions import IfCondition
 
 
@@ -34,6 +35,19 @@ def generate_launch_description():
             "tracker",
             default_value="bytetrack.yaml",
             description="Tracker name or path",
+        )
+
+        # Original RGB frame dimensions for detection-only ByteTrack.
+        # These are NOT the TensorRT/YOLO imgsz_height/imgsz_width values.
+        tracking_image_width = LaunchConfiguration("tracking_image_width")
+        tracking_image_width_cmd = DeclareLaunchArgument(
+            "tracking_image_width", default_value="640",
+            description="Original AI RGB width for ByteTrack bbox coordinates",
+        )
+        tracking_image_height = LaunchConfiguration("tracking_image_height")
+        tracking_image_height_cmd = DeclareLaunchArgument(
+            "tracking_image_height", default_value="480",
+            description="Original AI RGB height for ByteTrack bbox coordinates",
         )
 
         device = LaunchConfiguration("device")
@@ -261,7 +275,12 @@ def generate_launch_description():
             executable="tracking_node",
             name="tracking_node",
             namespace=namespace,
-            parameters=[{"tracker": tracker, "image_reliability": image_reliability}],
+            parameters=[{
+                "tracker": tracker,
+                "image_reliability": image_reliability,
+                "image_width": ParameterValue(tracking_image_width, value_type=int),
+                "image_height": ParameterValue(tracking_image_height, value_type=int),
+            }],
             remappings=[("image_raw", input_image_topic)],
             condition=IfCondition(PythonExpression([str(use_tracking)])),
         )
@@ -304,6 +323,8 @@ def generate_launch_description():
             model_type_cmd,
             model_cmd,
             tracker_cmd,
+            tracking_image_width_cmd,
+            tracking_image_height_cmd,
             device_cmd,
             fuse_model_cmd,
             yolo_encoding_cmd,
