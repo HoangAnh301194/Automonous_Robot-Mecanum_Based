@@ -59,6 +59,14 @@ class TestKioskAI(unittest.TestCase):
             "robot_ui_kiosk", "--9router-command", "/usr/bin/9router --no-browser"
         ])
         self.assertEqual(opts.router_command, "/usr/bin/9router --no-browser")
+        # ROS launch may omit an empty LaunchConfiguration substitution,
+        # leaving the flag without a following value.
+        opts = scope["parse_args"]([
+            "robot_ui_kiosk", "--windowed", "true",
+            "--auto-start-9router", "true",
+            "--9router-command",
+        ])
+        self.assertEqual(opts.router_command, "")
 
     def test_9router_env_file_autoload_and_override(self):
         with tempfile.TemporaryDirectory() as folder:
