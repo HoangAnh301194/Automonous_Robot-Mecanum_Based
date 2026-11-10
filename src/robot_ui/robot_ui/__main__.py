@@ -1,4 +1,4 @@
-from robot_ui.server import main
+from robot_ui.kiosk.main import main
 
 
 if __name__ == "__main__":

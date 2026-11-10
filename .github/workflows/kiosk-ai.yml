@@ -2,7 +2,7 @@ name: Kiosk AI unit tests
 
 on:
   push:
-    branches: [feature/main_interface]
+    branches: [feature/main_interface, simulator]
   pull_request:
     paths:
       - 'src/robot_ui/**'

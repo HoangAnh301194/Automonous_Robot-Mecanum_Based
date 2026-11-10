@@ -1,5 +1,5 @@
-# Robot UI
-The interface contains three screens:
+# Robot UI — Native Touchscreen Kiosk
+The ROS 2 package contains a single PyQt5 touchscreen application with three screens:
 
 - **Home:** loops the configured Dasai Mochi emotion video.
 - **Navigation:** displays the ROS map, robot pose, planned path and selected
@@ -343,25 +343,6 @@ Terminal 4: Robot UI
 
 Every terminal must source ROS 2 and `install/setup.bash` first.
 
-## Optional Web UI User Service
-
-`deploy/robot-ui.service.example` is a systemd **user** service for the web UI,
-not the native kiosk. It uses a stable symlink in your home directory instead of
-embedding a disk mount or username in the unit. After setting `WS`:
-
-```bash
-mkdir -p "$HOME/.local/share" "$HOME/.config/systemd/user"
-ln -s "$WS" "$HOME/.local/share/robot-workspace"
-cp "$WS/src/robot_ui/deploy/robot-ui.service.example" \
-  "$HOME/.config/systemd/user/robot-ui.service"
-systemctl --user daemon-reload
-systemctl --user enable --now robot-ui.service
-```
-
-Create the symlink only once. If it already exists, check its target before
-changing it. When relocating the workspace, stop the service, rebuild at the new
-location, update the symlink and restart the service. Do not install this example
-as a system-wide service.
 
 ## ROS Interfaces Used by the UI
 
