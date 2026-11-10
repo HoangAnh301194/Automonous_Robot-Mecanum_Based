@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Bring up three cameras, YOLO person tracking (GPU) and RTMPose (CPU).
+# Bring up three cameras (Front/Rear/AI Depth + AI RGB), YOLO tracking, RTMPose.
 # Only processes started by this script are stopped on exit.
 set -euo pipefail
 
@@ -59,7 +59,7 @@ check_alive() {
   fi
 }
 
-echo "[1/3] Start front/rear Depth and AI RGB"
+echo "[1/3] Start Front/Rear/AI Depth at 160x120 and AI RGB at 640x480"
 ros2 launch mo_hinh three_astra.launch.py \
   front_serial:="$FRONT_SERIAL" \
   rear_serial:="$REAR_SERIAL" \
@@ -112,6 +112,7 @@ AI 2D + skeleton pipeline started.
   Rear serial:     $REAR_SERIAL
   AI serial:       $AI_SERIAL
   RGB source:      $AI_IMAGE_TOPIC
+  AI Depth topic:  /ai_camera/depth/image_raw
   Person tracking: $TRACKING_TOPIC
   Skeleton debug:  /pose/image_debug
   Hand wave:       /pose/wave_detected
@@ -120,8 +121,9 @@ AI 2D + skeleton pipeline started.
   Logs:            $LOG_DIR
   Image viewer:    ros2 run rqt_image_view rqt_image_view /pose/image_debug
 
-This script does NOT start a 3D person follower: RGB AI and Depth front/rear
-are separate cameras and are not registered to each other.
+This script does NOT start a 3D person follower or publish person markers.
+Although the AI camera now publishes Depth, RGB/Depth registration, calibrated
+intrinsics/extrinsics, and TF localization must be validated before 3D fusion.
 Press Ctrl+C to stop only the processes started here.
 EOF
 
