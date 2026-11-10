@@ -46,7 +46,7 @@ class TrackingNode(LifecycleNode):
     ROS 2 Lifecycle Node for object tracking.
 
     This node tracks detected objects across frames using BYTE or BOT-SORT algorithms.
-    It subscribes to detections and image topics and publishes tracked detections with IDs.
+    ByteTrack subscribes only to detections; BoT-SORT retains image synchronization.
     """
 
     def __init__(self) -> None:
@@ -69,8 +69,14 @@ class TrackingNode(LifecycleNode):
         # Params
         self.declare_parameter("tracker", "bytetrack.yaml")
         self.declare_parameter("image_reliability", QoSReliabilityPolicy.BEST_EFFORT)
-
-        self.cv_bridge = CvBridge()
+        # ORIGINAL camera resolution (not YOLO TensorRT inference imgsz).
+        self.declare_parameter("image_width", 640)
+        self.declare_parameter("image_height", 480)
+        self.tracker_type = None
+        self.image_sub = None
+        self.detections_sub = None
+        self._synchronizer = None
+        self.cv_bridge = None
 
     def on_configure(self, state: LifecycleState) -> TransitionCallbackReturn:
         """
@@ -88,6 +94,11 @@ class TrackingNode(LifecycleNode):
         self.image_reliability = (
             self.get_parameter("image_reliability").get_parameter_value().integer_value
         )
+        self.image_width = int(self.get_parameter("image_width").value)
+        self.image_height = int(self.get_parameter("image_height").value)
+        if self.image_width <= 0 or self.image_height <= 0:
+            self.get_logger().error("image_width and image_height must be positive")
+            return TransitionCallbackReturn.ERROR
 
         try:
             self.tracker = self.create_tracker(tracker_name)
@@ -105,61 +116,64 @@ class TrackingNode(LifecycleNode):
         return TransitionCallbackReturn.SUCCESS
 
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
-        """
-        Activate lifecycle callback.
+        """Subscribe to detections only for ByteTrack; keep RGB for BoT-SORT."""
+        self.image_sub = None
+        self.detections_sub = None
+        self._synchronizer = None
 
-        Creates subscriptions to image and detection topics with time synchronization.
-
-        @param state Current lifecycle state
-        @return Transition callback return status
-        """
-        self.get_logger().info(f"[{self.get_name()}] Activating...")
-
-        image_qos_profile = QoSProfile(
-            reliability=self.image_reliability,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            durability=QoSDurabilityPolicy.VOLATILE,
-            depth=1,
-        )
-
-        # Subs
-        self.image_sub = message_filters.Subscriber(
-            self, Image, "image_raw", qos_profile=image_qos_profile
-        )
-        self.detections_sub = message_filters.Subscriber(
-            self, DetectionArray, "detections", qos_profile=10
-        )
-
-        self._synchronizer = message_filters.ApproximateTimeSynchronizer(
-            (self.image_sub, self.detections_sub), 10, 0.5
-        )
-        self._synchronizer.registerCallback(self.detections_cb)
+        if self.tracker_type == "bytetrack":
+            # DetectionArray already carries original-frame bbox coordinates,
+            # class, confidence and acquisition timestamp. Avoid image transport,
+            # CvBridge, BGR->RGB and the image/detection sync queue entirely.
+            self.detections_sub = self.create_subscription(
+                DetectionArray, "detections", self.detections_only_cb, 10
+            )
+            self.get_logger().info(
+                "ByteTrack detections-only mode: no RGB subscription, "
+                f"original camera size={self.image_width}x{self.image_height}"
+            )
+        else:
+            # BoT-SORT may require the actual frame for GMC and ReID.
+            self.cv_bridge = CvBridge()
+            image_qos_profile = QoSProfile(
+                reliability=self.image_reliability,
+                history=QoSHistoryPolicy.KEEP_LAST,
+                durability=QoSDurabilityPolicy.VOLATILE,
+                depth=1,
+            )
+            self.image_sub = message_filters.Subscriber(
+                self, Image, "image_raw", qos_profile=image_qos_profile
+            )
+            self.detections_sub = message_filters.Subscriber(
+                self, DetectionArray, "detections", qos_profile=10
+            )
+            self._synchronizer = message_filters.ApproximateTimeSynchronizer(
+                (self.image_sub, self.detections_sub), 10, 0.5
+            )
+            self._synchronizer.registerCallback(self.detections_cb)
+            self.get_logger().info("BoT-SORT RGB + detection synchronization mode")
 
         super().on_activate(state)
         self.get_logger().info(f"[{self.get_name()}] Activated")
-
         return TransitionCallbackReturn.SUCCESS
 
     def on_deactivate(self, state: LifecycleState) -> TransitionCallbackReturn:
-        """
-        Deactivate lifecycle callback.
-
-        Destroys subscriptions and cleans up the synchronizer.
-
-        @param state Current lifecycle state
-        @return Transition callback return status
-        """
-        self.get_logger().info(f"[{self.get_name()}] Deactivating...")
-
-        self.destroy_subscription(self.image_sub.sub)
-        self.destroy_subscription(self.detections_sub.sub)
-
-        del self._synchronizer
+        """Remove subscriptions for the active tracker backend."""
+        if self.tracker_type == "bytetrack":
+            if self.detections_sub is not None:
+                self.destroy_subscription(self.detections_sub)
+        else:
+            if self.image_sub is not None:
+                self.destroy_subscription(self.image_sub.sub)
+            if self.detections_sub is not None:
+                self.destroy_subscription(self.detections_sub.sub)
+        self.image_sub = None
+        self.detections_sub = None
         self._synchronizer = None
+        self.cv_bridge = None
 
         super().on_deactivate(state)
         self.get_logger().info(f"[{self.get_name()}] Deactivated")
-
         return TransitionCallbackReturn.SUCCESS
 
     def on_cleanup(self, state: LifecycleState) -> TransitionCallbackReturn:
@@ -214,112 +228,104 @@ class TrackingNode(LifecycleNode):
             "bytetrack",
             "botsort",
         ], f"Only support 'bytetrack' and 'botsort' for now, but got '{cfg.tracker_type}'"
+        self.tracker_type = cfg.tracker_type
         tracker = TRACKER_MAP[cfg.tracker_type](args=cfg)
         return tracker
 
+    def detections_only_cb(self, detections_msg: DetectionArray) -> None:
+        """ByteTrack: update from detections, no RGB image received or decoded."""
+        self._process_detections(
+            detections_msg, image_shape=(self.image_height, self.image_width), image=None
+        )
+
     def detections_cb(self, img_msg: Image, detections_msg: DetectionArray) -> None:
-        """
-        Synchronized callback for image and detections.
+        """BoT-SORT legacy path: retain synchronized RGB input for GMC/ReID."""
+        t_convert_start = time.perf_counter()
+        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
+        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+        convert_ms = (time.perf_counter() - t_convert_start) * 1000.0
+        self._process_detections(
+            detections_msg, image_shape=(img_msg.height, img_msg.width),
+            image=cv_image, convert_ms=convert_ms
+        )
 
-        Performs tracking on detections and publishes tracked results with IDs.
-
-        @param img_msg Image message
-        @param detections_msg Detections message
-        """
-
-        # ── Patch 0: measure sync input age ──
+    def _process_detections(
+        self, detections_msg: DetectionArray, image_shape, image=None,
+        convert_ms: float = 0.0
+    ) -> None:
+        """Publish the same DetectionArray contract for either tracker backend."""
         try:
-            stamp = rclpy.time.Time.from_msg(img_msg.header.stamp)
+            stamp = rclpy.time.Time.from_msg(detections_msg.header.stamp)
             input_age_ms = (self.get_clock().now() - stamp).nanoseconds / 1e6
         except Exception:
             input_age_ms = -1.0
 
         tracked_detections_msg = DetectionArray()
-        tracked_detections_msg.header = img_msg.header
+        # Keep original YOLO image timestamp and frame_id for RTMPose and Depth.
+        tracked_detections_msg.header = detections_msg.header
 
-        # ── Patch 0: measure image conversion ──
-        t_convert_start = time.perf_counter()
-        # Convert image
-        cv_image = self.cv_bridge.imgmsg_to_cv2(img_msg, desired_encoding="bgr8")
-        cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-        convert_ms = (time.perf_counter() - t_convert_start) * 1000.0
-
-        # Parse detections
         detection_list = []
-        detection: Detection
         for detection in detections_msg.detections:
+            bb = detection.bbox
+            detection_list.append([
+                bb.center.position.x - bb.size.x / 2,
+                bb.center.position.y - bb.size.y / 2,
+                bb.center.position.x + bb.size.x / 2,
+                bb.center.position.y + bb.size.y / 2,
+                detection.score,
+                detection.class_id,
+            ])
 
-            detection_list.append(
-                [
-                    detection.bbox.center.position.x - detection.bbox.size.x / 2,
-                    detection.bbox.center.position.y - detection.bbox.size.y / 2,
-                    detection.bbox.center.position.x + detection.bbox.size.x / 2,
-                    detection.bbox.center.position.y + detection.bbox.size.y / 2,
-                    detection.score,
-                    detection.class_id,
-                ]
-            )
-
-        # ── Patch 0: measure tracker update ──
+        # Empty arrays must also update ByteTrack so lost tracks can expire.
+        # Boxes requires a 2-D (N, 6) array even when N == 0.
+        det = Boxes(
+            np.asarray(detection_list, dtype=np.float32).reshape(-1, 6),
+            image_shape,
+        )
         t_tracker_start = time.perf_counter()
-        # Tracking
-        if len(detection_list) > 0:
-
-            det = Boxes(np.array(detection_list), (img_msg.height, img_msg.width))
-            tracks = self.tracker.update(det, cv_image)
-
-            if len(tracks) > 0:
-
-                for t in tracks:
-
-                    tracked_box = Boxes(t[:-1], (img_msg.height, img_msg.width))
-                    tracked_detection: Detection = detections_msg.detections[int(t[-1])]
-
-                    # Get boxes values
-                    box = tracked_box.xywh[0]
-                    tracked_detection.bbox.center.position.x = float(box[0])
-                    tracked_detection.bbox.center.position.y = float(box[1])
-                    tracked_detection.bbox.size.x = float(box[2])
-                    tracked_detection.bbox.size.y = float(box[3])
-
-                    # Get track ID
-                    track_id = ""
-                    if tracked_box.is_track:
-                        track_id = str(int(tracked_box.id))
-                    tracked_detection.id = track_id
-
-                    # Append msg
-                    tracked_detections_msg.detections.append(tracked_detection)
-
+        tracks = self.tracker.update(det, image)
         tracker_ms = (time.perf_counter() - t_tracker_start) * 1000.0
-        input_det_count = len(detection_list)
-        output_track_count = len(tracked_detections_msg.detections)
 
-        # Publish detections
+        for track in tracks:
+            source_index = int(track[-1])
+            if source_index < 0 or source_index >= len(detections_msg.detections):
+                self.get_logger().warn(
+                    f"Tracker returned out-of-range detection index {source_index}"
+                )
+                continue
+            tracked_box = Boxes(track[:-1], image_shape)
+            tracked_detection = detections_msg.detections[source_index]
+
+            box = tracked_box.xywh[0]
+            tracked_detection.bbox.center.position.x = float(box[0])
+            tracked_detection.bbox.center.position.y = float(box[1])
+            tracked_detection.bbox.size.x = float(box[2])
+            tracked_detection.bbox.size.y = float(box[3])
+            tracked_detection.id = (
+                str(int(tracked_box.id)) if tracked_box.is_track else ""
+            )
+            tracked_detections_msg.detections.append(tracked_detection)
+
         self._pub.publish(tracked_detections_msg)
 
-        # ── Patch 0: accumulate and log throttled ──
         self._metric_convert_ms_sum += convert_ms
         self._metric_tracker_ms_sum += tracker_ms
-        self._metric_input_det_sum += input_det_count
-        self._metric_output_track_sum += output_track_count
+        self._metric_input_det_sum += len(detection_list)
+        self._metric_output_track_sum += len(tracked_detections_msg.detections)
         self._metric_frame_count += 1
 
         now = time.monotonic()
         elapsed = now - self._metric_last_log
         if elapsed >= self._metric_log_interval:
             n = self._metric_frame_count
-            avg_convert = self._metric_convert_ms_sum / n
-            avg_tracker = self._metric_tracker_ms_sum / n
-            avg_in = self._metric_input_det_sum / n
-            avg_out = self._metric_output_track_sum / n
-            fps = n / elapsed
             self.get_logger().info(
-                f'[Tracking metrics] fps={fps:.1f} '
-                f'convert={avg_convert:.1f}ms '
-                f'tracker={avg_tracker:.1f}ms '
-                f'in_det={avg_in:.1f} out_track={avg_out:.1f} '
-                f'input_age={input_age_ms:.0f}ms'
+                f'[Tracking metrics] fps={n / elapsed:.1f} '
+                f'convert={self._metric_convert_ms_sum / n:.1f}ms '
+                f'tracker={self._metric_tracker_ms_sum / n:.1f}ms '
+                f'in_det={self._metric_input_det_sum / n:.1f} '
+                f'out_track={self._metric_output_track_sum / n:.1f} '
+                f'input_age={input_age_ms:.0f}ms '
+                f'mode={self.tracker_type}'
             )
             self._metric_convert_ms_sum = 0.0
             self._metric_tracker_ms_sum = 0.0
