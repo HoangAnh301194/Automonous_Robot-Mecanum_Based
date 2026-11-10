@@ -123,7 +123,12 @@ class KioskRosNode(Node):
     def _on_map(self, msg: OccupancyGrid) -> None:
         width = int(msg.info.width)
         height = int(msg.info.height)
+        self.get_logger().info(
+            f"[KIOSK MAP] Received /map: {width}x{height}, "
+            f"cells={len(msg.data)}, frame={msg.header.frame_id}"
+        )
         if width <= 0 or height <= 0:
+            self.get_logger().warning("[KIOSK MAP] Ignoring empty map")
             return
 
         step = max(1, math.ceil(max(width, height) / self.MAP_PREVIEW_MAX_DIMENSION))
