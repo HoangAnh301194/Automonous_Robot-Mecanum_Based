@@ -382,7 +382,7 @@
   <joint name="support_joint" type="fixed">
     <parent link="base_link"/>
     <child link="support_link"/>
-    <origin xyz="0.22 0.0 0.25" rpy="0 0 0"/>
+    <origin xyz="-0.22 0.0 0.25" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -414,7 +414,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="0.25 0.0 0.50" rpy="0 0.698132 0"/>
+    <origin xyz="-0.25 0.0 0.50" rpy="0 0.698132 3.14159265"/>
   </joint>
 
   <!-- Optical frame -->
@@ -478,7 +478,7 @@
   <joint name="rear_camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="rear_camera_link"/>
-    <origin xyz="-0.25 0.0 0.25" rpy="0 0.698132 3.14159265"/>
+    <origin xyz="0.25 0.0 0.25" rpy="0 0.698132 0"/>
   </joint>
 
   <!-- Rear Depth Optical frame -->
@@ -504,7 +504,7 @@
   <joint name="rear_scan_joint" type="fixed">
     <parent link="base_link"/>
     <child link="rear_scan_frame"/>
-    <origin xyz="-0.25 0.0 0.0" rpy="0 0 3.14159265"/>
+    <origin xyz="0.25 0.0 0.0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
