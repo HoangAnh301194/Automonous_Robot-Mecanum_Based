@@ -1,0 +1,84 @@
+<!--
+  Behavior Tree thông minh đa tầng cho Nav2 (Smart Adaptive Recovery):
+  1. Phản ứng tức thì khi có Goal mới (GoalUpdated).
+  2. Bỏ xoay 360 độ thô bạo làm đổ nước.
+  3. Leo thang tự cứu 3 cấp độ (RoundRobin):
+     - Cấp 1 (Chờ người): Dừng tĩnh 3.0s chờ người/vật cản di chuyển + Xóa bóng ma local costmap.
+     - Cấp 2 (Vật cản tĩnh): Tự động lùi êm 15cm (0.08 m/s) tạo khoảng hở trước mũi xe.
+     - Cấp 3 (Quét góc hẹp): Nhấp xoay nhẹ 35 độ (0.6 rad) tìm lối thoát.
+  4. Phục hồi toàn cục khi bế tắc (Xóa sạch costmap + tính lại đường).
+-->
+<root main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+      
+      <!-- ==================== LUỒNG ĐIỀU HƯỚNG CHÍNH ==================== -->
+      <PipelineSequence name="NavigateWithReplanning">
+        
+        <!-- 1. Bộ lập kế hoạch toàn cục (Planner): Chu kỳ 1Hz -->
+        <RateController hz="1.0">
+          <RecoveryNode number_of_retries="2" name="ComputePathRecovery">
+            <Fallback name="ComputeOrReusePath">
+              <!-- Nếu đường đi cũ vẫn thông thoáng thì không cần tính lại liên tục -->
+              <Inverter>
+                <IsPathValid path="{path}"/>
+              </Inverter>
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
+            </Fallback>
+            
+            <!-- Phục hồi khi Planner không vẽ được đường -->
+            <Sequence name="PlannerRecoverySequence">
+              <ClearEntireCostmap name="ClearGlobalCostmap" service_name="global_costmap/clear_entirely_global_costmap"/>
+              <Wait wait_duration="1.5"/>
+            </Sequence>
+          </RecoveryNode>
+        </RateController>
+
+        <!-- 2. Bộ điều khiển bám đường (MPPI Controller) -->
+        <RecoveryNode number_of_retries="3" name="FollowPathRecovery">
+          <FollowPath path="{path}" controller_id="FollowPath"/>
+          
+          <!-- Phản ứng khi gặp chướng ngại vật chắn đường -->
+          <ReactiveFallback name="ControllerReaction">
+            <!-- Nếu người dùng click điểm mới trên bản đồ -> Hủy ngay recovery để nhận lệnh mới -->
+            <GoalUpdated/>
+            
+            <!-- Chuỗi tự giải cứu leo thang 3 cấp độ (Round Robin) -->
+            <RoundRobin name="EscalatingRecovery">
+              
+              <!-- Cấp độ 1: Dừng tĩnh 3.0s chờ người hoặc vật cản qua đường + Xóa vết bóng ma -->
+              <Sequence name="Level1_GentleWait">
+                <Wait wait_duration="3.0"/>
+                <ClearEntireCostmap name="ClearLocalCostmap_L1" service_name="local_costmap/clear_entirely_local_costmap"/>
+              </Sequence>
+
+              <!-- Cấp độ 2: Lùi êm ái 15cm tốc độ chậm 0.08 m/s để tạo góc mở trước mũi xe -->
+              <Sequence name="Level2_GentleBackUp">
+                <BackUp backup_dist="0.15" backup_speed="0.08" time_allowance="4.0"/>
+                <ClearEntireCostmap name="ClearLocalCostmap_L2" service_name="local_costmap/clear_entirely_local_costmap"/>
+                <Wait wait_duration="1.0"/>
+              </Sequence>
+
+              <!-- Cấp độ 3: Nhấp xoay nhẹ 35 độ (0.60 rad) tìm khe hở lách qua (không xoay 360 độ) -->
+              <Sequence name="Level3_GentleScan">
+                <Spin spin_dist="0.60" time_allowance="4.0"/>
+                <ClearEntireCostmap name="ClearLocalCostmap_L3" service_name="local_costmap/clear_entirely_local_costmap"/>
+                <Wait wait_duration="1.0"/>
+              </Sequence>
+
+            </RoundRobin>
+          </ReactiveFallback>
+        </RecoveryNode>
+      </PipelineSequence>
+
+      <!-- ==================== CỨU NẠN TOÀN CỤC KHI BẾ TẮC ==================== -->
+      <Sequence name="GlobalSystemRecovery">
+        <!-- Xóa sạch cả 2 costmap để các cảm biến quét lại thực tế -->
+        <ClearEntireCostmap name="ClearBothGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
+        <ClearEntireCostmap name="ClearBothLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+        <Wait wait_duration="2.5"/>
+      </Sequence>
+
+    </RecoveryNode>
+  </BehaviorTree>
+</root>

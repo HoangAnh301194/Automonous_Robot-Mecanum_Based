@@ -42,6 +42,7 @@ amcl:
     scan_topic: scan
 bt_navigator:
   ros__parameters:
+    default_nav_to_pose_bt_xml: /home/a/ros2_ws/src/mo_hinh/config/navigate_to_pose_smart_recovery.xml
     global_frame: map
     robot_base_frame: base_footprint
     odom_topic: /odom
@@ -371,9 +372,9 @@ behavior_server:
     robot_base_frame: base_footprint
     transform_tolerance: 1.0
     simulate_ahead_time: 2.0
-    max_rotational_vel: 1.0
-    min_rotational_vel: 0.4
-    rotational_acc_lim: 3.2
+    max_rotational_vel: 0.5
+    min_rotational_vel: 0.2
+    rotational_acc_lim: 1.5
 waypoint_follower:
   ros__parameters:
     loop_rate: 20

@@ -38,7 +38,7 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
-from std_msgs.msg import Int32MultiArray, String
+from std_msgs.msg import Bool, Int32MultiArray, String
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -164,7 +164,7 @@ SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_exi
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 class RosInterface(Node):
-    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None):
+    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None):
         super().__init__("desktop_nav_gui_v3")
         self.log_callback = log_callback
         self.map_callback = map_callback
@@ -173,6 +173,7 @@ class RosInterface(Node):
         self.dataenc_callback = dataenc_callback
         self.nav_feedback_callback = nav_feedback_callback
         self.nav_status_callback = nav_status_callback
+        self.human_callback = human_callback
         self.current_goal_x = None
         self.current_goal_y = None
         self.initial_goal_dist = None
@@ -193,7 +194,18 @@ class RosInterface(Node):
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
         self.cancel_nav_client = self.create_client(CancelGoal, "/navigate_to_pose/_action/cancel_goal")
         self.cancel_through_poses_client = self.create_client(CancelGoal, "/navigate_through_poses/_action/cancel_goal")
+        self.human_detected_pub = self.create_publisher(Bool, "/human_detected_in_path", 10)
+        self.human_detected_sub = self.create_subscription(Bool, "/human_detected_in_path", self.on_human_detected_msg, 10)
         self.pose_timer = self.create_timer(0.05, self.publish_pose_from_tf)
+
+    def publish_mock_human(self, is_human: bool):
+        msg = Bool()
+        msg.data = bool(is_human)
+        self.human_detected_pub.publish(msg)
+
+    def on_human_detected_msg(self, msg):
+        if self.human_callback:
+            self.human_callback(bool(msg.data))
 
     def log(self, msg):
         self.get_logger().info(msg)
@@ -679,6 +691,7 @@ class MainWindow(QWidget):
     dataenc_signal = pyqtSignal(object)
     nav_feedback_signal = pyqtSignal(float, float, float, float, int)
     nav_thought_signal = pyqtSignal(str, str, str)
+    human_signal = pyqtSignal(bool)
     LAYER1_SIM, LAYER1_REAL = "layer1_sim", "layer1_real"
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
@@ -711,6 +724,7 @@ class MainWindow(QWidget):
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
         self.nav_feedback_signal.connect(self._on_nav_feedback_ui)
         self.nav_thought_signal.connect(self._on_nav_thought_ui)
+        self.human_signal.connect(self._on_human_detected_ui)
         self.init_ui()
         self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 & Gazebo cũ trước khi khởi động.")
         self.init_ros()
@@ -816,6 +830,11 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.lbl_platform_status, 8, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 9, 0, 1, 2)
         control_layout.addWidget(self.lbl_nav2_status, 10, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 11, 0, 1, 2)
         control_layout.addWidget(self.lbl_dataenc, 12, 0, 1, 2)
+        self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
+        self.chk_mock_human.setStyleSheet("color: #38bdf8; font-weight: bold;")
+        self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
+        self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
+        control_layout.addWidget(self.chk_mock_human, 13, 0, 1, 2)
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
@@ -936,6 +955,7 @@ class MainWindow(QWidget):
             dataenc_callback=self.on_new_dataenc,
             nav_feedback_callback=self.on_new_nav_feedback,
             nav_status_callback=self.on_new_nav_status,
+            human_callback=self.on_human_detected,
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True); self.ros_spin_thread.start()
         self.append_log("ROS2 node v3 đã khởi động.")
@@ -952,6 +972,34 @@ class MainWindow(QWidget):
 
     def append_log(self, text):
         self.log_signal.emit(str(text))
+
+    def on_mock_human_toggled(self, checked):
+        if self.ros_node:
+            self.ros_node.publish_mock_human(checked)
+            self.append_log(f"[MOCK_HUMAN] Giả lập có người phía trước: {'BẬT (True)' if checked else 'TẮT (False)'}")
+
+    def on_human_detected(self, is_human: bool):
+        self.human_signal.emit(is_human)
+
+    def _on_human_detected_ui(self, is_human: bool):
+        now_str = time.strftime("%H:%M:%S")
+        if is_human:
+            self.lbl_mind_status.setText("👤 PHÁT HIỆN CÓ NGƯỜI TRƯỚC MẶT")
+            self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
+            self.lbl_mind_desc.setText("Camera AI phát hiện có người trong cự ly an toàn (<1.8m). Robot đang chủ động phanh dừng nhường đường (tạm khóa tự lùi/xoay).")
+            self.mind_banner_frame.setStyleSheet(
+                "QFrame { background-color: #0c4a6e; border: 2px solid #38bdf8; border-radius: 6px; padding: 6px; }"
+            )
+            self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: #38bdf8;'>👤 PHÁT HIỆN NGƯỜI</b>: Đang phanh dừng chờ nhường đường.")
+        else:
+            if "NGƯỜI" in self.lbl_mind_status.text():
+                self.lbl_mind_status.setText("🚗 ĐƯỜNG ĐÃ THÔNG THOÁNG")
+                self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #16a34a;")
+                self.lbl_mind_desc.setText("Không còn người chắn trước mũi xe. Robot tiếp tục di chuyển theo lộ trình.")
+                self.mind_banner_frame.setStyleSheet(
+                    "QFrame { background-color: #0f172a; border: 2px solid #16a34a; border-radius: 6px; padding: 6px; }"
+                )
+                self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: #16a34a;'>ĐƯỜNG THOÁNG</b>: Người đã rời đi, tiếp tục hành trình.")
 
     def on_new_nav_feedback(self, dist, total_dist, nav_sec, est_sec, recov):
         self.nav_feedback_signal.emit(float(dist), float(total_dist), float(nav_sec), float(est_sec), int(recov))
