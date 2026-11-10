@@ -14,6 +14,7 @@ from rclpy.utilities import remove_ros_args
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
 from robot_ui.kiosk.llm_env import load_llm_env_file
+from robot_ui.kiosk.router_process import start_local_9router, stop_local_9router
 
 
 def boolean_argument(value: str | bool) -> bool:
@@ -49,6 +50,17 @@ def parse_args(arguments: list[str]) -> argparse.Namespace:
         "--llm-env-file",
         default=os.environ.get("KIOSK_LLM_ENV_FILE", "~/ros2_ws/config/llm.local.env"),
         help="Local 9router settings file; read before importing the chatbot.",
+    )
+    parser.add_argument(
+        "--auto-start-9router",
+        type=boolean_argument,
+        default=True,
+        help="Start local 9router if its API port is not listening.",
+    )
+    parser.add_argument(
+        "--9router-command",
+        default=os.environ.get("KIOSK_9ROUTER_COMMAND", ""),
+        help="Optional local startup command (parsed as argv, never a shell).",
     )
     return parser.parse_args(arguments[1:])
 
@@ -91,6 +103,16 @@ def main(args: list[str] | None = None) -> int:
     # its bundled Qt plugin override the compatible system platform plugin.
     from robot_ui.kiosk.window import KioskWindow
 
+    owned_router = None
+    if all(os.environ.get(key) for key in ("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL")):
+        owned_router = start_local_9router(
+            os.environ["LLM_BASE_URL"],
+            enabled=options.auto_start_9router,
+            command=options.router_command,
+        )
+    elif options.auto_start_9router:
+        print("[robot_ui] 9router autostart skipped: incomplete LLM configuration.", flush=True)
+
     rclpy.init(args=raw_args)
     signals = KioskSignals()
     ros_node = KioskRosNode(signals)
@@ -106,13 +128,17 @@ def main(args: list[str] | None = None) -> int:
     else:
         window.showFullScreen()
 
-    exit_code = application.exec_()
-    executor.shutdown(timeout_sec=2.0)
-    ros_node.destroy_node()
-    if rclpy.ok():
-        rclpy.shutdown()
-    ros_thread.join(timeout=2.0)
-    return exit_code
+    try:
+        return application.exec_()
+    finally:
+        try:
+            executor.shutdown(timeout_sec=2.0)
+            ros_node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+            ros_thread.join(timeout=2.0)
+        finally:
+            stop_local_9router(owned_router)
 
 
 if __name__ == "__main__":
