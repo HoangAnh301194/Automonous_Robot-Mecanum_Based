@@ -121,15 +121,17 @@ def main(args: list[str] | None = None) -> int:
     ros_node = KioskRosNode(signals)
     executor = MultiThreadedExecutor(num_threads=2)
     executor.add_node(ros_node)
-    ros_thread = threading.Thread(target=executor.spin, name="robot-ui-ros", daemon=True)
-    ros_thread.start()
-
+    # Connect Qt signals before processing latched ROS topics such as /map.
+    # Otherwise the first TRANSIENT_LOCAL map can arrive before the UI is ready.
     window = KioskWindow(ros_node, signals)
     if options.windowed:
         window.resize(1024, 600)
         window.show()
     else:
         window.showFullScreen()
+
+    ros_thread = threading.Thread(target=executor.spin, name="robot-ui-ros", daemon=True)
+    ros_thread.start()
 
     try:
         return application.exec_()
