@@ -158,8 +158,8 @@ def generate_launch_description():
         # AI Depth is a separate OpenNI stream from the UVC RGB image.
         # Depth and RGB pixels are NOT assumed registered.
         DeclareLaunchArgument('enable_ai_depth', default_value='true'),
-        DeclareLaunchArgument('ai_depth_width', default_value='640'),
-        DeclareLaunchArgument('ai_depth_height', default_value='480'),
+        DeclareLaunchArgument('ai_depth_width', default_value='160'),
+        DeclareLaunchArgument('ai_depth_height', default_value='120'),
         DeclareLaunchArgument('ai_depth_fps', default_value='15'),
 
         # AI RGB Camera parameters
@@ -180,18 +180,18 @@ def generate_launch_description():
             description='OpenNI serial used to resolve the physical AI RGB UVC camera.',
         ),
 
-        # Front Depth Camera parameters (640x480 @ 15 FPS)
+        # Front Depth Camera parameters (160x120 @ 15 FPS)
         DeclareLaunchArgument(
             'front_serial', default_value='17110310855',
             description='Serial of front depth camera.',
         ),
         DeclareLaunchArgument(
-            'front_depth_width', default_value='640',
-            description='Front depth width (default: 640).',
+            'front_depth_width', default_value='160',
+            description='Front depth width (default: 160).',
         ),
         DeclareLaunchArgument(
-            'front_depth_height', default_value='480',
-            description='Front depth height (default: 480).',
+            'front_depth_height', default_value='120',
+            description='Front depth height (default: 120).',
         ),
         DeclareLaunchArgument(
             'front_depth_fps', default_value='15',
