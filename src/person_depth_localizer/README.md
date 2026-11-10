@@ -1,80 +1,121 @@
-# Person Depth Localizer (uncalibrated preview)
+# Person Depth Localizer (Multi-Person 3D Preview)
 
-**Test only: no Nav2 control, no automatic goals. RGB-Depth calibration is not performed.**
+Package định vị người 3D thô (Uncalibrated Multi-person 3D Preview) sử dụng luồng **RGB 640×480** và **Depth 160×120** từ Astra Pro AI, kết hợp **YOLO Tracking** và **TF2**.
 
-Inputs: RGB image dimensions, YOLO person /yolo/tracking, AI Depth image and CameraInfo, TF2.
+> ⚠️ **LƯU Ý:** Đây là bản prototype phục vụ kiểm tra dữ liệu và hiển thị trực quan trên RViz. **KHÔNG** dùng làm mục tiêu điều hướng tự động (Nav2 Goal) cho tới khi hoàn thành hiệu chuẩn camera (Calibration).
 
-Outputs:
-- /mission/person_preview_base (geometry_msgs/PointStamped): planar x/y in base_link
-- /mission/person_preview_map (geometry_msgs/PointStamped): planar x/y in map if TF exists
-- /mission/person_distance_preview (std_msgs/Float32): planar distance
-- /mission/person_marker (visualization_msgs/Marker): orange preview sphere
-- /mission/person_marker_array (visualization_msgs/MarkerArray): sphere and label
-- /mission/person_preview_status (std_msgs/String): JSON with calibrated=false and navigation_ready=false.
+---
 
-## Install
+## 1. Các Topic Chính (Topics Published)
 
-~~~bash
+| Topic | Định dạng Message | Ý nghĩa |
+| :--- | :--- | :--- |
+| `/perception/tracked_people` | `robot_interfaces/msg/TrackedPersonArray` | **Topic chính**: Mảng chứa tất cả người được track (tọa độ $x, y, z$, khoảng cách $d_{xy}$, depth, track_id, timestamp) |
+| `/mission/person_marker_array` | `visualization_msgs/msg/MarkerArray` | Cột trụ 3D (Cylinder) và nhãn chữ (Text `ID:... \| d:...m`) hiển thị trên RViz |
+| `/mission/person_preview_status` | `std_msgs/msg/String` | JSON log trạng thái (`preview_only`, số người phát hiện, độ trễ skew, v.v.) |
+| `/mission/person_preview_base` | `geometry_msgs/msg/PointStamped` | Tọa độ 2D mặt sàn của người chính (bbox to nhất) trên `base_footprint` |
+| `/mission/person_distance_preview` | `std_msgs/msg/Float32` | Khoảng cách mặt phẳng (m) của người chính (phục vụ debug nhanh / rqt_plot) |
+
+---
+
+## 2. Hướng Dẫn Biên Dịch (Build)
+
+```bash
 cd ~/ros2_ws
-git switch simulator
-git pull --ff-only origin simulator
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-up-to person_depth_localizer
+colcon build --symlink-install --packages-up-to person_depth_localizer mo_hinh yolo_bringup
 source install/setup.bash
-~~~
+```
 
-Terminal 1 (stop existing camera launches first):
+---
 
-~~~bash
+## 3. Các Lệnh Khởi Chạy (Step-by-Step Launch)
+
+### Terminal 1: Khởi động 3 Camera (Depth 160×120 + RGB AI 640×480)
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
+
 ros2 launch mo_hinh three_astra.launch.py
-~~~
+```
 
-Terminal 2 (replace path with actual engine location):
+### Terminal 2: Khởi động YOLO Tracking (TensorRT Engine trên CUDA)
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 
-~~~bash
 ros2 launch yolo_bringup yolo.launch.py \
-  model:=/absolute/path/to/yolo11n.engine device:=cuda:0 \
+  model:=/home/orin/ros2_ws/yolo11n.engine \
+  device:=cuda:0 \
   input_image_topic:=/ai_camera/color/image_raw \
-  image_reliability:=2 imgsz_height:=384 imgsz_width:=640 \
-  classes:=0 use_tracking:=True use_3d:=False
-~~~
+  image_reliability:=2 \
+  imgsz_height:=384 \
+  imgsz_width:=640 \
+  classes:=0 \
+  use_tracking:=True \
+  use_3d:=False
+```
 
-Before starting TF, check actual Depth header frame:
+### Terminal 3: Khởi động Node Định Vị Người Đa Đối Tượng
+*(Chạy với TF giả định camera cao 1.5m nhìn thẳng phía trước để test)*
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 
-~~~bash
-ros2 topic echo /ai_camera/depth/image_raw --field header --once
-~~~
-
-Terminal 3, ONLY if the Depth frame is named ai_camera_depth_optical_frame and its transform does not already exist:
-
-~~~bash
 ros2 launch person_depth_localizer rough_person_preview.launch.py \
   publish_test_tf:=true \
   test_parent_frame:=base_footprint \
-  test_x:=0 test_y:=0 test_z:=1.5 \
+  test_x:=0.0 \
+  test_y:=0.0 \
+  test_z:=1.5 \
   depth_frame:=ai_camera_depth_optical_frame
-~~~
+```
 
-The mock TF above assumes camera optical centre is directly above the base_footprint at 1.5 m and points horizontally forward. It must NOT be used for navigation. If a proper sensor TF already exists, launch with publish_test_tf:=false. If the actual Depth frame differs, configure depth_frame to the real header.frame_id.
+### Terminal 4 (Tùy chọn): Khởi động Nhận Diện Giơ Tay (RTMPose)
+```bash
+source /opt/ros/humble/setup.bash
+source ~/ros2_ws/install/setup.bash
 
-Verify:
+ros2 launch hand_wave_detection hand_wave_detection.launch.py \
+  backend:=rtmpose \
+  device:=cpu \
+  tracking_topic:=/yolo/tracking \
+  image_topic:=/ai_camera/color/image_raw \
+  max_people:=3
+```
 
-~~~bash
+---
+
+## 4. Lệnh Kiểm Tra Dữ Liệu Thực Tế (Verification)
+
+```bash
+source /opt/ros/humble/setup.bash
+
+# 1. Xem mảng tất cả người đang được theo dõi:
+ros2 topic echo /perception/tracked_people
+
+# 2. Xem trạng thái kết nối & số lượng người:
 ros2 topic echo /mission/person_preview_status
-ros2 topic echo /mission/person_preview_base --once
-ros2 topic echo /mission/person_distance_preview --once
-ros2 topic echo /mission/person_preview_map --once
-ros2 run tf2_ros tf2_echo base_link ai_camera_depth_optical_frame
-~~~
 
-RViz2: Fixed Frame map (if AMCL/localization running) or base_link; Add MarkerArray, topic /mission/person_marker_array.
+# 3. Xem khoảng cách người gần nhất (m):
+ros2 topic echo /mission/person_distance_preview
 
-## Limitations and next calibration stages
+# 4. Kiểm tra nhận diện giơ tay (True/False):
+ros2 topic echo /pose/wave_detected
+```
 
-1. RGB bbox pixels are scaled to Depth dimensions using a normalized image ratio, NOT valid camera registration. Camera parallax/FOV differences can select background depths. Bench test with just one person in the centre of the view.
-2. If Depth CameraInfo.K is zero, a rough assumed field of view is used. Every output remains uncalibrated.
-3. Depth and tracking must be within 0.25 seconds by header timestamp. Failed pairing or TF produces status but no person position. Marker lifetime is one second.
-4. RGB camera calibration: use an 8x6 inner-corner checkerboard at known real square size, collect multiple poses, save the camera_info YAML, and configure usb_cam to load it.
-5. Depth: verify K and distortion at 160x120. RGB/Depth extrinsics require a common visible target or validated Orbbec registration, not a simple x4 pixel mapping.
-6. Measure camera optical pose x/y/z and roll/pitch/yaw relative to the robot. Replace mock transform with calibrated static TF/URDF, validate on measured targets, then implement robust per-track association and safe target stopping distances.
-7. Never feed this preview position to Nav2 or the Behavior Tree as a navigation goal.
+### Cấu hình xem trên RViz2:
+1. Mở `rviz2`.
+2. Đặt **Fixed Frame** = `base_footprint` (hoặc `map` nếu đã chạy SLAM/AMCL).
+3. Bấm **Add** -> chọn **By topic** -> `/mission/person_marker_array`.
+4. Mỗi người sẽ được đại diện bằng một cột trụ màu cam cùng nhãn Track ID và khoảng cách nổi trên đầu.
+
+---
+
+## 5. Lệnh Dừng / Kill Toàn Bộ (Clean Teardown)
+
+Để dừng sạch sẽ tất cả các camera, node YOLO, AI và static transform đang chạy nền chỉ bằng 1 dòng lệnh:
+
+```bash
+killall -9 astra_camera_node usb_cam_node_exe yolo_node tracking_node debug_node rough_localizer hand_wave_detector static_transform_publisher 2>/dev/null; ros2 daemon stop
+```
