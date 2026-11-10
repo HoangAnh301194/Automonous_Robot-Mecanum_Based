@@ -59,6 +59,7 @@ def parse_args(arguments: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--9router-command",
+        dest="router_command",
         default=os.environ.get("KIOSK_9ROUTER_COMMAND", ""),
         help="Optional local startup command (parsed as argv, never a shell).",
     )
