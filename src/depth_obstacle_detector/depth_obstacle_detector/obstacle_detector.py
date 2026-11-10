@@ -137,7 +137,18 @@ class ObstacleDetectorNode(Node):
             self.get_logger().error(f"Failed to process image: {str(e)}")
 
     def process_frame(self, cv_image, stamp, t0):
-        if self.ground_frame is None or self.ground_frame.shape != cv_image.shape:
+        if self.ground_frame is None:
+            return
+        if self.ground_frame.shape != cv_image.shape:
+            # A changed Depth resolution invalidates an old stored ground
+            # reference. Make the inactive obstacle detector explicit in logs.
+            self.get_logger().error(
+                f"[{self.cam_name}] Depth resolution changed: live "
+                f"{cv_image.shape}, ground reference {self.ground_frame.shape}. "
+                "Obstacle scan NOT updated. Re-capture ground reference "
+                "and retune ROI/min_area for the new resolution.",
+                throttle_duration_sec=5.0,
+            )
             return
             
         h, w = cv_image.shape
