@@ -46,14 +46,14 @@
               <!-- Nhánh thực hiện lùi -->
               <Sequence name="ExecuteBackUp">
                 <!-- Bước 4: Kiểm tra an toàn trước khi thông báo -->
-                <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.40" timeout="0.50"/>
+                <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.55" timeout="0.50"/>
                 
                 <OperatorAlert code="PRE_BACKUP" message="Robot chuẩn bị lùi. Vui lòng giữ khoảng cách."/>
                 <Speak message="Robot sẽ lùi lại một chút."/>
                 
                 <!-- Bước 5: Thực hiện lùi và giám sát liên tục -->
                 <ReactiveSequence name="SafeBackUp">
-                  <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.40" timeout="0.50"/>
+                  <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.55" timeout="0.50"/>
                   <!-- Không xóa local costmap ở đây để BackUp vẫn còn dữ liệu vật cản tổng thể -->
                   <BackUp backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
                 </ReactiveSequence>
