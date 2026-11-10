@@ -21,12 +21,13 @@ from PyQt5.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
-    QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QPushButton, QRadioButton, QScrollArea, QSlider, QTextEdit,
+    QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSlider, QTabWidget, QTextEdit,
     QVBoxLayout, QWidget,
 )
 
 import rclpy
+from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
@@ -163,13 +164,18 @@ SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_exi
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 class RosInterface(Node):
-    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None):
+    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None):
         super().__init__("desktop_nav_gui_v3")
         self.log_callback = log_callback
         self.map_callback = map_callback
         self.pose_callback = pose_callback
         self.scan_callback = scan_callback
         self.dataenc_callback = dataenc_callback
+        self.nav_feedback_callback = nav_feedback_callback
+        self.nav_status_callback = nav_status_callback
+        self.current_goal_x = None
+        self.current_goal_y = None
+        self.initial_goal_dist = None
         self.last_scan_ui_pub = 0.0
         self.last_tf_warn_time = 0.0
         self.target_map_frame = "map"
@@ -177,12 +183,11 @@ class RosInterface(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         map_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, history=HistoryPolicy.KEEP_LAST, depth=1)
-        self._map_sub = self.create_subscription(OccupancyGrid, "/map1", self.on_map, map_qos)
+        self._map_sub = self.create_subscription(OccupancyGrid, "/map", self.on_map, map_qos)
         self.scan_sub = self.create_subscription(LaserScan, "/scan", self.on_scan, QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10))
         self.dataenc_sub = self.create_subscription(Int32MultiArray, "/dataenc", self.on_dataenc, 20)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
-        self.edited_map_pub = self.create_publisher(OccupancyGrid, "/map", QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, history=HistoryPolicy.KEEP_LAST, depth=1))
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.current_goal_handle = None
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
@@ -282,9 +287,40 @@ class RosInterface(Node):
         if self.dataenc_callback:
             self.dataenc_callback(list(msg.data))
 
+    def emit_nav_status(self, title, desc, color="#3b82f6"):
+        if self.nav_status_callback:
+            self.nav_status_callback(title, desc, color)
+
+    def _on_nav_feedback(self, feedback_msg):
+        fb = feedback_msg.feedback
+        dist = float(fb.distance_remaining)
+        recov = int(fb.number_of_recoveries)
+        nav_sec = float(fb.navigation_time.sec + fb.navigation_time.nanosec * 1e-9)
+        est_sec = float(fb.estimated_time_remaining.sec + fb.estimated_time_remaining.nanosec * 1e-9)
+        if self.initial_goal_dist is None or dist > self.initial_goal_dist:
+            self.initial_goal_dist = dist
+        if self.nav_feedback_callback:
+            self.nav_feedback_callback(dist, self.initial_goal_dist, nav_sec, est_sec, recov)
+
+    def _on_goal_result(self, fut):
+        try:
+            status = fut.result().status
+            if status == GoalStatus.STATUS_SUCCEEDED:
+                self.log("🏁 Đã đến đích thành công!")
+                self.emit_nav_status("🏁 ĐÃ ĐẾN ĐÍCH THÀNH CÔNG!", "Robot đã tới đúng vị trí mục tiêu và phanh dừng an toàn.", "#10b981")
+            elif status == GoalStatus.STATUS_CANCELED:
+                self.log("⛔ Mục tiêu đã bị hủy.")
+                self.emit_nav_status("⛔ ĐÃ HỦY MỤC TIÊU", "Đã phanh xe và dừng toàn bộ nhiệm vụ điều hướng theo yêu cầu.", "#6b7280")
+            elif status == GoalStatus.STATUS_ABORTED:
+                self.log("❌ Điều hướng bị hủy bỏ (Aborted).")
+                self.emit_nav_status("❌ BẾ TẮC / HỦY BỎ", "Robot không thể đến đích vì bị kẹt hoặc đường đi bị vật cản chặn hoàn toàn.", "#ef4444")
+        except Exception as e:
+            self.log(f"Lỗi khi nhận kết quả goal: {e}")
+
     def send_goal(self, x, y, yaw=0.0):
         if not self.nav_to_pose_client.wait_for_server(timeout_sec=1.0):
             self.log("NavigateToPose action server chưa sẵn sàng.")
+            self.emit_nav_status("⚠️ SERVER CHƯA SẴN SÀNG", "NavigateToPose action server chưa phản hồi. Hãy kiểm tra xem Nav2 đã Start chưa.", "#ef4444")
             return False
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose.header.frame_id = "map"
@@ -293,17 +329,25 @@ class RosInterface(Node):
         goal_msg.pose.pose.position.y = float(y)
         goal_msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
         goal_msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        self.current_goal_x = float(x)
+        self.current_goal_y = float(y)
+        self.initial_goal_dist = None
         self.log(f"Gửi goal Nav2: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f}")
-        send_goal_future = self.nav_to_pose_client.send_goal_async(goal_msg)
+        self.emit_nav_status("🎯 ĐÃ GỬI MỤC TIÊU MỚI", f"Mục tiêu ({x:.2f}, {y:.2f}). Đang gửi tới Nav2 planner để tính toán đường đi...", "#3b82f6")
+        send_goal_future = self.nav_to_pose_client.send_goal_async(goal_msg, feedback_callback=self._on_nav_feedback)
 
         def _on_goal_response(fut):
             try:
                 self.current_goal_handle = fut.result()
                 if not self.current_goal_handle.accepted:
                     self.log("Goal bị từ chối bởi Nav2 server.")
+                    self.emit_nav_status("❌ MỤC TIÊU BỊ TỪ CHỐI", "Nav2 server từ chối mục tiêu. Điểm đến có thể rơi vào vùng cấm hoặc ngoài bản đồ.", "#ef4444")
                     self.current_goal_handle = None
                 else:
                     self.log("Goal đã được Nav2 chấp nhận.")
+                    self.emit_nav_status("🚗 ĐANG BÁM LỘ TRÌNH MPPI", "Nav2 đã chấp nhận mục tiêu. Đang tính toán quỹ đạo điều khiển MPPI để di chuyển.", "#16a34a")
+                    result_future = self.current_goal_handle.get_result_async()
+                    result_future.add_done_callback(self._on_goal_result)
             except Exception as e:
                 self.log(f"Lỗi khi gửi goal Nav2: {e}")
 
@@ -313,6 +357,7 @@ class RosInterface(Node):
     def cancel_nav_goal(self):
         """Hủy ngay lập tức mục tiêu Nav2 đang chạy và phanh dừng robot"""
         self.log("⛔ [CANCEL GOAL] Đang gửi lệnh dừng khẩn cấp và hủy mục tiêu Nav2...")
+        self.emit_nav_status("⛔ ĐÃ PHANH DỪNG / HỦY GOAL", "Đã phanh xe khẩn cấp và gửi lệnh hủy mục tiêu tới Nav2.", "#ef4444")
         # 1. Phát liên tục vận tốc 0.0 vào /cmd_vel để phanh dừng bánh lập tức
         stop_twist = Twist()
         for _ in range(5):
@@ -343,146 +388,12 @@ class RosInterface(Node):
         self.log("✅ Đã phanh xe và gửi lệnh CancelGoal tới Nav2.")
         return True
 
-    def publish_edited_map(self, occ_grid_msg):
-        self.edited_map_pub.publish(occ_grid_msg)
-
-    def switch_map_subscription(self, new_topic):
-        pass  # Không cần nữa - subscribe /map1 từ đầu
-
     def send_waypoint_batch(self, waypoints):
         msg = String()
         msg.data = json.dumps({"waypoints": waypoints}, ensure_ascii=False)
         self.waypoints_pub.publish(msg)
         self.log(f"Gửi batch waypoint cho nhiemvuboss: {len(waypoints)} điểm")
-
-class MapEditor:
-    def __init__(self, ros_node_getter, log_callback=None):
-        self.get_ros_node = ros_node_getter
-        self.log = log_callback or (lambda msg: None)
-        self.original_map_msg = None
-        self.edited_data = None
-        self.map_width = 0
-        self.map_height = 0
-        self.map_resolution = 0.0
-        self.map_origin_x = 0.0
-        self.map_origin_y = 0.0
-        self.edit_enabled = False
-        self.history = []
-        self.redo_stack = []
-        self._stroke_start = 0
-
-    def load_from_grid(self, occ_grid):
-        info = occ_grid.info
-        self.map_width, self.map_height = info.width, info.height
-        self.map_resolution = info.resolution
-        self.map_origin_x, self.map_origin_y = info.origin.position.x, info.origin.position.y
-        self.original_map_msg = occ_grid
-        if self.edited_data is None or len(self.edited_data) != len(occ_grid.data):
-            self.edited_data = list(occ_grid.data)
-        if not self.edit_enabled:
-            self.edited_data = list(occ_grid.data)
-
-    def enable_edit(self):
-        if self.original_map_msg is None:
-            self.log("Chưa có bản đồ gốc để chỉnh sửa.")
-            return False
-        if self.edited_data is None or len(self.edited_data) != len(self.original_map_msg.data):
-            self.edited_data = list(self.original_map_msg.data)
-        self.edit_enabled = True
-        self.history.clear()
-        self.redo_stack.clear()
-        self.log("Đã bật chế độ chỉnh sửa map.")
-        return True
-
-    def disable_edit(self):
-        self.edit_enabled = False
-        self.log("Đã tắt chế độ chỉnh sửa map.")
-
-    def reset(self):
-        if self.original_map_msg is not None:
-            self.edited_data = list(self.original_map_msg.data)
-            self.history.clear()
-            self.redo_stack.clear()
-            self.log("Đã reset map về bản gốc.")
-
-    def paint_cell(self, mx, my, value, brush_radius=0):
-        if not self.edit_enabled or self.edited_data is None:
-            return False
-        changed = False
-        for dy in range(-brush_radius, brush_radius + 1):
-            for dx in range(-brush_radius, brush_radius + 1):
-                if brush_radius > 0 and dx * dx + dy * dy > brush_radius * brush_radius:
-                    continue
-                cx, cy = mx + dx, my + dy
-                if 0 <= cx < self.map_width and 0 <= cy < self.map_height:
-                    idx = cx + cy * self.map_width
-                    old_val = self.edited_data[idx]
-                    if old_val != value and old_val != -1:
-                        self.history.append((idx, old_val, value))
-                        self.redo_stack.clear()
-                        self.edited_data[idx] = value
-                        changed = True
-        return changed
-
-    def paint_world(self, wx, wy, value, brush_radius_cells=0):
-        if self.map_resolution <= 0:
-            return False
-        mx = int((wx - self.map_origin_x) / self.map_resolution)
-        my = int((wy - self.map_origin_y) / self.map_resolution)
-        return self.paint_cell(mx, my, value, brush_radius_cells)
-
-    def start_stroke(self):
-        self._stroke_start = len(self.history)
-
-    def end_stroke(self):
-        pass
-
-    def undo(self):
-        if not self.history:
-            return False
-        start = getattr(self, '_stroke_start', max(0, len(self.history) - 1))
-        if len(self.history) <= start:
-            group = list(self.history)
-            self.history.clear()
-        else:
-            group = self.history[start:]
-            self.history = self.history[:start]
-        for idx, old_val, new_val in group:
-            self.edited_data[idx] = old_val
-            self.redo_stack.append((idx, old_val, new_val))
-        self._stroke_start = len(self.history)
-        self.log(f"Undo: {len(group)} ô.")
-        return True
-
-    def redo(self):
-        if not self.redo_stack:
-            return False
-        idx, old_val, new_val = self.redo_stack.pop()
-        self.edited_data[idx] = new_val
-        self.history.append((idx, old_val, new_val))
-        self.log("Redo.")
-        return True
-
-    def get_edited_grid(self):
-        if self.original_map_msg is None or self.edited_data is None:
-            return None
-        msg = copy.deepcopy(self.original_map_msg)
-        msg.data = list(self.edited_data)
-        msg.header.stamp = rclpy.clock.Clock().now().to_msg()
-        return msg
-
-    def publish_edited_map(self):
-        node = self.get_ros_node()
-        if node is None:
-            self.log("ROS node chưa sẵn sàng.")
-            return False
-        msg = self.get_edited_grid()
-        if msg is None:
-            self.log("Không có dữ liệu map để publish.")
-            return False
-        node.publish_edited_map(msg)
-        self.log("Đã publish bản đồ chỉnh sửa lên /map.")
-        return True
+        self.emit_nav_status("📍 GỬI TẬP WAYPOINT", f"Đã gửi chuỗi {len(waypoints)} waypoint cho bộ điều hướng tự động.", "#3b82f6")
 
 class MapViewer(QLabel):
     def __init__(self, ros_node_getter, on_map_click=None, on_map_drag=None, parent=None):
@@ -766,6 +677,8 @@ class MainWindow(QWidget):
     pose_signal = pyqtSignal(float, float, float, str)
     scan_signal = pyqtSignal(object, object)
     dataenc_signal = pyqtSignal(object)
+    nav_feedback_signal = pyqtSignal(float, float, float, float, int)
+    nav_thought_signal = pyqtSignal(str, str, str)
     LAYER1_SIM, LAYER1_REAL = "layer1_sim", "layer1_real"
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
@@ -784,6 +697,8 @@ class MainWindow(QWidget):
         self.one_shot_lock = threading.Lock()
         self.map_mode = MAP_MODE_GOAL
         self.proc_mgr = ProcessManager(self.append_log)
+        self.last_thought_title = ""
+        self.last_thought_time = 0.0
         # Tự động dọn dẹp các tiến trình ROS2 & Gazebo chạy ngầm từ trước
         self.force_kill_known_ros_processes()
         self.ros_node = None
@@ -794,11 +709,12 @@ class MainWindow(QWidget):
         self.pose_signal.connect(self._on_new_pose_ui)
         self.scan_signal.connect(self._on_new_scan_ui)
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
+        self.nav_feedback_signal.connect(self._on_nav_feedback_ui)
+        self.nav_thought_signal.connect(self._on_nav_thought_ui)
         self.init_ui()
         self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 & Gazebo cũ trước khi khởi động.")
         self.init_ros()
         self.refresh_map_list()
-        self.map_editor = MapEditor(self.get_ros_node, self.append_log)
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self.refresh_status)
         self.status_timer.start(500)
@@ -867,24 +783,6 @@ class MainWindow(QWidget):
         map_layout.addWidget(self.btn_batch_mode, 6, 0); map_layout.addWidget(self.btn_batch_undo, 6, 1); map_layout.addWidget(self.btn_batch_clear, 6, 2)
         map_layout.addWidget(self.btn_batch_send, 7, 0, 1, 3); map_layout.addWidget(self.lbl_batch_info, 8, 0, 1, 3)
         map_group.setLayout(map_layout)
-        self.rb_map_goal = QRadioButton("Gửi Goal"); self.rb_map_draw = QRadioButton("Vẽ vật cản"); self.rb_map_erase = QRadioButton("Xóa vật cản")
-        self.rb_map_goal.setChecked(True)
-        self.map_mode_group = QButtonGroup(self); self.map_mode_group.setExclusive(True)
-        self.map_mode_group.addButton(self.rb_map_goal); self.map_mode_group.addButton(self.rb_map_draw); self.map_mode_group.addButton(self.rb_map_erase)
-        self.rb_map_goal.toggled.connect(self.on_map_mode_changed); self.rb_map_draw.toggled.connect(self.on_map_mode_changed); self.rb_map_erase.toggled.connect(self.on_map_mode_changed)
-        self.sld_brush = QSlider(Qt.Horizontal); self.sld_brush.setMinimum(0); self.sld_brush.setMaximum(10); self.sld_brush.setValue(2); self.sld_brush.setTickPosition(QSlider.TicksBelow)
-        self.lbl_brush = QLabel("Brush: 2 ô"); self.sld_brush.valueChanged.connect(lambda v: self.lbl_brush.setText(f"Brush: {v} ô"))
-        self.btn_edit_undo = QPushButton("Undo"); self.btn_edit_undo.clicked.connect(self.on_edit_undo)
-        self.btn_edit_redo = QPushButton("Redo"); self.btn_edit_redo.clicked.connect(self.on_edit_redo)
-        self.btn_edit_reset = QPushButton("Reset map gốc"); self.btn_edit_reset.clicked.connect(self.on_edit_reset)
-        self.btn_edit_apply = QPushButton("Áp dụng & Publish"); self.btn_edit_apply.clicked.connect(self.on_edit_apply)
-        self.lbl_edit_status = QLabel("Chỉnh sửa: OFF"); self.lbl_edit_status.setStyleSheet("color: gray; font-weight: bold;")
-        edit_group = QGroupBox("Chỉnh sửa map"); edit_layout = QGridLayout()
-        edit_layout.addWidget(self.rb_map_goal, 0, 0); edit_layout.addWidget(self.rb_map_draw, 0, 1); edit_layout.addWidget(self.rb_map_erase, 0, 2)
-        edit_layout.addWidget(self.lbl_brush, 1, 0); edit_layout.addWidget(self.sld_brush, 1, 1, 1, 2)
-        edit_layout.addWidget(self.btn_edit_undo, 2, 0); edit_layout.addWidget(self.btn_edit_redo, 2, 1); edit_layout.addWidget(self.btn_edit_reset, 2, 2)
-        edit_layout.addWidget(self.btn_edit_apply, 3, 0, 1, 3); edit_layout.addWidget(self.lbl_edit_status, 4, 0, 1, 3)
-        edit_group.setLayout(edit_layout)
         self.btn_start_platform = QPushButton("Start Layer 1 (Odom)"); self.btn_stop_platform = QPushButton("Stop Layer 1 (Odom)")
         self.btn_start_mode = QPushButton("Start Layer 2 (Mode)"); self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
         self.btn_switch_mode = QPushButton("Switch Layer 2 Mode")
@@ -919,11 +817,104 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.lbl_nav2_status, 10, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 11, 0, 1, 2)
         control_layout.addWidget(self.lbl_dataenc, 12, 0, 1, 2)
         control_group.setLayout(control_layout)
-        self.log_box = QTextEdit(); self.log_box.setReadOnly(True); self.log_box.setMinimumHeight(140)
-        log_group = QGroupBox("Log"); log_layout = QVBoxLayout(); log_layout.addWidget(self.log_box); log_group.setLayout(log_layout)
+        # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
+        self.tabs_info = QTabWidget()
+        self.tabs_info.setMinimumHeight(260)
+
+        # TAB 1: Log gốc hệ thống
+        tab_log = QWidget()
+        tab_log_layout = QVBoxLayout()
+        tab_log_layout.setContentsMargins(4, 4, 4, 4)
+        self.log_box = QTextEdit()
+        self.log_box.setReadOnly(True)
+        self.log_box.setMinimumHeight(140)
+        tab_log_layout.addWidget(self.log_box)
+        tab_log.setLayout(tab_log_layout)
+        self.tabs_info.addTab(tab_log, "📜 Log Hệ Thống")
+
+        # TAB 2: Trạng thái & Suy nghĩ của Robot
+        tab_mind = QWidget()
+        tab_mind_layout = QVBoxLayout()
+        tab_mind_layout.setContentsMargins(6, 6, 6, 6)
+        tab_mind_layout.setSpacing(6)
+
+        # 1. Banner suy nghĩ hiện tại
+        self.mind_banner_frame = QFrame()
+        self.mind_banner_frame.setStyleSheet(
+            "QFrame { background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 6px; padding: 6px; }"
+        )
+        banner_layout = QVBoxLayout(self.mind_banner_frame)
+        banner_layout.setContentsMargins(6, 6, 6, 6)
+        banner_layout.setSpacing(4)
+        self.lbl_mind_title = QLabel("🤖 Robot đang nghĩ gì:")
+        self.lbl_mind_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #94a3b8;")
+        self.lbl_mind_status = QLabel("Chưa có lệnh điều hướng")
+        self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
+        self.lbl_mind_status.setWordWrap(True)
+        self.lbl_mind_desc = QLabel("Robot đang ở trạng thái chờ. Hãy click mục tiêu trên bản đồ để bắt đầu.")
+        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #cbd5e1; line-height: 1.3;")
+        self.lbl_mind_desc.setWordWrap(True)
+        banner_layout.addWidget(self.lbl_mind_title)
+        banner_layout.addWidget(self.lbl_mind_status)
+        banner_layout.addWidget(self.lbl_mind_desc)
+        tab_mind_layout.addWidget(self.mind_banner_frame)
+
+        # 2. Nhóm thông số lộ trình Nav2
+        nav_info_group = QGroupBox("Tiến trình điều hướng")
+        nav_info_layout = QGridLayout()
+        nav_info_layout.setContentsMargins(6, 6, 6, 6)
+        nav_info_layout.setSpacing(4)
+
+        self.lbl_mind_goal = QLabel("🎯 Mục tiêu: Chưa nhận")
+        self.lbl_mind_goal.setStyleSheet("font-weight: bold; color: #f1f5f9;")
+        self.lbl_mind_dist = QLabel("📏 Còn lại: -- m")
+        self.lbl_mind_time = QLabel("⏱ Thời gian: --")
+        self.lbl_mind_recovery = QLabel("🔄 Tự cứu (Recovery): 0 lần")
+
+        self.pbar_nav = QProgressBar()
+        self.pbar_nav.setRange(0, 100)
+        self.pbar_nav.setValue(0)
+        self.pbar_nav.setTextVisible(True)
+        self.pbar_nav.setFormat("Tiến độ: %p%")
+        self.pbar_nav.setStyleSheet(
+            "QProgressBar { border: 1px solid #475569; border-radius: 4px; text-align: center; background-color: #1e293b; color: white; font-weight: bold; height: 18px; }"
+            "QProgressBar::chunk { background-color: #10b981; border-radius: 3px; }"
+        )
+
+        nav_info_layout.addWidget(self.lbl_mind_goal, 0, 0, 1, 2)
+        nav_info_layout.addWidget(self.pbar_nav, 1, 0, 1, 2)
+        nav_info_layout.addWidget(self.lbl_mind_dist, 2, 0)
+        nav_info_layout.addWidget(self.lbl_mind_time, 2, 1)
+        nav_info_layout.addWidget(self.lbl_mind_recovery, 3, 0, 1, 2)
+        nav_info_group.setLayout(nav_info_layout)
+        tab_mind_layout.addWidget(nav_info_group)
+
+        # 3. Nhật ký suy nghĩ gần nhất
+        thought_hist_header = QHBoxLayout()
+        lbl_hist_title = QLabel("📝 Lịch sử phản ứng gần nhất:")
+        lbl_hist_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #94a3b8;")
+        self.btn_clear_thoughts = QPushButton("Xóa")
+        self.btn_clear_thoughts.setFixedSize(45, 20)
+        self.btn_clear_thoughts.setStyleSheet("font-size: 10px; padding: 0px;")
+        self.btn_clear_thoughts.clicked.connect(self.clear_thought_history)
+        thought_hist_header.addWidget(lbl_hist_title)
+        thought_hist_header.addStretch()
+        thought_hist_header.addWidget(self.btn_clear_thoughts)
+        tab_mind_layout.addLayout(thought_hist_header)
+
+        self.thought_history_box = QTextEdit()
+        self.thought_history_box.setReadOnly(True)
+        self.thought_history_box.setMinimumHeight(100)
+        self.thought_history_box.setStyleSheet(
+            "background-color: #0b0f19; color: #a5f3fc; font-family: Monospace, Consolas, monospace; font-size: 10px; border: 1px solid #334155; border-radius: 4px;"
+        )
+        tab_mind_layout.addWidget(self.thought_history_box, stretch=1)
+        tab_mind.setLayout(tab_mind_layout)
+        self.tabs_info.addTab(tab_mind, "🧠 Trạng Thái & Suy Nghĩ")
+
         left_layout = QVBoxLayout()
-        left_layout.addWidget(system_group); left_layout.addWidget(map_group); left_layout.addWidget(edit_group)
-        left_layout.addWidget(control_group); left_layout.addWidget(log_group, stretch=1)
+        left_layout.addWidget(system_group); left_layout.addWidget(map_group)
+        left_layout.addWidget(control_group); left_layout.addWidget(self.tabs_info, stretch=1)
         left_widget = QWidget(); left_widget.setLayout(left_layout)
         left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True); left_scroll.setWidget(left_widget)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(320)
@@ -937,7 +928,15 @@ class MainWindow(QWidget):
     def init_ros(self):
         if not rclpy.ok():
             rclpy.init(args=None)
-        self.ros_node = RosInterface(log_callback=self.append_log, map_callback=self.on_new_map, pose_callback=self.on_new_pose, scan_callback=self.on_new_scan, dataenc_callback=self.on_new_dataenc)
+        self.ros_node = RosInterface(
+            log_callback=self.append_log,
+            map_callback=self.on_new_map,
+            pose_callback=self.on_new_pose,
+            scan_callback=self.on_new_scan,
+            dataenc_callback=self.on_new_dataenc,
+            nav_feedback_callback=self.on_new_nav_feedback,
+            nav_status_callback=self.on_new_nav_status,
+        )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True); self.ros_spin_thread.start()
         self.append_log("ROS2 node v3 đã khởi động.")
 
@@ -954,8 +953,90 @@ class MainWindow(QWidget):
     def append_log(self, text):
         self.log_signal.emit(str(text))
 
+    def on_new_nav_feedback(self, dist, total_dist, nav_sec, est_sec, recov):
+        self.nav_feedback_signal.emit(float(dist), float(total_dist), float(nav_sec), float(est_sec), int(recov))
+
+    def on_new_nav_status(self, title, desc, color):
+        self.nav_thought_signal.emit(str(title), str(desc), str(color))
+
+    def clear_thought_history(self):
+        self.thought_history_box.clear()
+
+    def _on_nav_feedback_ui(self, dist, total_dist, nav_sec, est_sec, recov):
+        self.lbl_mind_dist.setText(f"📏 Còn lại: {dist:.2f} m")
+        self.lbl_mind_time.setText(f"⏱ Đi: {int(nav_sec)}s | Dự kiến: {int(est_sec)}s")
+        self.lbl_mind_recovery.setText(f"🔄 Tự cứu (Recovery): {recov} lần")
+        if total_dist > 0.05:
+            progress = max(0, min(100, int((1.0 - (dist / total_dist)) * 100)))
+            self.pbar_nav.setValue(progress)
+
+    def _on_nav_thought_ui(self, title, desc, color):
+        self.lbl_mind_status.setText(title)
+        self.lbl_mind_status.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {color};")
+        self.lbl_mind_desc.setText(desc)
+        self.mind_banner_frame.setStyleSheet(
+            f"QFrame {{ background-color: #0f172a; border: 2px solid {color}; border-radius: 6px; padding: 6px; }}"
+        )
+        now_str = time.strftime("%H:%M:%S")
+        self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: {color};'>{title}</b>: {desc}")
+        if hasattr(self, 'ros_node') and self.ros_node and hasattr(self.ros_node, 'current_goal_x') and self.ros_node.current_goal_x is not None:
+            self.lbl_mind_goal.setText(f"🎯 Mục tiêu: ({self.ros_node.current_goal_x:.2f}, {self.ros_node.current_goal_y:.2f})")
+
+    def _parse_log_for_mind(self, text):
+        now = time.monotonic()
+        lower = text.lower()
+        title = None
+        desc = None
+        color = "#3b82f6"
+
+        if "controller failed to compute command velocity" in lower or "failed to make progress" in lower:
+            title = "⚠️ ĐANG DỪNG TRÁNH VẬT CẢN (MPPI)"
+            desc = "Bộ điều khiển MPPI phát hiện vật cản quá sát thân xe. Robot đang phanh dừng an toàn để chờ đường mở hoặc tính đường lách."
+            color = "#f97316"
+        elif "failed to create plan" in lower or "failed to generate a valid path" in lower or "start pose is in collision" in lower or "goal is in collision" in lower or "could not compute path" in lower:
+            title = "❌ BẾ TẮC: KHÔNG THỂ LẬP ĐƯỜNG ĐI"
+            desc = "Bộ lập kế hoạch không tìm thấy đường đi an toàn. Vị trí đích hoặc điểm đứng của robot đang bị vật cản/tường chặn kín."
+            color = "#ef4444"
+        elif "backup" in lower or "backing up" in lower:
+            title = "⏪ ĐANG TỰ ĐỘNG LÙI XE THOÁT KẸT"
+            desc = "Đang lùi xe một khoảng ngắn để tạo cự ly an toàn trước mũi xe."
+            color = "#a855f7"
+        elif "spinning" in lower or ("spin" in lower and "behavior" in lower):
+            title = "🔄 ĐANG XOAY TẠI CHỖ TÌM ĐƯỜNG"
+            desc = "Robot đang xoay thân xe để cảm biến quét lại không gian xung quanh và tìm lối thoát."
+            color = "#8b5cf6"
+        elif "wait" in lower and "behavior" in lower:
+            title = "⏳ ĐANG TẠM DỪNG CHỜ ĐƯỜNG THOÁNG"
+            desc = "Đang tạm dừng tĩnh vài giây để chờ người hoặc vật cản phía trước rời đi."
+            color = "#3b82f6"
+        elif "clearing" in lower and "costmap" in lower:
+            title = "🧹 ĐANG XÓA BÓNG MA CẢM BIẾN"
+            desc = "Đang tự động dọn sạch bản đồ vật cản cục bộ để cảm biến LiDAR & Depth Camera cập nhật lại thực tế."
+            color = "#eab308"
+        elif "passing new path" in lower:
+            title = "🚗 ĐÃ CÓ LỘ TRÌNH THÔNG THOÁNG"
+            desc = "Đường đi đã thông suốt. MPPI đang điều khiển động cơ bám sát quỹ đạo."
+            color = "#16a34a"
+        elif "reached the goal" in lower or "goal succeeded" in lower:
+            title = "🏁 ĐÃ ĐẾN ĐÍCH THÀNH CÔNG!"
+            desc = "Robot đã hoàn thành lộ trình và đến đúng điểm hẹn."
+            color = "#10b981"
+            self.pbar_nav.setValue(100)
+        elif "extrapolation into future" in lower or "extrapolation into past" in lower:
+            title = "⚠️ LỆCH THỜI GIAN TF (TF JITTER)"
+            desc = "Có độ trễ nhẹ giữa TF odom và máy tính. Nav2 đang tự động bù trừ dữ liệu."
+            color = "#f59e0b"
+
+        if title is not None:
+            if title == self.last_thought_title and (now - self.last_thought_time) < 2.0:
+                return
+            self.last_thought_title = title
+            self.last_thought_time = now
+            self.nav_thought_signal.emit(title, desc, color)
+
     def _append_log_ui(self, text):
         self.log_box.append(text)
+        self._parse_log_for_mind(text)
 
     def on_new_map(self, msg):
         self.map_signal.emit(msg)
@@ -967,31 +1048,7 @@ class MainWindow(QWidget):
         self.dataenc_signal.emit(values)
 
     def _on_new_map_ui(self, msg):
-        if self.map_editor:
-            self.map_editor.load_from_grid(msg)
-        if self.map_editor and self.map_editor.edit_enabled:
-            # Edit mode: KHÔNG redraw khi SLAM publish (tránh nhấp nháy)
-            pass
-        else:
-            # Hiển thị map bình thường
-            self.map_view.update_map(msg)
-            # Nhận map đầu tiên → tự động bật edit mode
-            if self.map_editor and self.map_editor.original_map_msg and not self.map_editor.edit_enabled:
-                self._auto_activate_map_proxy()
-
-    def _auto_activate_map_proxy(self):
-        """Nhận map đầu tiên từ /map1 → bật edit mode ngay."""
-        self.append_log("Nhận map đầu tiên từ /map1 → bật chỉnh sửa map...")
-        QTimer.singleShot(500, self._activate_edit_mode)
-
-    def _activate_edit_mode(self):
-        if self.map_editor:
-            self.map_editor.enable_edit()
-            self.lbl_edit_status.setText("Chỉnh sửa: ON (SLAM→/map1, GUI→/map)")
-            self.lbl_edit_status.setStyleSheet("color: lime; font-weight: bold;")
-            if self.map_editor.edited_data:
-                self.map_view.update_edited_map(self.map_editor.edited_data, self.map_editor.map_width, self.map_editor.map_height)
-            self.append_log("Đã tự động bật chỉnh sửa map.")
+        self.map_view.update_map(msg)
 
     def _on_new_pose_ui(self, x, y, yaw, source):
         self.map_view.update_pose(x, y, yaw, source)
@@ -1005,53 +1062,16 @@ class MainWindow(QWidget):
         else:
             self.lbl_dataenc.setText(f"Encoder: {values}")
 
-    def on_map_mode_changed(self):
-        if self.rb_map_goal.isChecked(): self.map_mode = MAP_MODE_GOAL
-        elif self.rb_map_draw.isChecked(): self.map_mode = MAP_MODE_DRAW_OBSTACLE
-        elif self.rb_map_erase.isChecked(): self.map_mode = MAP_MODE_ERASE
-    def on_edit_undo(self):
-        if self.map_editor and self.map_editor.undo(): self._refresh_edit_map_display()
-    def on_edit_redo(self):
-        if self.map_editor and self.map_editor.redo(): self._refresh_edit_map_display()
-    def on_edit_reset(self):
-        if self.map_editor: self.map_editor.reset(); self._refresh_edit_map_display()
-    def on_edit_apply(self):
-        if not self.map_editor: return
-        if not self.map_editor.edit_enabled:
-            QMessageBox.warning(self, "Chưa bật edit", "Chưa có map để áp dụng."); return
-        self.map_editor.publish_edited_map()
-    def _refresh_edit_map_display(self):
-        if self.map_editor and self.map_editor.edited_data:
-            self.map_view.update_edited_map(self.map_editor.edited_data, self.map_editor.map_width, self.map_editor.map_height)
-
     def on_map_dragged(self, wx, wy):
-        if wx is None or wy is None:
-            if self.map_editor: self.map_editor.end_stroke()
-            if self.map_editor and self.map_editor.edit_enabled: self._refresh_edit_map_display()
-            return
-        if self.map_mode not in (MAP_MODE_DRAW_OBSTACLE, MAP_MODE_ERASE): return
-        if not self.map_editor or not self.map_editor.edit_enabled: return
-        brush = self.sld_brush.value()
-        paint_value = 100 if self.map_mode == MAP_MODE_DRAW_OBSTACLE else 0
-        if self.map_editor.paint_world(wx, wy, paint_value, brush): self._refresh_edit_map_display()
+        pass
 
     def on_map_clicked(self, wx, wy):
-        if self.map_mode == MAP_MODE_DRAW_OBSTACLE:
-            if self.map_editor and self.map_editor.edit_enabled:
-                brush = self.sld_brush.value()
-                self.map_editor.start_stroke(); self.map_editor.paint_world(wx, wy, 100, brush); self.map_editor.end_stroke()
-                self._refresh_edit_map_display(); return True
-            return False
-        if self.map_mode == MAP_MODE_ERASE:
-            if self.map_editor and self.map_editor.edit_enabled:
-                brush = self.sld_brush.value()
-                self.map_editor.start_stroke(); self.map_editor.paint_world(wx, wy, 0, brush); self.map_editor.end_stroke()
-                self._refresh_edit_map_display(); return True
-            return False
         if self.batch_waypoint_mode:
             name = self.waypoint_name_from_index(len(self.batch_waypoints))
             self.batch_waypoints.append({"name": name, "x": float(wx), "y": float(wy), "yaw": 0.0, "frame_id": "map"})
-            self.refresh_batch_waypoint_views(); self.append_log(f"Thêm waypoint {name}: x={wx:.3f}, y={wy:.3f}"); return True
+            self.refresh_batch_waypoint_views()
+            self.append_log(f"Thêm waypoint {name}: x={wx:.3f}, y={wy:.3f}")
+            return True
         return False
 
     def waypoint_name_from_index(self, idx):
@@ -1305,9 +1325,9 @@ class MainWindow(QWidget):
         data = self._load_yaml(SLAM_MAPPING_PARAMS_BASE)
         if "slam_toolbox" not in data: data["slam_toolbox"] = {"ros__parameters": {}}
         if "ros__parameters" not in data["slam_toolbox"]: data["slam_toolbox"]["ros__parameters"] = {}
-        data["slam_toolbox"]["ros__parameters"]["map_topic"] = "/map1"
+        data["slam_toolbox"]["ros__parameters"]["map_topic"] = "/map"
         temp_path = self._write_temp_yaml(data, "slam_mapping_gui_v3_")
-        self.append_log(f"Tạo SLAM mapping params tạm: {temp_path} (map_topic=/map1)"); return temp_path
+        self.append_log(f"Tạo SLAM mapping params tạm: {temp_path} (map_topic=/map)"); return temp_path
     def build_slam_localization_params(self, map_graph_stem=None):
         data = self._load_yaml(SLAM_LOCALIZATION_PARAMS_BASE)
         if "slam_toolbox" not in data: data["slam_toolbox"] = {"ros__parameters": {}}

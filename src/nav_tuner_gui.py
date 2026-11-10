@@ -885,10 +885,9 @@ class NavTunerGUI(QMainWindow):
         self.append_log(f"Đã nạp và gửi thành công Preset [{preset_name}] tới Robot!", "SUCCESS")
 
     def on_load_yaml_file(self):
-        """Mở hộp thoại chọn file YAML cấu hình để nạp vào GUI và áp dụng lên Robot"""
-        init_dir = os.path.join(self.ws_dir, 'src/mo_hinh/config')
+        init_dir = os.path.join(self.ws_dir, 'src/mo_hinh/config/nav_profiles')
         if not os.path.exists(init_dir):
-            init_dir = self.ws_dir
+            init_dir = os.path.join(self.ws_dir, 'src/mo_hinh/config')
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Chọn file YAML cấu hình Nav2 / SLAM",
             init_dir,

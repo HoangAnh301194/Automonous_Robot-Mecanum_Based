@@ -184,18 +184,18 @@ def generate_launch_description():
             description='Front depth FPS (default: 15).',
         ),
 
-        # Rear Depth Camera parameters (320x240 @ 15 FPS - siêu nhẹ cho Jetson)
+        # Rear Depth Camera parameters (160x120 @ 15 FPS - siêu nhẹ cho Jetson)
         DeclareLaunchArgument(
             'rear_serial', default_value='17122514440',
             description='Serial of rear depth camera.',
         ),
         DeclareLaunchArgument(
-            'rear_depth_width', default_value='320',
-            description='Rear depth width (default: 320 - optimal lightweight).',
+            'rear_depth_width', default_value='160',
+            description='Rear depth width (default: 160 - optimal ultra-lightweight).',
         ),
         DeclareLaunchArgument(
-            'rear_depth_height', default_value='240',
-            description='Rear depth height (default: 240).',
+            'rear_depth_height', default_value='120',
+            description='Rear depth height (default: 120).',
         ),
         DeclareLaunchArgument(
             'rear_depth_fps', default_value='15',
