@@ -49,6 +49,22 @@ def _openni_library():
     for key in ("OPENNI2_REDIST", "OPENNI2_REDIST64"):
         if os.environ.get(key):
             candidates.append(str(Path(os.environ[key]) / "libOpenNI2.so"))
+    # Astra's bundled OpenNI2 must precede the system libOpenNI2.so.
+    # Ubuntu's generic OpenNI2 may enumerate zero Orbbec devices even when
+    # the Astra-specific library and its liborbbec driver enumerate all three.
+    try:
+        from ament_index_python.packages import get_package_prefix
+        prefix = Path(get_package_prefix("astra_camera"))
+        candidates += [
+            str(prefix / "lib" / "libOpenNI2.so"),
+            str(prefix / "lib" / "astra_camera" / "libOpenNI2.so"),
+        ]
+        # Match the driver's bundled plugin location when none is configured.
+        bundled_drivers = prefix / "lib" / "OpenNI2" / "Drivers" / "liborbbec.so"
+        if bundled_drivers.exists() and not os.environ.get("OPENNI2_REDIST"):
+            os.environ["OPENNI2_REDIST"] = str(prefix / "lib" / "OpenNI2")
+    except (ImportError, LookupError):
+        pass
     discovered = ctypes.util.find_library("OpenNI2")
     if discovered:
         candidates.append(discovered)
@@ -59,15 +75,6 @@ def _openni_library():
         "/usr/local/lib/libOpenNI2.so",
         "/opt/ros/humble/lib/libOpenNI2.so",
     ]
-    try:
-        from ament_index_python.packages import get_package_prefix
-        prefix = Path(get_package_prefix("astra_camera"))
-        candidates += [
-            str(prefix / "lib" / "libOpenNI2.so"),
-            str(prefix / "lib" / "astra_camera" / "libOpenNI2.so"),
-        ]
-    except (ImportError, LookupError):
-        pass
     errors = []
     for name in dict.fromkeys(candidates):
         try:
