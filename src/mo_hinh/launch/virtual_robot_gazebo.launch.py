@@ -135,8 +135,8 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument('use_sim_time', default_value='true'),
         DeclareLaunchArgument('world', default_value=default_world),
-        DeclareLaunchArgument('x_pose', default_value='-2.0'),
-        DeclareLaunchArgument('y_pose', default_value='-2.0'),
+        DeclareLaunchArgument('x_pose', default_value='-9.0'),
+        DeclareLaunchArgument('y_pose', default_value='0.0'),
         DeclareLaunchArgument('z_pose', default_value='0.10'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
 

@@ -59,8 +59,15 @@ bt_navigator:
     default_server_timeout: 20
     wait_for_service_timeout: 1000
     action_server_result_timeout: 900.0
-    # Su dung Behavior Tree chuan goc cua ROS 2 Humble (tu dong replan va recovery: spin, backup, wait)
+    navigators: ["navigate_to_pose"]
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    default_nav_to_pose_bt_xml: "/home/duc/robot_ws/src/mo_hinh/config/navigate_to_pose_custom_recovery.xml"
     plugin_lib_names:
+      - nav2_operator_alert_plugin
+      - nav2_speak_plugin
+      - nav2_check_rear_safety_plugin
+      - nav2_recovery_progress_guard_plugin
       - nav2_compute_path_to_pose_action_bt_node
       - nav2_compute_path_through_poses_action_bt_node
       - nav2_smooth_path_action_bt_node

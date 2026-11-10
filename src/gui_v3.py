@@ -1221,7 +1221,7 @@ class MainWindow(QWidget):
         topic = self.get_selected_odom_topic()
         changed = _replace_key_recursive(data, "odom_topic", topic)
 
-        # Tự động thay thế mọi đường dẫn chứa /home/.../ros2_ws thành đường dẫn thực tế của máy
+        # Tự động thay thế mọi đường dẫn chứa /home/.../ros2_ws hoặc robot_ws thành đường dẫn thực tế của máy
         def _fix_user_paths(obj):
             if isinstance(obj, dict):
                 return {k: _fix_user_paths(v) for k, v in obj.items()}
@@ -1229,65 +1229,10 @@ class MainWindow(QWidget):
                 return [_fix_user_paths(v) for v in obj]
             elif isinstance(obj, str):
                 import re
-                return re.sub(r"/home/[^/]+/ros2_ws", WS_ROOT, obj)
+                return re.sub(r"/home/[^/]+/(?:ros2_ws|robot_ws)", WS_ROOT, obj)
             return obj
 
         data = _fix_user_paths(data)
-
-        if "bt_navigator" in data and "ros__parameters" in data["bt_navigator"]:
-            bt_params = data["bt_navigator"]["ros__parameters"]
-            # Su dung Behavior Tree va Recovery chuan goc cua ROS 2 Humble
-            bt_params.pop("default_nav_to_pose_bt_xml", None)
-            bt_params.pop("default_nav_through_poses_bt_xml", None)
-            bt_params.pop("navigators", None)
-            bt_params.pop("navigate_to_pose", None)
-            bt_params["plugin_lib_names"] = [
-                "nav2_compute_path_to_pose_action_bt_node",
-                "nav2_compute_path_through_poses_action_bt_node",
-                "nav2_smooth_path_action_bt_node",
-                "nav2_follow_path_action_bt_node",
-                "nav2_spin_action_bt_node",
-                "nav2_wait_action_bt_node",
-                "nav2_assisted_teleop_action_bt_node",
-                "nav2_back_up_action_bt_node",
-                "nav2_drive_on_heading_bt_node",
-                "nav2_clear_costmap_service_bt_node",
-                "nav2_is_stuck_condition_bt_node",
-                "nav2_goal_reached_condition_bt_node",
-                "nav2_goal_updated_condition_bt_node",
-                "nav2_globally_updated_goal_condition_bt_node",
-                "nav2_is_path_valid_condition_bt_node",
-                "nav2_initial_pose_received_condition_bt_node",
-                "nav2_reinitialize_global_localization_service_bt_node",
-                "nav2_rate_controller_bt_node",
-                "nav2_distance_controller_bt_node",
-                "nav2_speed_controller_bt_node",
-                "nav2_truncate_path_action_bt_node",
-                "nav2_truncate_path_local_action_bt_node",
-                "nav2_goal_updater_node_bt_node",
-                "nav2_recovery_node_bt_node",
-                "nav2_pipeline_sequence_bt_node",
-                "nav2_round_robin_node_bt_node",
-                "nav2_transform_available_condition_bt_node",
-                "nav2_time_expired_condition_bt_node",
-                "nav2_path_expiring_timer_condition",
-                "nav2_distance_traveled_condition_bt_node",
-                "nav2_single_trigger_bt_node",
-                "nav2_goal_updated_controller_bt_node",
-                "nav2_is_battery_low_condition_bt_node",
-                "nav2_navigate_through_poses_action_bt_node",
-                "nav2_navigate_to_pose_action_bt_node",
-                "nav2_remove_passed_goals_action_bt_node",
-                "nav2_planner_selector_bt_node",
-                "nav2_controller_selector_bt_node",
-                "nav2_goal_checker_selector_bt_node",
-                "nav2_controller_cancel_bt_node",
-                "nav2_path_longer_on_approach_bt_node",
-                "nav2_wait_cancel_bt_node",
-                "nav2_spin_cancel_bt_node",
-                "nav2_back_up_cancel_bt_node",
-                "nav2_assisted_teleop_cancel_bt_node",
-            ]
 
         if "behavior_server" in data and "ros__parameters" in data["behavior_server"]:
             bs_params = data["behavior_server"]["ros__parameters"]
@@ -1299,7 +1244,7 @@ class MainWindow(QWidget):
             bs_params["assisted_teleop"] = {"plugin": "nav2_behaviors/AssistedTeleop"}
 
         temp_path = self._write_temp_yaml(data, "nav2_gui_v3_")
-        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, chuẩn Nav2 Humble gốc)")
+        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, giữ cấu hình BT/Recovery từ YAML)")
         return temp_path
     def build_slam_mapping_params(self):
         data = self._load_yaml(SLAM_MAPPING_PARAMS_BASE)
