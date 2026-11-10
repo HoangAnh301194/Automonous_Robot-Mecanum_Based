@@ -16,11 +16,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Compile Kiosk entry point, ROS launch and 9router config loader
+      - name: Compile Kiosk entry point, ROS launch and 9router startup
         run: |
           python3 -m compileall -q \
             src/robot_ui/robot_ui/kiosk/main.py \
             src/robot_ui/robot_ui/kiosk/llm_env.py \
+            src/robot_ui/robot_ui/kiosk/router_process.py \
             src/robot_ui/launch/kiosk.launch.py
       - name: Test pure-Python knowledge and session code
         run: |
