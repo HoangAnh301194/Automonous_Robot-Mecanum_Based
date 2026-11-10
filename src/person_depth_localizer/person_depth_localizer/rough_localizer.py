@@ -3,10 +3,13 @@
 The RGB bbox and Depth ROI are joined by normalized image coordinates.
 This is NOT a calibrated RGB/Depth registration. Intended to prove that
 tracking, depth, TF2 and RViz messages work before calibration.
+Now includes Stage 4 HandWave association per track_id.
 """
 from collections import deque
 import json
 import math
+import re
+import time
 
 import numpy as np
 import rclpy
@@ -15,7 +18,7 @@ from geometry_msgs.msg import PointStamped, Point
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CameraInfo, Image
-from std_msgs.msg import Float32, String
+from std_msgs.msg import Bool, Float32, String
 from visualization_msgs.msg import Marker, MarkerArray
 from yolo_msgs.msg import DetectionArray
 from tf2_ros import Buffer, TransformException, TransformListener
@@ -66,6 +69,11 @@ class RoughPersonLocalizer(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
+        # Stage 4: Hand wave tracking integration
+        self.waving_track_ids = set()
+        self.last_wave_time = 0.0
+        self.global_wave_detected = False
+
         self.create_subscription(
             Image, '/ai_camera/color/image_raw', self.rgb_cb,
             qos_profile_sensor_data)
@@ -77,6 +85,12 @@ class RoughPersonLocalizer(Node):
             qos_profile_sensor_data)
         self.create_subscription(
             DetectionArray, '/yolo/tracking', self.tracking_cb, 10)
+
+        # HandWave subscribers
+        self.create_subscription(
+            Bool, '/pose/wave_detected', self.wave_detected_cb, 10)
+        self.create_subscription(
+            String, '/pose/wave_status', self.wave_status_cb, 10)
 
         # Multi-person array topic
         self.tracked_people_pub = self.create_publisher(
@@ -97,8 +111,22 @@ class RoughPersonLocalizer(Node):
             String, '/mission/person_preview_status', 10)
 
         self.get_logger().warn(
-            'UNCALIBRATED PREVIEW ONLY. Multi-person tracking active on /perception/tracked_people. '
+            'UNCALIBRATED PREVIEW ONLY. Multi-person + HandWave tracking active on /perception/tracked_people. '
             'Do not subscribe to autonomous navigation until calibrated.')
+
+    def wave_detected_cb(self, msg: Bool):
+        self.last_wave_time = time.time()
+        self.global_wave_detected = bool(msg.data)
+        if not self.global_wave_detected:
+            self.waving_track_ids.clear()
+
+    def wave_status_cb(self, msg: String):
+        self.last_wave_time = time.time()
+        # Parse format: "[person_41] Waving with Right hand! | [person_12] ..."
+        matches = re.findall(r'\[person_([-\w]+)\]', msg.data)
+        if matches:
+            self.waving_track_ids = set(matches)
+            self.global_wave_detected = True
 
     def rgb_cb(self, msg):
         self.rgb_w, self.rgb_h = msg.width, msg.height
@@ -194,6 +222,10 @@ class RoughPersonLocalizer(Node):
         hi = float(self.get_parameter('max_depth_m').value)
         min_samp = int(self.get_parameter('min_samples').value)
 
+        # Stage 4: Check if HandWave node is active (< 2.5s)
+        now_sec = time.time()
+        wave_alive = (now_sec - self.last_wave_time) < 2.5
+
         tracked_people_list = []
         markers = []
         primary_person_data = None
@@ -239,6 +271,15 @@ class RoughPersonLocalizer(Node):
 
             dist_xy = math.hypot(point_base[0], point_base[1])
 
+            # Stage 4: Check if this specific person is waving
+            is_waving = False
+            if wave_alive and self.global_wave_detected:
+                clean_tid = track_id.strip()
+                if (clean_tid in self.waving_track_ids or
+                    str(clean_tid.split('_')[-1]) in self.waving_track_ids or
+                    (len(people) == 1 and self.global_wave_detected)):
+                    is_waving = True
+
             # Populate TrackedPerson
             tp = TrackedPerson()
             tp.track_id = track_id
@@ -247,8 +288,8 @@ class RoughPersonLocalizer(Node):
             tp.depth_m = float(depth_m)
             tp.position_valid = True
             tp.depth_valid = True
-            tp.is_waving = False  # To be connected in Stage 4
-            tp.wave_valid = False
+            tp.is_waving = bool(is_waving)
+            tp.wave_valid = bool(wave_alive)
             tp.detection_confidence = float(person.score)
             tp.rgb_stamp = msg.header.stamp
             tp.depth_stamp = depth_stamp
@@ -268,17 +309,8 @@ class RoughPersonLocalizer(Node):
             marker.pose.position.y = float(point_base[1])
             marker.pose.position.z = 0.5
             marker.pose.orientation.w = 1.0
-            marker.scale.x = 0.35
-            marker.scale.y = 0.35
-            marker.scale.z = 1.0
-            marker.color.r = 1.0
-            marker.color.g = 0.55
-            marker.color.b = 0.0
-            marker.color.a = 0.85
             marker.lifetime.sec = 1
-            markers.append(marker)
 
-            # Text label above person
             label = Marker()
             label.header = marker.header
             label.ns = 'tracked_people'
@@ -289,24 +321,55 @@ class RoughPersonLocalizer(Node):
             label.pose.position.y = float(point_base[1])
             label.pose.position.z = 1.2
             label.pose.orientation.w = 1.0
-            label.scale.z = 0.22
-            label.color.r = 1.0
-            label.color.g = 0.9
-            label.color.b = 0.2
-            label.color.a = 1.0
             label.lifetime.sec = 1
-            label.text = f'ID:{track_id} | d:{dist_xy:.2f}m'
+
+            if is_waving:
+                # Bright green cylinder and text with WAVING indicator
+                marker.scale.x = 0.42
+                marker.scale.y = 0.42
+                marker.scale.z = 1.1
+                marker.color.r = 0.0
+                marker.color.g = 1.0
+                marker.color.b = 0.2
+                marker.color.a = 0.95
+
+                label.scale.z = 0.26
+                label.color.r = 0.2
+                label.color.g = 1.0
+                label.color.b = 0.2
+                label.color.a = 1.0
+                label.text = f'ID:{track_id} | d:{dist_xy:.2f}m | [WAVING] 👋'
+            else:
+                # Orange cylinder for normal person
+                marker.scale.x = 0.35
+                marker.scale.y = 0.35
+                marker.scale.z = 1.0
+                marker.color.r = 1.0
+                marker.color.g = 0.55
+                marker.color.b = 0.0
+                marker.color.a = 0.85
+
+                label.scale.z = 0.22
+                label.color.r = 1.0
+                label.color.g = 0.9
+                label.color.b = 0.2
+                label.color.a = 1.0
+                label.text = f'ID:{track_id} | d:{dist_xy:.2f}m'
+
+            markers.append(marker)
             markers.append(label)
 
-            # Choose primary person (largest bbox) for legacy preview topic
+            # Choose primary person (prefer waving person, else largest bbox)
             area = bw * bh
-            if primary_person_data is None or area > primary_person_data['area']:
+            score = area + (1e6 if is_waving else 0.0)
+            if primary_person_data is None or score > primary_person_data['score']:
                 primary_person_data = {
-                    'area': area,
+                    'score': score,
                     'point_base': point_base,
                     'dist_xy': dist_xy,
                     'depth_m': depth_m,
                     'track_id': track_id,
+                    'is_waving': is_waving,
                 }
 
         # Publish TrackedPersonArray
@@ -346,8 +409,11 @@ class RoughPersonLocalizer(Node):
                 except Exception:
                     pass
 
+        waving_count = sum(1 for p in tracked_people_list if p.is_waving)
         self.report('preview_only',
                     tracked_people_count=len(tracked_people_list),
+                    waving_people_count=waving_count,
+                    wave_module_active=wave_alive,
                     people_detected=len(people),
                     map_available=map_available,
                     source_frame=source,
