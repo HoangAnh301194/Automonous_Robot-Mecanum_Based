@@ -1,4 +1,6 @@
 """Pure Python unit tests for kiosk AI. No ROS, Qt, GPU or external API needed."""
+import argparse
+import ast
 import json
 import os
 import tempfile
@@ -31,6 +33,41 @@ class FakeResponse:
 
 
 class TestKioskAI(unittest.TestCase):
+    def test_kiosk_cli_9router_command_has_matching_attribute(self):
+        """Check actual CLI parser without importing ROS 2 or PyQt on CI."""
+        main_path = Path(__file__).resolve().parents[1] / "robot_ui" / "kiosk" / "main.py"
+        tree = ast.parse(main_path.read_text(encoding="utf-8"))
+        functions = [
+            node for node in tree.body
+            if isinstance(node, ast.FunctionDef)
+            and node.name in {"boolean_argument", "parse_args"}
+        ]
+        self.assertEqual(len(functions), 2)
+        scope = {"argparse": argparse, "os": os}
+        exec(compile(ast.Module(body=functions, type_ignores=[]), str(main_path), "exec"), scope)
+        opts = scope["parse_args"]([
+            "robot_ui_kiosk", "--windowed", "true",
+            "--hide-cursor", "false",
+            "--auto-start-9router", "true",
+            "--9router-command", "",
+        ])
+        self.assertTrue(opts.windowed)
+        self.assertFalse(opts.hide_cursor)
+        self.assertTrue(opts.auto_start_9router)
+        self.assertEqual(opts.router_command, "")
+        opts = scope["parse_args"]([
+            "robot_ui_kiosk", "--9router-command", "/usr/bin/9router --no-browser"
+        ])
+        self.assertEqual(opts.router_command, "/usr/bin/9router --no-browser")
+        # ROS launch may omit an empty LaunchConfiguration substitution,
+        # leaving the flag without a following value.
+        opts = scope["parse_args"]([
+            "robot_ui_kiosk", "--windowed", "true",
+            "--auto-start-9router", "true",
+            "--9router-command",
+        ])
+        self.assertEqual(opts.router_command, "")
+
     def test_9router_env_file_autoload_and_override(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder, "llm.local.env")
