@@ -6,11 +6,12 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from robot_ui.kiosk.knowledge import KnowledgeRetriever, chunk_document
 from robot_ui.kiosk.llm_client import LLMWorker, call_llm, format_robot_context
 from robot_ui.kiosk.llm_env import load_llm_env_file
+from robot_ui.kiosk.router_process import _local_endpoint, start_local_9router, stop_local_9router
 
 
 class FakeEncoder:
@@ -73,6 +74,65 @@ class TestKioskAI(unittest.TestCase):
             with self.assertRaises(ValueError):
                 load_llm_env_file(path, environ=environment)
             self.assertEqual(environment["LLM_MODEL"], "old-model")
+
+    def test_9router_autostart_only_local(self):
+        self.assertEqual(_local_endpoint("http://127.0.0.1:20128/v1"),
+                         ("127.0.0.1", 20128))
+        self.assertEqual(_local_endpoint("http://localhost:20128/v1"),
+                         ("localhost", 20128))
+        self.assertIsNone(_local_endpoint("http://10.42.0.1:20128/v1"))
+        self.assertIsNone(_local_endpoint("not-a-url"))
+        with patch("robot_ui.kiosk.router_process.subprocess.Popen") as popen:
+            self.assertIsNone(start_local_9router("http://10.42.0.1:20128/v1"))
+            self.assertIsNone(start_local_9router("http://localhost:20128/v1",
+                                                 enabled=False))
+            popen.assert_not_called()
+
+    def test_9router_autostart_reuses_existing_server(self):
+        with patch("robot_ui.kiosk.router_process._port_open", return_value=True), \
+             patch("robot_ui.kiosk.router_process.subprocess.Popen") as popen:
+            self.assertIsNone(start_local_9router("http://localhost:20128/v1"))
+            popen.assert_not_called()
+
+    def test_9router_autostart_cli_and_owned_shutdown(self):
+        proc = Mock()
+        proc.pid = 4321
+        proc.poll.return_value = None
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("robot_ui.kiosk.router_process.Path.home", return_value=Path(folder)), \
+             patch("robot_ui.kiosk.router_process._port_open",
+                   side_effect=[False, True]), \
+             patch("robot_ui.kiosk.router_process.shutil.which",
+                   side_effect=lambda name: "/usr/local/bin/9router"
+                   if name == "9router" else None), \
+             patch("robot_ui.kiosk.router_process.subprocess.Popen",
+                   return_value=proc) as popen, \
+             patch("robot_ui.kiosk.router_process.os.killpg") as killpg:
+            owned = start_local_9router("http://localhost:20128/v1",
+                                        wait_seconds=1)
+            self.assertIs(owned, proc)
+            argv = popen.call_args.args[0]
+            self.assertEqual(argv, ["/usr/local/bin/9router",
+                                    "--no-browser", "--port", "20128"])
+            stop_local_9router(owned)
+            killpg.assert_called_once_with(4321, __import__("signal").SIGTERM)
+            proc.wait.assert_called_once_with(timeout=3)
+
+    def test_9router_autostart_existing_docker_container(self):
+        inspect = Mock(returncode=0, stdout="false\n")
+        with patch("robot_ui.kiosk.router_process._port_open",
+                   side_effect=[False, True]), \
+             patch("robot_ui.kiosk.router_process.shutil.which",
+                   side_effect=lambda name: "/usr/bin/docker"
+                   if name == "docker" else None), \
+             patch("robot_ui.kiosk.router_process.subprocess.run",
+                   side_effect=[inspect, Mock(returncode=0)]) as run, \
+             patch("robot_ui.kiosk.router_process.subprocess.Popen") as popen:
+            self.assertIsNone(start_local_9router("http://localhost:20128/v1",
+                                                 wait_seconds=1))
+            self.assertEqual(run.call_args_list[1].args[0],
+                             ["/usr/bin/docker", "start", "9router"])
+            popen.assert_not_called()
 
     def test_chunking_with_overlap(self):
         text = " ".join(["Robot co cam bien va pin."] * 90)
