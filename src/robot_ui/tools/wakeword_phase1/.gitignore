@@ -1,0 +1,11 @@
+# Phase 1 local data and pretrained weights; never commit recordings or transcripts.
+samples/
+*.wav
+*.mp3
+*.flac
+results*.json
+manifest.csv
+aliases.json
+models/
+__pycache__/
+.pytest_cache/
