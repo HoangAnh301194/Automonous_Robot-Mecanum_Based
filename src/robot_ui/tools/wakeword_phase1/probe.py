@@ -99,18 +99,24 @@ def open_wav(path: Path):
 def recognize_file(path: Path, vosk, models: dict) -> tuple[dict, float, float]:
     recognizers = {name: vosk.KaldiRecognizer(model, 16000) for name, model in models.items()}
     start = time.monotonic()
+    segments = {name: [] for name in models}
     with open_wav(path) as wav:
         duration = wav.getnframes() / 16000
         while True:
             pcm = wav.readframes(1600)
             if not pcm:
                 break
-            for recognizer in recognizers.values():
-                recognizer.AcceptWaveform(pcm)
+            for name, recognizer in recognizers.items():
+                if recognizer.AcceptWaveform(pcm):
+                    segment = json.loads(recognizer.Result()).get("text", "")
+                    if segment:
+                        segments[name].append(segment)
     transcripts = {}
     for name, recognizer in recognizers.items():
-        final = json.loads(recognizer.FinalResult())
-        transcripts[name] = final.get("text", "")
+        final = json.loads(recognizer.FinalResult()).get("text", "")
+        if final:
+            segments[name].append(final)
+        transcripts[name] = " ".join(segments[name])
     return transcripts, time.monotonic() - start, duration
 
 
@@ -178,18 +184,25 @@ def capture_cmd(source: str) -> list[str]:
 def record_sample(path: Path, duration: float, source: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
-                               stderr=subprocess.PIPE)
+                               stderr=subprocess.DEVNULL)
     try:
-        pcm = process.stdout.read(round(duration * 16000) * 2)
-        if len(pcm) < 3200:
-            raise RuntimeError("No usable PCM received from microphone")
-    finally:
-        process.terminate()
         try:
-            process.communicate(timeout=1)
+            process.communicate(timeout=duration + 1.5)
+        except subprocess.TimeoutExpired as exc:
+            pcm = exc.output or b""
+        else:
+            raise RuntimeError("Microphone capture ended unexpectedly")
+    finally:
+        if process.poll() is None:
+            process.terminate()
+        try:
+            extra, _ = process.communicate(timeout=1)
         except subprocess.TimeoutExpired:
             process.kill()
-            process.communicate()
+            extra, _ = process.communicate()
+    pcm = (pcm + extra)[:round(duration * 16000) * 2]
+    if len(pcm) < 3200:
+        raise RuntimeError("No usable PCM received from microphone")
     with wave.open(str(path), "wb") as fp:
         fp.setnchannels(1)
         fp.setsampwidth(2)
