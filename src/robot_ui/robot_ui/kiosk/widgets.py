@@ -455,11 +455,17 @@ class NavigationPage(QWidget):
 
         home = QPushButton()
         home.setObjectName("navHomeButton")
-        home.setToolTip("Trở về trang quản trị")
-        home.setAccessibleName("Trở về trang quản trị")
-        home.setIcon(monochrome_icon(icons["home"], QColor("#ffb32c")))
-        home.setIconSize(QSize(22, 22))
-        home.setFixedSize(34, 34)
+        home.setToolTip("Quay lại")
+        home.setAccessibleName("Quay lại")
+        back_icon = icons.get("back")
+        if back_icon and Path(back_icon).is_file():
+            home.setIcon(QIcon(str(back_icon)))
+            home.setIconSize(QSize(28, 28))
+            home.setFixedSize(42, 42)
+        else:
+            home.setIcon(monochrome_icon(icons.get("home", ""), QColor("#ffb32c")))
+            home.setIconSize(QSize(22, 22))
+            home.setFixedSize(34, 34)
         home.clicked.connect(self.home_requested)
         top_layout.addWidget(home)
         top_layout.addStretch(1)
@@ -585,7 +591,12 @@ class NavigationPage(QWidget):
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     home_requested = pyqtSignal()
-    def __init__(self, chat_icon: Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        chat_icon: Path,
+        parent: QWidget | None = None,
+        back_icon: Path | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("chatPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
@@ -599,12 +610,17 @@ class ChatPage(QWidget):
         header_layout.setContentsMargins(12, 7, 12, 7)
         header_layout.setSpacing(10)
 
-        back = QPushButton("‹")
+        back = QPushButton()
         back.setObjectName("navHomeButton")
-        back.setToolTip("Trở về trang chủ")
-        back.setAccessibleName("Trở về trang chủ")
-        back.setFixedSize(48, 46)
-        back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
+        back.setToolTip("Quay lại")
+        back.setAccessibleName("Quay lại")
+        back.setFixedSize(46, 46)
+        if back_icon and Path(back_icon).is_file():
+            back.setIcon(QIcon(str(back_icon)))
+            back.setIconSize(QSize(30, 30))
+        else:
+            back.setText("‹")
+            back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
         back.clicked.connect(self.home_requested)
         header_layout.addWidget(back)
 
@@ -776,8 +792,8 @@ class NavButton(QPushButton):
             color = QColor("#ffb32c" if dark_background else "#d97800")
         else:
             color = QColor("#ffffff" if dark_background else "#26343c")
-        # Preserve the full-colour Settings icon (PNG alpha or JPEG) instead of monochrome tinting.
-        if self.page_id == "settings" or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
+        # Preserve full-colour icons (Settings, Service, Emergency) instead of monochrome tinting.
+        if self.page_id in {"settings", "service", "emergency"} or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
             self.setIcon(QIcon(str(self.icon_path)))
         else:
             self.setIcon(monochrome_icon(self.icon_path, color))
@@ -794,10 +810,16 @@ class BottomNavigation(QFrame):
         self._buttons: dict[str, NavButton] = {}
         self._dark_background = True
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 7, 8, 7)
-        layout.setSpacing(6)
-        labels = {"home": "Trang chủ", "settings": "Quản trị",
-                  "navigation": "Dẫn đường", "chat": "Trò chuyện"}
+        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setSpacing(8)
+        labels = {
+            "home": "Trang chủ",
+            "chat": "Trò chuyện",
+            "service": "Dịch vụ",
+            "emergency": "Dừng khẩn",
+            "settings": "Quản trị",
+            "navigation": "Dẫn đường",
+        }
         for page_id, path in icons.items():
             button = NavButton(labels.get(page_id, page_id), path, page_id)
             button.clicked.connect(lambda checked=False, name=page_id: self.page_requested.emit(name))

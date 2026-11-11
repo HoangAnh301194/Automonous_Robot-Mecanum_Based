@@ -23,14 +23,40 @@ def picture(path: Path, size: int = 70) -> QLabel:
     return label
 
 
+def check_wifi_connected() -> bool:
+    """Check wireless network connectivity from sysfs and procfs."""
+    try:
+        sys_net = Path("/sys/class/net")
+        if sys_net.is_dir():
+            for iface in sys_net.iterdir():
+                if iface.name.startswith(("wl", "ra", "wlan")):
+                    operstate = (iface / "operstate").read_text().strip()
+                    carrier_file = iface / "carrier"
+                    carrier = carrier_file.read_text().strip() if carrier_file.exists() else ""
+                    if operstate == "up" or carrier == "1":
+                        return True
+        proc_wireless = Path("/proc/net/wireless")
+        if proc_wireless.exists():
+            lines = [l for l in proc_wireless.read_text().strip().splitlines() if ":" in l]
+            if lines:
+                return True
+    except Exception:
+        pass
+    return False
+
+
 class WelcomePage(QWidget):
     chat_requested = pyqtSignal()
+    service_requested = pyqtSignal()
+    emergency_stop_requested = pyqtSignal()
 
     def __init__(
         self,
         background: Path,
         ptit: Path,
         faculty: Path,
+        service_icon: Path | None = None,
+        emergency_icon: Path | None = None,
         chat: Path | None = None,
     ):
         super().__init__()
@@ -75,6 +101,7 @@ class WelcomePage(QWidget):
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
         layout.addStretch(3)
+
         self.setStyleSheet("""
             QLabel#welcomeSchoolPtit { color: #ff4545; font-size: 15px; font-weight: 800; }
             QLabel#welcomeSchoolFee1 { color: #48a9ff; font-size: 14px; font-weight: 800; }
@@ -124,11 +151,14 @@ class AdminPinDialog(QDialog):
         self.setObjectName("adminPinDialog")
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 20, 24, 20)
+        root.setSpacing(10)
         title = QLabel("QUẢN TRỊ ROBOT")
         title.setObjectName("adminPinTitle")
         title.setAlignment(Qt.AlignCenter)
         root.addWidget(title)
-        root.addWidget(QLabel("Nhập mã PIN để truy cập"))
+        prompt = QLabel("Nhập mã PIN để truy cập")
+        prompt.setAlignment(Qt.AlignCenter)
+        root.addWidget(prompt)
 
         self.entry = QLineEdit()
         self.entry.setEchoMode(QLineEdit.Password)
@@ -141,28 +171,35 @@ class AdminPinDialog(QDialog):
         self.error = QLabel("")
         self.error.setObjectName("adminPinError")
         self.error.setMinimumHeight(24)
+        self.error.setAlignment(Qt.AlignCenter)
         root.addWidget(self.error)
 
         grid = QGridLayout()
+        grid.setSpacing(10)
+        grid.setAlignment(Qt.AlignCenter)
+        btn_w, btn_h = 72, 60
         for row, digits in enumerate((("1", "2", "3"), ("4", "5", "6"), ("7", "8", "9"))):
             for col, digit in enumerate(digits):
                 button = QPushButton(digit)
-                button.setMinimumHeight(51)
+                button.setFixedSize(btn_w, btn_h)
                 button.clicked.connect(lambda checked=False, d=digit: self.entry.insert(d))
                 grid.addWidget(button, row, col)
         back = QPushButton("Xóa")
+        back.setFixedSize(btn_w, btn_h)
         back.clicked.connect(self.entry.backspace)
         grid.addWidget(back, 3, 0)
         zero = QPushButton("0")
+        zero.setFixedSize(btn_w, btn_h)
         zero.clicked.connect(lambda: self.entry.insert("0"))
         grid.addWidget(zero, 3, 1)
         self.confirm = QPushButton("OK")
         self.confirm.setObjectName("adminPinConfirm")
+        self.confirm.setFixedSize(btn_w, btn_h)
         self.confirm.clicked.connect(self._check)
         grid.addWidget(self.confirm, 3, 2)
         root.addLayout(grid)
         cancel = QPushButton("Hủy")
-        cancel.setMinimumHeight(43)
+        cancel.setMinimumHeight(44)
         cancel.clicked.connect(self.reject)
         root.addWidget(cancel)
         self.setStyleSheet("""
@@ -172,8 +209,8 @@ class AdminPinDialog(QDialog):
             QLabel#adminPinError { color: #ff8585; }
             QLineEdit { color: white; background: #293849; border-radius: 8px; font-size: 22px; }
             QPushButton { color: white; background: #344454; border: none;
-                          border-radius: 9px; font-size: 17px; font-weight: 700; }
-            QPushButton#adminPinConfirm { color: #161b23; background: #f6c16a; }
+                          border-radius: 10px; font-size: 18px; font-weight: 700; }
+            QPushButton#adminPinConfirm { color: #161b23; background: #f6c16a; font-size: 18px; }
         """)
 
     def _check(self):
@@ -193,76 +230,341 @@ class AdminPinDialog(QDialog):
 class AdminPage(QWidget):
     navigation_requested = pyqtSignal()
     logout_requested = pyqtSignal()
+    back_requested = pyqtSignal()
+    detection_debug_requested = pyqtSignal()
+    slam_requested = pyqtSignal()
+    start_nav_requested = pyqtSignal()
+    stop_nav_requested = pyqtSignal()
+    system_status_requested = pyqtSignal()
 
-    def __init__(self, nav_icon: Path, slam_icon: Path):
+    def __init__(
+        self,
+        nav_icon: Path,
+        slam_icon: Path,
+        detection_icon: Path | None = None,
+        start_nav_icon: Path | None = None,
+        stop_nav_icon: Path | None = None,
+        status_icon: Path | None = None,
+        wifi_connected_icon: Path | None = None,
+        wifi_disconnected_icon: Path | None = None,
+        battery_icons: dict[str, Path] | None = None,
+        back_icon: Path | None = None,
+    ):
         super().__init__()
         self.setObjectName("adminPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
+
+        self.wifi_connected_icon = wifi_connected_icon
+        self.wifi_disconnected_icon = wifi_disconnected_icon
+        self.battery_icons = battery_icons or {}
+        self.back_icon = back_icon
+
+        # Fallback status labels for backwards compatibility
+        self.connection = QLabel("Kết nối ROS 2: Đang chờ")
+        self.robot = QLabel("Trạng thái robot: Chưa có dữ liệu")
+        self.nav = QLabel("Điều hướng: Chưa có dữ liệu")
+        self.battery = QLabel("Pin: --")
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(28, 22, 28, 28)
-        root.setSpacing(13)
+        root.setContentsMargins(28, 18, 28, 24)
+        root.setSpacing(14)
+
+        # Header: Back Button + Title on Left, Status Bar on Right
         header = QHBoxLayout()
+        header.setSpacing(12)
+
+        # Back button in top-left
+        self.back_button = QPushButton()
+        self.back_button.setObjectName("adminBackButton")
+        self.back_button.setCursor(Qt.PointingHandCursor)
+        self.back_button.setFixedSize(46, 46)
+        self.back_button.setToolTip("Quay lại")
+        if back_icon and Path(back_icon).is_file():
+            self.back_button.setIcon(QIcon(str(back_icon)))
+            self.back_button.setIconSize(QSize(32, 32))
+        else:
+            self.back_button.setText("‹")
+            self.back_button.setStyleSheet("color: #ffb32c; font-size: 26px; font-weight: 700;")
+        self.back_button.clicked.connect(self.back_requested)
+        self.back_button.clicked.connect(self.logout_requested)
+        header.addWidget(self.back_button)
+
+        title_box = QVBoxLayout()
+        title_box.setSpacing(2)
         title = QLabel("QUẢN TRỊ ROBOT")
         title.setObjectName("adminTitle")
-        header.addWidget(title)
+        subtitle = QLabel("Trung tâm điều khiển và cấu hình chuyên sâu")
+        subtitle.setObjectName("adminSubtitle")
+        title_box.addWidget(title)
+        title_box.addWidget(subtitle)
+        header.addLayout(title_box)
         header.addStretch()
-        logout = QPushButton("Đăng xuất")
-        logout.setObjectName("adminLogout")
-        logout.setMinimumSize(115, 50)
-        logout.clicked.connect(self.logout_requested)
-        header.addWidget(logout)
+
+        # Status Bar on Top Right (Wifi, Battery)
+        status_bar = QHBoxLayout()
+        status_bar.setSpacing(12)
+
+        # Wifi Badge
+        self.wifi_widget = QWidget()
+        self.wifi_widget.setObjectName("adminHeaderBadge")
+        wifi_layout = QHBoxLayout(self.wifi_widget)
+        wifi_layout.setContentsMargins(10, 5, 12, 5)
+        wifi_layout.setSpacing(8)
+        self.wifi_icon_label = QLabel()
+        self.wifi_icon_label.setFixedSize(28, 28)
+        self.wifi_icon_label.setAlignment(Qt.AlignCenter)
+        self.wifi_text_label = QLabel("Wifi")
+        self.wifi_text_label.setObjectName("adminBadgeText")
+        wifi_layout.addWidget(self.wifi_icon_label)
+        wifi_layout.addWidget(self.wifi_text_label)
+        status_bar.addWidget(self.wifi_widget)
+
+        # Battery Badge
+        self.battery_widget = QWidget()
+        self.battery_widget.setObjectName("adminHeaderBadge")
+        battery_layout = QHBoxLayout(self.battery_widget)
+        battery_layout.setContentsMargins(10, 5, 12, 5)
+        battery_layout.setSpacing(8)
+        self.battery_icon_label = QLabel()
+        self.battery_icon_label.setFixedSize(28, 28)
+        self.battery_icon_label.setAlignment(Qt.AlignCenter)
+        self.battery_text_label = QLabel("--%")
+        self.battery_text_label.setObjectName("adminBadgeText")
+        battery_layout.addWidget(self.battery_icon_label)
+        battery_layout.addWidget(self.battery_text_label)
+        status_bar.addWidget(self.battery_widget)
+
+        header.addLayout(status_bar)
         root.addLayout(header)
-        root.addWidget(QLabel("Trạng thái hệ thống và công cụ điều hướng"))
-        self.connection = self._add_status(root, "Kết nối ROS 2: Đang chờ")
-        self.robot = self._add_status(root, "Trạng thái robot: Chưa có dữ liệu")
-        self.nav = self._add_status(root, "Điều hướng: Chưa có dữ liệu")
-        self.battery = self._add_status(root, "Pin: --")
-        root.addSpacing(12)
-        actions = QHBoxLayout()
-        actions.setSpacing(16)
-        nav_btn = QPushButton("  Bản đồ & Nav2")
-        nav_btn.setObjectName("adminNavButton")
-        nav_btn.setIcon(QIcon(str(nav_icon)))
-        nav_btn.setIconSize(QSize(60, 60))
-        nav_btn.setMinimumHeight(92)
-        nav_btn.clicked.connect(self.navigation_requested)
-        actions.addWidget(nav_btn)
-        slam_label = QLabel()
-        slam_label.setPixmap(QPixmap(str(slam_icon)).scaled(58, 58, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-        actions.addWidget(slam_label)
-        actions.addWidget(QLabel("SLAM\nTích hợp ở giai đoạn tiếp theo"))
-        root.addLayout(actions)
+
+        # Status Banner
+        self.status_banner = QLabel("Trạng thái: Sẵn sàng")
+        self.status_banner.setObjectName("adminStatusBanner")
+        self.status_banner.setMinimumHeight(36)
+        root.addWidget(self.status_banner)
+
+        # Grid of 6 launcher buttons (Icon on top, Name below icon)
+        grid = QGridLayout()
+        grid.setSpacing(24)
+        grid.setAlignment(Qt.AlignCenter)
+
+        def make_launcher_icon(
+            title_text: str,
+            icon_file: Path | None,
+            obj_name: str,
+            callback,
+        ) -> QPushButton:
+            btn = QPushButton()
+            btn.setObjectName(obj_name)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFixedSize(168, 135)
+            layout = QVBoxLayout(btn)
+            layout.setContentsMargins(10, 14, 10, 12)
+            layout.setSpacing(8)
+            layout.setAlignment(Qt.AlignCenter)
+
+            icon_lbl = QLabel()
+            icon_lbl.setFixedSize(68, 68)
+            icon_lbl.setAlignment(Qt.AlignCenter)
+            if icon_file and Path(icon_file).is_file():
+                pm = QPixmap(str(icon_file))
+                if not pm.isNull():
+                    icon_lbl.setPixmap(pm.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            layout.addWidget(icon_lbl, 0, Qt.AlignCenter)
+
+            t = QLabel(title_text)
+            t.setObjectName("launcherTitle")
+            t.setAlignment(Qt.AlignCenter)
+            t.setWordWrap(True)
+            layout.addWidget(t, 0, Qt.AlignCenter)
+
+            btn.clicked.connect(callback)
+            return btn
+
+        # 1. Detection Debug
+        self.btn_detection = make_launcher_icon(
+            "Detection Debug",
+            detection_icon,
+            "adminDetectionButton",
+            self.detection_debug_requested,
+        )
+        grid.addWidget(self.btn_detection, 0, 0)
+
+        # 2. SLAM Config
+        self.btn_slam = make_launcher_icon(
+            "SLAM Config",
+            slam_icon,
+            "adminSlamButton",
+            self.slam_requested,
+        )
+        grid.addWidget(self.btn_slam, 0, 1)
+
+        # 3. Navigation Config
+        self.btn_nav_config = make_launcher_icon(
+            "Navigation Config",
+            nav_icon,
+            "adminNavButton",
+            self.navigation_requested,
+        )
+        grid.addWidget(self.btn_nav_config, 0, 2)
+
+        # 4. Start Navigation
+        self.btn_start_nav = make_launcher_icon(
+            "Bắt đầu Điều hướng",
+            start_nav_icon,
+            "adminStartNavButton",
+            self.start_nav_requested,
+        )
+        grid.addWidget(self.btn_start_nav, 1, 0)
+
+        # 5. Stop Navigation
+        self.btn_stop_nav = make_launcher_icon(
+            "Dừng Điều hướng",
+            stop_nav_icon,
+            "adminStopNavButton",
+            self.stop_nav_requested,
+        )
+        grid.addWidget(self.btn_stop_nav, 1, 1)
+
+        # 6. System Status
+        self.btn_status = make_launcher_icon(
+            "System Status",
+            status_icon,
+            "adminSystemStatusButton",
+            self.system_status_requested,
+        )
+        grid.addWidget(self.btn_status, 1, 2)
+
+        root.addLayout(grid)
         root.addStretch()
-        root.addWidget(QLabel("Nhiệm vụ · AI/Camera · Developer: sẽ tích hợp sau."))
+
         self.setStyleSheet("""
-            QWidget#adminPage { background: #141c25; }
-            QLabel { color: #dce2e7; font-size: 14px; }
-            QLabel#adminTitle { color: #f6c16a; font-size: 25px; font-weight: 800; }
-            QLabel#adminStatus { background: #283441; color: white;
-                                 border-radius: 9px; padding: 10px 13px; }
-            QPushButton#adminLogout { background: #344250; color: white;
-                                      border-radius: 10px; font-weight: 700; }
-            QPushButton#adminNavButton { color: white; background: #344250;
-                border: 2px solid #f6c16a; border-radius: 14px;
-                font-size: 18px; font-weight: 700; }
+            QWidget#adminPage { background: #000000; }
+            QLabel { color: #dce2e7; }
+            QLabel#adminTitle { color: #f6c16a; font-size: 26px; font-weight: 800; }
+            QLabel#adminSubtitle { color: #8896a6; font-size: 13px; font-weight: 500; }
+            QWidget#adminHeaderBadge {
+                background: #0f1318;
+                border: 1px solid #202732;
+                border-radius: 10px;
+            }
+            QLabel#adminBadgeText { color: #f0f4f8; font-size: 14px; font-weight: 700; }
+            QLabel#adminStatusBanner {
+                background: #0d1217;
+                color: #a4b3c4;
+                border: 1px solid #1f2733;
+                border-radius: 9px;
+                padding: 6px 14px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton#adminBackButton {
+                background: #0f141a;
+                border: 1px solid #232e3d;
+                border-radius: 12px;
+            }
+            QPushButton#adminBackButton:hover {
+                background: #17202c;
+                border-color: #3b4e64;
+            }
+            QPushButton#adminBackButton:pressed {
+                background: #1c2738;
+                border: 2px solid #f6c16a;
+            }
+            QPushButton#adminDetectionButton,
+            QPushButton#adminSlamButton,
+            QPushButton#adminNavButton,
+            QPushButton#adminStartNavButton,
+            QPushButton#adminStopNavButton,
+            QPushButton#adminSystemStatusButton {
+                background: #0d1218;
+                border: 1px solid #1c2532;
+                border-radius: 18px;
+            }
+            QPushButton#adminDetectionButton:hover,
+            QPushButton#adminSlamButton:hover,
+            QPushButton#adminNavButton:hover,
+            QPushButton#adminStartNavButton:hover,
+            QPushButton#adminStopNavButton:hover,
+            QPushButton#adminSystemStatusButton:hover {
+                background: #141d27;
+                border-color: #3b4e64;
+            }
+            QPushButton#adminDetectionButton:pressed,
+            QPushButton#adminSlamButton:pressed,
+            QPushButton#adminNavButton:pressed,
+            QPushButton#adminStartNavButton:pressed,
+            QPushButton#adminStopNavButton:pressed,
+            QPushButton#adminSystemStatusButton:pressed {
+                background: #192432;
+                border: 2px solid #f6c16a;
+            }
+            QLabel#launcherTitle {
+                color: #ffffff;
+                font-size: 14px;
+                font-weight: 700;
+            }
         """)
 
-    @staticmethod
-    def _add_status(layout: QVBoxLayout, value: str) -> QLabel:
-        label = QLabel(value)
-        label.setObjectName("adminStatus")
-        label.setMinimumHeight(43)
-        layout.addWidget(label)
-        return label
+        self.update_wifi()
+        self.set_battery(None)
+
+    def update_wifi(self) -> None:
+        self.set_wifi(check_wifi_connected())
+
+    def set_wifi(self, connected: bool) -> None:
+        icon = self.wifi_connected_icon if connected else self.wifi_disconnected_icon
+        if icon and Path(icon).is_file():
+            pm = QPixmap(str(icon))
+            if not pm.isNull():
+                self.wifi_icon_label.setPixmap(
+                    pm.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+        self.wifi_text_label.setText("Online" if connected else "Offline")
+        self.wifi_text_label.setStyleSheet("color: #4cd964;" if connected else "color: #ff5252;")
+
+    def set_battery(self, percent: float | None) -> None:
+        if percent is None or percent < 0:
+            key = "0"
+            text = "--%"
+        else:
+            text = f"{percent:.0f}%"
+            if percent >= 85:
+                key = "100"
+            elif percent >= 60:
+                key = "75"
+            elif percent >= 35:
+                key = "50"
+            elif percent >= 15:
+                key = "25"
+            else:
+                key = "0"
+        icon = self.battery_icons.get(key)
+        if icon and Path(icon).is_file():
+            pm = QPixmap(str(icon))
+            if not pm.isNull():
+                self.battery_icon_label.setPixmap(
+                    pm.scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                )
+        self.battery_text_label.setText(text)
+        self.battery.setText(f"Pin: {text}")
 
     def set_connection(self, connected: bool):
-        self.connection.setText("Kết nối ROS 2: Có phản hồi" if connected
-                                else "Kết nối ROS 2: Chưa kết nối")
+        self.connection.setText("Kết nối ROS 2: Có phản hồi" if connected else "Kết nối ROS 2: Chưa kết nối")
+        if not connected:
+            self.status_banner.setText("ROS 2: Chưa kết nối")
 
     def set_robot_status(self, status: dict[str, Any]):
-        self.robot.setText(f"Trạng thái robot: {status.get('robot_state', 'Chưa có dữ liệu')}")
         battery = status.get("battery_percent")
-        self.battery.setText(f"Pin: {float(battery):.0f}%" if isinstance(battery, (int, float)) else "Pin: --")
+        if isinstance(battery, (int, float)):
+            self.set_battery(float(battery))
+        else:
+            self.set_battery(None)
+        state = status.get("robot_state", "Bình thường")
+        self.robot.setText(f"Trạng thái robot: {state}")
+        self.status_banner.setText(f"Trạng thái robot: {state}")
 
     def set_navigation_status(self, status: dict[str, Any]):
-        self.nav.setText(f"Điều hướng: {status.get('status', 'Chưa có dữ liệu')}")
+        nav_state = status.get("status", "Chưa có dữ liệu")
+        self.nav.setText(f"Điều hướng: {nav_state}")
+        self.status_banner.setText(f"Điều hướng: {nav_state}")

@@ -26,7 +26,7 @@ def generate_launch_description():
         model = LaunchConfiguration("model")
         model_cmd = DeclareLaunchArgument(
             "model",
-            default_value="yolo11n.pt",
+            default_value="yolo11n.engine",
             description="Model name or path",
         )
 
@@ -60,7 +60,7 @@ def generate_launch_description():
         fuse_model = LaunchConfiguration("fuse_model")
         fuse_model_cmd = DeclareLaunchArgument(
             "fuse_model",
-            default_value="True",
+            default_value="False",
             description="Whether to fuse the model for inference optimization",
         )
 
@@ -81,7 +81,7 @@ def generate_launch_description():
         threshold = LaunchConfiguration("threshold")
         threshold_cmd = DeclareLaunchArgument(
             "threshold",
-            default_value="0.5",
+            default_value="0.35",
             description="Minimum probability of a detection to be published",
         )
 
@@ -116,7 +116,7 @@ def generate_launch_description():
         max_det = LaunchConfiguration("max_det")
         max_det_cmd = DeclareLaunchArgument(
             "max_det",
-            default_value="300",
+            default_value="5",
             description="Maximum number of detections allowed per image",
         )
 
@@ -144,7 +144,7 @@ def generate_launch_description():
         classes = LaunchConfiguration("classes")
         classes_cmd = DeclareLaunchArgument(
             "classes",
-            default_value="",
+            default_value="0",
             description="Comma-separated class IDs to detect; empty means all classes",
         )
 
@@ -217,7 +217,7 @@ def generate_launch_description():
         use_debug = LaunchConfiguration("use_debug")
         use_debug_cmd = DeclareLaunchArgument(
             "use_debug",
-            default_value="True",
+            default_value="False",
             description="Whether to activate the debug node",
         )
 
@@ -236,8 +236,8 @@ def generate_launch_description():
         skip_frames = LaunchConfiguration("skip_frames")
         skip_frames_cmd = DeclareLaunchArgument(
             "skip_frames",
-            default_value="0",
-            description="Number of frames to skip between inferences (0 = process all frames, 2 = process 1 frame every 3 frames)",
+            default_value="1",
+            description="Number of frames to skip between inferences (0 = process all frames, 1 = process 1 frame every 2 frames)",
         )
 
         yolo_node_cmd = Node(

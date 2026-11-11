@@ -36,7 +36,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 'detector_model',
-                default_value='yolo11n.pt',
+                default_value='yolo11n.engine',
                 description='Optional YOLO11 person-detector model override.',
             ),
             DeclareLaunchArgument(

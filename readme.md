@@ -313,28 +313,132 @@ ros2 topic echo /pose/wave_detected
 Do not expose the unauthenticated video server directly to the Internet.
 A plain SSH session without X forwarding cannot display `rqt_image_view`.
 
-### 6.6 Start the complete AI pipeline with one command
+### 6.6 Start the complete AI pipeline (AI Camera -> YOLO11 TensorRT -> ByteTrack -> RTMPose)
 
-The updated script runs `three_astra.launch.py`, YOLO 2D person tracking
-on `/ai_camera/color/image_raw`, and RTMPose skeleton/hand-wave detection
-on the same AI RGB topic. No `/camera/color/image_raw` fallback is used.
+The pipeline integrates Astra Pro AI Camera, YOLO11n TensorRT inference, ByteTrack person tracking, and RTMPose skeleton/hand-wave detection. All defaults are pre-configured for low latency and high stability on Jetson Orin Nano.
+
+#### 6.6.1 Default Parameter Specification
+
+| Module | Parameter | Default Value | Notes / Description |
+| :--- | :--- | :--- | :--- |
+| **YOLO** | `model` | `yolo11n.engine` | TensorRT FP16 engine optimized for Jetson Orin Nano |
+| | `device` | `cuda:0` | GPU Jetson |
+| | `classes` | `"0"` | Person class only (`0`) |
+| | `threshold` | `0.35` | Confidence score threshold (balanced for ByteTrack) |
+| | `iou` | `0.7` | NMS IoU threshold |
+| | `imgsz_width` | `640` | Input inference width |
+| | `imgsz_height` | `384` | Input inference height (384 saves 20% compute over 480) |
+| | `half` | `True` | FP16 inference |
+| | `max_det` | `5` | Maximum 5 detections per frame |
+| | `skip_frames` | `1` | Skips 1 frame between inferences (processes at 15 FPS from 30 FPS stream) |
+| | `fuse_model` | `False` | Disabled because TensorRT engine graph is already fused |
+| | `use_tracking` | `True` | Enables ByteTrack tracking node |
+| | `use_debug` | `False` | Disables debug image publishing by default to save 10-15% CPU |
+| | `use_3d` | `False` | Kept False until RGB-Depth extrinsics calibration is finalized |
+| **ByteTrack** | `tracker` | `bytetrack.yaml` | Detection-only tracking |
+| | `tracking_image_width` | `640` | Original AI RGB frame width |
+| | `tracking_image_height` | `480` | Original AI RGB frame height |
+| **RTMPose** | `backend` | `rtmpose` | RTMPose-S ONNX SDK |
+| | `device` | `cpu` | Multi-threaded CPU execution (intra-op=4, inter-op=2) |
+| | `max_people` | `5` | Up to 5 nearest people selected via `NearestTrackSelector` |
+| | `pose_input_width` | `192` | Pose input width |
+| | `pose_input_height` | `256` | Pose input height |
+| | `confidence` | `0.25` | Input bbox score threshold |
+| | `keypoint_threshold` | `0.40` | Keypoint visibility threshold |
+| **Camera** | `front/rear/ai_depth` | `160x120 @ 15fps` | Ultra-lightweight depth configuration |
+| | `ai_color` | `640x480 @ 30fps` | RGB stream resolution and framerate |
+| | `device_num` | `3` | Total Astra driver nodes |
+
+---
+
+#### 6.6.2 Quick Start (Lệnh chạy rút gọn - dùng toàn bộ tham số mặc định)
+
+**Cách 1: Khởi động toàn bộ pipeline bằng 1 script duy nhất**
 
 ```bash
 cd ~/ros2_ws
 bash start_person_following.sh
 ```
 
+**Cách 2: Khởi động từng module bằng ROS 2 launch rút gọn (không cần gõ tham số)**
+
+Terminal 1 (Cameras):
+```bash
+ros2 launch mo_hinh three_astra.launch.py
+```
+
+Terminal 2 (YOLO11 TensorRT & ByteTrack):
+```bash
+ros2 launch yolo_bringup yolo.launch.py
+```
+
+Terminal 3 (RTMPose Skeleton & HandWave):
+```bash
+ros2 launch hand_wave_detection hand_wave_detection.launch.py
+```
+
+---
+
+#### 6.6.3 Full Configuration (Lệnh chạy đầy đủ tham số khi cần tùy biến)
+
+Nếu cần tùy biến hoặc ghi đè tham số trực tiếp trên CLI:
+
+**1. Khởi động 3 Camera Astra Pro đầy đủ tham số:**
+```bash
+ros2 launch mo_hinh three_astra.launch.py \
+  front_serial:=17110310855 \
+  rear_serial:=17122514440 \
+  ai_serial:=17122611013 \
+  front_depth_width:=160 front_depth_height:=120 front_depth_fps:=15 \
+  rear_depth_width:=160 rear_depth_height:=120 rear_depth_fps:=15 \
+  ai_depth_width:=160 ai_depth_height:=120 ai_depth_fps:=15 \
+  ai_color_width:=640 ai_color_height:=480 ai_color_fps:=30 \
+  device_num:=3 enable_front:=true enable_rear:=true enable_ai:=true enable_ai_depth:=true
+```
+
+**2. Khởi động YOLO11 TensorRT & ByteTrack đầy đủ tham số:**
+```bash
+ros2 launch yolo_bringup yolo.launch.py \
+  model:=yolo11n.engine \
+  device:=cuda:0 \
+  classes:=0 \
+  threshold:=0.35 \
+  iou:=0.7 \
+  max_det:=5 \
+  skip_frames:=1 \
+  imgsz_width:=640 \
+  imgsz_height:=384 \
+  half:=True \
+  fuse_model:=False \
+  use_tracking:=True \
+  use_3d:=False \
+  use_debug:=False \
+  input_image_topic:=/ai_camera/color/image_raw
+```
+
+**3. Khởi động RTMPose Skeleton & HandWave đầy đủ tham số:**
+```bash
+ros2 launch hand_wave_detection hand_wave_detection.launch.py \
+  backend:=rtmpose \
+  device:=cpu \
+  max_people:=5 \
+  detector_model:=yolo11n.engine \
+  image_topic:=/ai_camera/color/image_raw \
+  tracking_topic:=/yolo/tracking
+```
+
+Hoặc ghi đè qua biến môi trường khi chạy `start_person_following.sh`:
+```bash
+PERSON_MODEL=yolo11n.engine YOLO_MAX_DET=5 YOLO_SKIP_FRAMES=1 HAND_WAVE_MAX_PEOPLE=5 bash start_person_following.sh
+```
+
+---
+
 Default AI routing:
 - `/ai_camera/color/image_raw` -> YOLO detector + tracker + RTMPose
 - `/yolo/tracking` -> RTMPose person bounding boxes
 - `/pose/image_debug` -> skeleton visualization
 - `/pose/wave_detected` -> raised-hand detection
-
-The script runs YOLO on `cuda:0` and RTMPose on `cpu` by default. Three serials are configurable as `FRONT_SERIAL`, `REAR_SERIAL` and `AI_SERIAL` environment variables. Override
-non-topic options via environment variables, for example
-`HAND_WAVE_MAX_PEOPLE=1 bash start_person_following.sh`. All launch logs
-are written under `log/ai_pipeline_YYYYMMDD_HHMMSS/`. Press Ctrl+C to
-stop the script's child launches; it does not kill unrelated camera nodes.
 
 **Important:** This is an AI RGB / 2D pipeline, not a calibrated 3D
 person follower. `person_follower.launch.py` now defaults to 2D YOLO

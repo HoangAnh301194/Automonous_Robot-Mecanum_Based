@@ -13,14 +13,14 @@ def generate_launch_description():
     yolo_bringup_dir = get_package_share_directory('yolo_bringup')
     
     # Arguments
-    model_arg = DeclareLaunchArgument('model', default_value='yolo11n.pt')
+    model_arg = DeclareLaunchArgument('model', default_value='yolo11n.engine')
     tracker_arg = DeclareLaunchArgument('tracker', default_value='bytetrack.yaml')
     device_arg = DeclareLaunchArgument('device', default_value='cuda:0')
     input_image_topic_arg = DeclareLaunchArgument('input_image_topic', default_value='/ai_camera/color/image_raw')
     input_depth_topic_arg = DeclareLaunchArgument('input_depth_topic', default_value='')
     input_depth_info_topic_arg = DeclareLaunchArgument('input_depth_info_topic', default_value='')
     target_frame_arg = DeclareLaunchArgument('target_frame', default_value='camera_link')
-    threshold_arg = DeclareLaunchArgument('threshold', default_value='0.25')
+    threshold_arg = DeclareLaunchArgument('threshold', default_value='0.35')
     use_3d_arg = DeclareLaunchArgument(
         'use_3d', default_value='False',
         description='Opt-in only: requires calibrated, registered RGB and Depth topics.'
@@ -32,8 +32,8 @@ def generate_launch_description():
     imgsz_height_arg = DeclareLaunchArgument('imgsz_height', default_value='384',
         description='Reduced from 480 to save 25% compute')
     imgsz_width_arg = DeclareLaunchArgument('imgsz_width', default_value='640')
-    max_det_arg = DeclareLaunchArgument('max_det', default_value='10',
-        description='Reduced from 300; 10 is enough for person following')
+    max_det_arg = DeclareLaunchArgument('max_det', default_value='5',
+        description='Reduced from 10; 5 is enough for person following')
     
     def validate_3d_topics(context, *args, **kwargs):
         # Do not silently subscribe to old /camera/depth topics when 3D is enabled.

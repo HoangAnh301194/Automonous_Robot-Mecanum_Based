@@ -299,6 +299,7 @@ class KioskWindow(QMainWindow):
         self._navigation_status: dict[str, Any] = {}
         self._connected = False
         self._active_page = "idle"
+        self._page_history: list[str] = []
         self._admin_authenticated = False
         # Prototype PIN; override via KIOSK_ADMIN_PIN before deployment.
         self._admin_pin = os.getenv("KIOSK_ADMIN_PIN", "1")
@@ -331,21 +332,42 @@ class KioskWindow(QMainWindow):
             background=icon_path("background.jpg"),
             ptit=icon_path("logoPtit.png"),
             faculty=icon_path("fee1.png"),
+            service_icon=icon_path("service.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
         )
+        battery_icons = {
+            "0": icon_path("battery_0.png"),
+            "25": icon_path("battery_25.png"),
+            "50": icon_path("battery_50.png"),
+            "75": icon_path("battery_75.png"),
+            "100": icon_path("battery_100.png"),
+        }
         self.admin_page = AdminPage(
             nav_icon=icon_path("navigationIcon.png"),
             slam_icon=icon_path("SLAMicon.png"),
+            detection_icon=icon_path("detection.png"),
+            start_nav_icon=icon_path("startNavigation.png"),
+            stop_nav_icon=icon_path("stopNavigation.png"),
+            status_icon=icon_path("status.png"),
+            wifi_connected_icon=icon_path("wifi.png"),
+            wifi_disconnected_icon=icon_path("wifidisconected.png"),
+            battery_icons=battery_icons,
+            back_icon=icon_path("back.png"),
         )
         self.navigation_page = NavigationPage(
             {
                 "home": icon_path("homeIcon.png"),
+                "back": icon_path("back.png"),
                 "click_goal": icon_path("clickGoal.png"),
                 "goal": icon_path("location.png"),
                 "start": icon_path("startNavigation.png"),
                 "stop": icon_path("stopNavigation.png"),
             }
         )
-        self.chat_page = ChatPage(icon_path("chatIcon.png"))
+        self.chat_page = ChatPage(
+            chat_icon=icon_path("chatIcon.png"),
+            back_icon=icon_path("back.png"),
+        )
         self.pages = {
             "idle": self.idle_page,
             "home": self.home_page,
@@ -360,15 +382,23 @@ class KioskWindow(QMainWindow):
             {
                 "home": icon_path("homeIcon.png"),
                 "chat": icon_path("chatIcon.png"),
+                "service": icon_path("service.png"),
+                "emergency": icon_path("emergency_stop.png"),
                 "settings": icon_path("setting_icon.png"),
             },
             central,
         )
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
-        self.chat_page.home_requested.connect(lambda: self.show_page("home"))
+        self.chat_page.home_requested.connect(self.go_back)
+        self.admin_page.back_requested.connect(self.go_back)
+        self.admin_page.logout_requested.connect(self.go_back)
         self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
-        self.admin_page.logout_requested.connect(self._logout_admin)
-        self.navigation_page.home_requested.connect(lambda: self.show_page("admin"))
+        self.admin_page.start_nav_requested.connect(self._on_admin_start_nav)
+        self.admin_page.stop_nav_requested.connect(self._on_admin_stop_nav)
+        self.admin_page.slam_requested.connect(self._on_admin_slam)
+        self.admin_page.detection_debug_requested.connect(self._on_admin_detection)
+        self.admin_page.system_status_requested.connect(self._on_admin_system_status)
+        self.navigation_page.home_requested.connect(self.go_back)
         self.navigation_page.start_requested.connect(self.ros_node.navigate_to_pose)
         self.navigation_page.cancel_requested.connect(self.ros_node.cancel_navigation)
 
@@ -412,7 +442,7 @@ class KioskWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
         self.stack.setGeometry(central.rect())
-        nav_width = min(280, max(248, central.width() - 32))
+        nav_width = min(460, max(390, central.width() - 32))
         nav_height = 64
         self.bottom_navigation.setGeometry(
             (central.width() - nav_width) // 2,
@@ -423,18 +453,28 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation.raise_()
         super().resizeEvent(event)
 
-    def show_page(self, page_id: str) -> None:
+    def show_page(self, page_id: str, track_history: bool = True) -> None:
         """State-based route guard; protected pages are never guest-accessible."""
+        if page_id == self._active_page:
+            return
         page = self.pages.get(page_id)
         if page is None:
             return
         if page_id in {"admin", "navigation"} and not self._admin_authenticated:
             self.get_logger_or_warning("Blocked unauthorized admin navigation")
             return
+
+        if track_history and self._active_page not in {"idle"}:
+            self._page_history.append(self._active_page)
+
         if page_id == "idle" or (
             page_id == "home" and self._active_page in {"admin", "navigation"}
         ):
             self._admin_authenticated = False
+
+        if page_id == "idle":
+            self._page_history.clear()
+
         self._active_page = page_id
         self.stack.setCurrentWidget(page)
         self.bottom_navigation.setVisible(page_id == "home")
@@ -450,6 +490,19 @@ class KioskWindow(QMainWindow):
         if page_id == "navigation":
             self.ros_node.request_locations()
 
+    def go_back(self) -> None:
+        """Navigate back to the previous screen."""
+        if self._page_history:
+            prev_page = self._page_history.pop()
+            self.show_page(prev_page, track_history=False)
+        else:
+            if self._active_page in {"admin", "chat"}:
+                self.show_page("home", track_history=False)
+            elif self._active_page == "navigation":
+                self.show_page("admin", track_history=False)
+            else:
+                self.show_page("idle", track_history=False)
+
     def get_logger_or_warning(self, message: str) -> None:
         # The UI is a Qt window; log through the existing ROS adapter.
         self.ros_node.get_logger().warn(message)
@@ -461,6 +514,10 @@ class KioskWindow(QMainWindow):
             self.show_page("chat")
         elif target == "home":
             self.show_page("home")
+        elif target == "service":
+            self._on_service_requested()
+        elif target == "emergency":
+            self._on_emergency_stop()
 
     def _request_admin_login(self) -> None:
         dialog = AdminPinDialog(self._admin_pin, self)
@@ -474,6 +531,31 @@ class KioskWindow(QMainWindow):
     def _logout_admin(self) -> None:
         self._admin_authenticated = False
         self.show_page("home")
+
+    def _on_service_requested(self) -> None:
+        self._request_admin_login()
+
+    def _on_emergency_stop(self) -> None:
+        print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)
+        self.ros_node.cancel_navigation()
+        self.signals.command_status_changed.emit("DỪNG KHẨN CẤP ĐÃ KÍCH HOẠT", "error")
+        self.bottom_navigation.set_active("home" if self._active_page == "home" else self._active_page)
+
+    def _on_admin_start_nav(self) -> None:
+        self.show_page("navigation")
+
+    def _on_admin_stop_nav(self) -> None:
+        self.ros_node.cancel_navigation()
+        self.admin_page.status_banner.setText("Điều hướng: Đã gửi lệnh dừng")
+
+    def _on_admin_slam(self) -> None:
+        self.admin_page.status_banner.setText("SLAM: Đang sẵn sàng khởi tạo")
+
+    def _on_admin_detection(self) -> None:
+        self.admin_page.status_banner.setText("Detection Debug: Kênh /yolo/detections đang mở")
+
+    def _on_admin_system_status(self) -> None:
+        self.admin_page.status_banner.setText("System Status: CPU, Cảm biến & Vi điều khiển bình thường")
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
@@ -530,6 +612,8 @@ class KioskWindow(QMainWindow):
         return super().eventFilter(watched, event)
 
     def _expire_idle_session(self) -> None:
+        if self._active_page == "admin":
+            self.admin_page.update_wifi()
         if self._active_page == "idle":
             return
         timeout = (

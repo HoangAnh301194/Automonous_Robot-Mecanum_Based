@@ -12,15 +12,18 @@ fi
 source /opt/ros/humble/setup.bash
 source "$WS/install/setup.bash"
 
-PERSON_MODEL="${PERSON_MODEL:-yolo11n.pt}"
+PERSON_MODEL="${PERSON_MODEL:-yolo11n.engine}"
 YOLO_DEVICE="${YOLO_DEVICE:-cuda:0}"
+YOLO_THRESHOLD="${YOLO_THRESHOLD:-0.35}"
 YOLO_IMGSZ_HEIGHT="${YOLO_IMGSZ_HEIGHT:-384}"
 YOLO_IMGSZ_WIDTH="${YOLO_IMGSZ_WIDTH:-640}"
-YOLO_MAX_DET="${YOLO_MAX_DET:-10}"
+YOLO_MAX_DET="${YOLO_MAX_DET:-5}"
+YOLO_SKIP_FRAMES="${YOLO_SKIP_FRAMES:-1}"
 YOLO_CLASSES="${YOLO_CLASSES:-0}"
+YOLO_USE_DEBUG="${YOLO_USE_DEBUG:-False}"
 YOLO_IMAGE_RELIABILITY="${YOLO_IMAGE_RELIABILITY:-2}"
 HAND_WAVE_DEVICE="${HAND_WAVE_DEVICE:-cpu}"
-HAND_WAVE_MAX_PEOPLE="${HAND_WAVE_MAX_PEOPLE:-3}"
+HAND_WAVE_MAX_PEOPLE="${HAND_WAVE_MAX_PEOPLE:-5}"
 FRONT_SERIAL="${FRONT_SERIAL:-17110310855}"
 REAR_SERIAL="${REAR_SERIAL:-17122514440}"
 AI_SERIAL="${AI_SERIAL:-17122611013}"
@@ -80,12 +83,14 @@ ros2 launch yolo_bringup yolo.launch.py \
   input_image_topic:="$AI_IMAGE_TOPIC" \
   image_reliability:="$YOLO_IMAGE_RELIABILITY" \
   classes:="$YOLO_CLASSES" \
+  threshold:="$YOLO_THRESHOLD" \
   imgsz_height:="$YOLO_IMGSZ_HEIGHT" \
   imgsz_width:="$YOLO_IMGSZ_WIDTH" \
   max_det:="$YOLO_MAX_DET" \
+  skip_frames:="$YOLO_SKIP_FRAMES" \
   use_tracking:=True \
   use_3d:=False \
-  use_debug:=True \
+  use_debug:="$YOLO_USE_DEBUG" \
   > "$LOG_DIR/yolo.log" 2>&1 &
 yolo_pid=$!
 pids+=("$yolo_pid")

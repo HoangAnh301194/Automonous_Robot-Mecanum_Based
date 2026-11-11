@@ -14,20 +14,11 @@ data_files = [
     (
         "share/robot_ui/souta_robot",
         [
-            "souta_robot/homeIcon.png",
-            "souta_robot/locolization.png",
-            "souta_robot/chatIcon.png",
-            "souta_robot/clickGoal.png",
-            "souta_robot/location.png",
-            "souta_robot/startNavigation.png",
-            "souta_robot/stopNavigation.png",
-            # Branded Home, Settings and future admin navigation icons.
-            "souta_robot/background.jpg",
-            "souta_robot/logoPtit.png",
-            "souta_robot/fee1.png",
-            "souta_robot/setting_icon.png",
-            "souta_robot/SLAMicon.png",
-            "souta_robot/navigationIcon.png",
+            str(p)
+            for p in sorted(
+                list(Path("souta_robot").glob("*.png"))
+                + list(Path("souta_robot").glob("*.jpg"))
+            )
         ],
     ),
     (

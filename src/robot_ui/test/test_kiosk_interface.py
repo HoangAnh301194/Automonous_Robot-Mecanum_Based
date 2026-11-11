@@ -56,16 +56,77 @@ def test_welcome_greeting_and_dock_chat_action(app):
     assert seen == ["chat"]
 
 
-def test_admin_nav_and_logout_actions(app):
+def test_admin_nav_and_back_actions(app):
     missing = Path("/nonexistent-kiosk-test-asset")
     page = AdminPage(missing, missing)
     seen = []
     page.navigation_requested.connect(lambda: seen.append("navigation"))
-    page.logout_requested.connect(lambda: seen.append("logout"))
+    page.back_requested.connect(lambda: seen.append("back"))
     nav = page.findChild(QPushButton, "adminNavButton")
     assert nav is not None
     nav.click()
-    logout = page.findChild(QPushButton, "adminLogout")
-    assert logout is not None
-    logout.click()
-    assert seen == ["navigation", "logout"]
+    back = page.findChild(QPushButton, "adminBackButton")
+    assert back is not None
+    back.click()
+    assert seen == ["navigation", "back"]
+
+
+def test_dock_service_and_emergency_actions(app):
+    missing = Path("/nonexistent-kiosk-test-asset")
+    dock = BottomNavigation({
+        "home": missing,
+        "chat": missing,
+        "service": missing,
+        "emergency": missing,
+        "settings": missing,
+    })
+    seen = []
+    dock.page_requested.connect(seen.append)
+    dock._buttons["service"].click()
+    dock._buttons["emergency"].click()
+    assert seen == ["service", "emergency"]
+
+
+def test_admin_pin_keypad_sizes_synchronized(app):
+    dialog = AdminPinDialog("1234")
+    buttons = [btn for btn in dialog.findChildren(QPushButton) if btn.text() in {"1", "2", "0", "Xóa", "OK"}]
+    assert len(buttons) >= 5
+    first_size = buttons[0].size()
+    for btn in buttons:
+        assert btn.width() == 72
+        assert btn.height() == 60
+
+
+def test_admin_page_grid_and_indicators(app):
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = AdminPage(
+        nav_icon=missing,
+        slam_icon=missing,
+        detection_icon=missing,
+        start_nav_icon=missing,
+        stop_nav_icon=missing,
+        status_icon=missing,
+    )
+    # Check all 6 function buttons
+    for name in (
+        "adminDetectionButton",
+        "adminSlamButton",
+        "adminNavButton",
+        "adminStartNavButton",
+        "adminStopNavButton",
+        "adminSystemStatusButton",
+    ):
+        btn = page.findChild(QPushButton, name)
+        assert btn is not None
+
+    # Check wifi and battery indicators
+    page.set_wifi(True)
+    assert page.wifi_text_label.text() == "Online"
+    page.set_wifi(False)
+    assert page.wifi_text_label.text() == "Offline"
+
+    page.set_battery(85.0)
+    assert page.battery_text_label.text() == "85%"
+    page.set_battery(None)
+    assert page.battery_text_label.text() == "--%"
+
