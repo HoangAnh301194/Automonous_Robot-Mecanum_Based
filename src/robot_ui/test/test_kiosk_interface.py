@@ -11,9 +11,10 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
-from PyQt5.QtWidgets import QApplication, QDialog, QPushButton
+from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QPushButton
 
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, WelcomePage
+from robot_ui.kiosk.widgets import BottomNavigation
 
 
 @pytest.fixture(scope="module")
@@ -39,15 +40,20 @@ def test_pin_rejects_wrong_code(app):
     assert dialog.error.text()
 
 
-def test_welcome_chat_action(app):
+def test_welcome_greeting_and_dock_chat_action(app):
     missing = Path("/nonexistent-kiosk-test-asset")
-    page = WelcomePage(missing, missing, missing, missing)
+    page = WelcomePage(missing, missing, missing)
+    assert page.findChild(QPushButton, "welcomeChatButton") is None
+    texts = [label.text() for label in page.findChildren(QLabel)]
+    assert any("20-11" in text for text in texts)
+    assert any("Khoa Kỹ thuật Điện tử 1" in text for text in texts)
+    assert not any("Souta Robot" in text for text in texts)
+
+    dock = BottomNavigation({"home": missing, "chat": missing, "settings": missing})
     seen = []
-    page.chat_requested.connect(lambda: seen.append(True))
-    button = page.findChild(QPushButton, "welcomeChatButton")
-    assert button is not None
-    button.click()
-    assert seen == [True]
+    dock.page_requested.connect(seen.append)
+    dock._buttons["chat"].click()
+    assert seen == ["chat"]
 
 
 def test_admin_nav_and_logout_actions(app):

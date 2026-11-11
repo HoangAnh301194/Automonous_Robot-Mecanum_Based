@@ -23,9 +23,9 @@ data_files = [
             "souta_robot/stopNavigation.png",
             # Branded Home, Settings and future admin navigation icons.
             "souta_robot/background.jpg",
-            "souta_robot/logoPtit.jpg",
-            "souta_robot/fee1.jpeg",
-            "souta_robot/setting_icon.jpeg",
+            "souta_robot/logoPtit.png",
+            "souta_robot/fee1.png",
+            "souta_robot/setting_icon.png",
             "souta_robot/SLAMicon.png",
             "souta_robot/navigationIcon.png",
         ],

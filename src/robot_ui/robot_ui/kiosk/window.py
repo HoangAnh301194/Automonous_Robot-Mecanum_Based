@@ -329,9 +329,8 @@ class KioskWindow(QMainWindow):
         self.idle_page.video.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.home_page = WelcomePage(
             background=icon_path("background.jpg"),
-            ptit=icon_path("logoPtit.jpg"),
-            faculty=icon_path("fee1.jpeg"),
-            chat=icon_path("chatIcon.png"),
+            ptit=icon_path("logoPtit.png"),
+            faculty=icon_path("fee1.png"),
         )
         self.admin_page = AdminPage(
             nav_icon=icon_path("navigationIcon.png"),
@@ -360,12 +359,12 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation = BottomNavigation(
             {
                 "home": icon_path("homeIcon.png"),
-                "settings": icon_path("setting_icon.jpeg"),
+                "chat": icon_path("chatIcon.png"),
+                "settings": icon_path("setting_icon.png"),
             },
             central,
         )
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
-        self.home_page.chat_requested.connect(lambda: self.show_page("chat"))
         self.chat_page.home_requested.connect(lambda: self.show_page("home"))
         self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
         self.admin_page.logout_requested.connect(self._logout_admin)
@@ -413,7 +412,7 @@ class KioskWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
         self.stack.setGeometry(central.rect())
-        nav_width = min(260, max(238, central.width() - 32))
+        nav_width = min(280, max(248, central.width() - 32))
         nav_height = 64
         self.bottom_navigation.setGeometry(
             (central.width() - nav_width) // 2,
@@ -458,6 +457,8 @@ class KioskWindow(QMainWindow):
     def _on_bottom_navigation(self, target: str) -> None:
         if target == "settings":
             self._request_admin_login()
+        elif target == "chat":
+            self.show_page("chat")
         elif target == "home":
             self.show_page("home")
 

@@ -12,16 +12,16 @@ START
 IDLE (Souta Robot face / MP4, full screen, no dock or telemetry)
   | tap anywhere
   v
-HOME (background.jpg, PTIT + FEE1 logos)
-  |-- Chat button --> CHAT (existing 9router/RAG) --> Back --> HOME
+HOME (background.jpg, PTIT top-left + FEE1 top-right logos)
+  |-- Dock Chat icon --> CHAT (existing 9router/RAG) --> Back --> HOME
   |
-  `-- Settings icon --> Admin PIN dialog --> ADMIN overview
+  `-- Dock Settings icon --> Admin PIN dialog --> ADMIN overview
                                            |-- Map & Nav2 --> NAVIGATION
                                            |                 `-- Back --> ADMIN
                                            `-- Logout --> HOME
 ```
 
-Only Home and Settings buttons appear in the **public Home dock**.
+Only Home, Chat and Settings buttons appear in the **public Home dock**.
 Navigation controls are hidden from visitors. The existing ROS subscriptions,
 map widget, Nav2 action client and LLM worker remain unchanged.
 
@@ -68,7 +68,7 @@ The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
   returns to the animated Souta Robot face.
 * Screen transitions and timeouts **never cancel an ongoing Nav2 goal**.
 * Existing `/map`, robot status, LLM and navigation ROS interfaces are reused.
-* `background.jpg`, `logoPtit.jpg`, `fee1.jpeg`, `setting_icon.jpeg`,
+* `background.jpg`, `logoPtit.png`, `fee1.png`, `setting_icon.png`,
   `SLAMicon.png`, and `navigationIcon.png` are installed via `setup.py`.
 * The large background JPEG is decoded to display-scale resolution using
   Qt `QImageReader` to reduce peak image memory.
@@ -82,7 +82,7 @@ use a strong PIN / secret storage and consider local OS access control.
 
 1. Launch Kiosk. It should show only Souta Robot's face, no Home/Map/Chat dock.
 2. Tap anywhere. The Home screen should show the institution background,
-   PTIT/FEE1 logos and only Home + Settings in the bottom dock.
+   PTIT/FEE1 logos and Home + Chat + Settings in the bottom dock.
 3. Tap Chat. Confirm 9router conversation works; return via header button.
 4. Tap Settings. Wrong PIN stays locked; PIN `1` opens Admin.
 5. From Admin open Map & Nav2; use the back arrow to return to Admin.

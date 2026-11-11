@@ -26,7 +26,13 @@ def picture(path: Path, size: int = 70) -> QLabel:
 class WelcomePage(QWidget):
     chat_requested = pyqtSignal()
 
-    def __init__(self, background: Path, ptit: Path, faculty: Path, chat: Path):
+    def __init__(
+        self,
+        background: Path,
+        ptit: Path,
+        faculty: Path,
+        chat: Path | None = None,
+    ):
         super().__init__()
         self.setObjectName("welcomePage")
         self.background_file = background
@@ -37,50 +43,43 @@ class WelcomePage(QWidget):
         layout.setSpacing(12)
 
         header = QHBoxLayout()
-        header.addWidget(picture(ptit))
-        header.addWidget(picture(faculty))
-        school = QLabel("HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG\nKHOA KỸ THUẬT ĐIỆN TỬ 1")
-        school.setObjectName("welcomeSchool")
-        school.setWordWrap(True)
-        header.addWidget(school, 1)
-        layout.addLayout(header)
-        layout.addStretch(2)
+        header.addWidget(picture(ptit), 0, Qt.AlignTop)
 
-        title = QLabel("XIN CHÀO QUÝ THẦY CÔ")
+        school_box = QVBoxLayout()
+        school_box.setContentsMargins(8, 6, 8, 0)
+        school_box.setSpacing(3)
+        school_ptit = QLabel("HỌC VIỆN CÔNG NGHỆ BƯU CHÍNH VIỄN THÔNG")
+        school_ptit.setObjectName("welcomeSchoolPtit")
+        school_ptit.setAlignment(Qt.AlignCenter)
+        school_ptit.setWordWrap(True)
+        school_fee1 = QLabel("KHOA KỸ THUẬT ĐIỆN TỬ 1")
+        school_fee1.setObjectName("welcomeSchoolFee1")
+        school_fee1.setAlignment(Qt.AlignCenter)
+        school_fee1.setWordWrap(True)
+        school_box.addWidget(school_ptit)
+        school_box.addWidget(school_fee1)
+        header.addLayout(school_box, 1)
+
+        header.addWidget(picture(faculty), 0, Qt.AlignTop)
+        layout.addLayout(header)
+        layout.addStretch(1)
+
+        title = QLabel("Chào mừng ngày Nhà giáo Việt Nam 20-11")
         title.setObjectName("welcomeHeading")
         title.setAlignment(Qt.AlignCenter)
         title.setWordWrap(True)
         layout.addWidget(title)
-        subtitle = QLabel("Souta Robot  ·  Trợ lý robot tại Học viện")
+        subtitle = QLabel("Kính chào quý Thầy Cô Khoa Kỹ thuật Điện tử 1")
         subtitle.setObjectName("welcomeSubtitle")
         subtitle.setAlignment(Qt.AlignCenter)
+        subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
-        layout.addSpacing(14)
-
-        row = QHBoxLayout()
-        row.addStretch()
-        btn = QPushButton("  Trò chuyện với Souta Robot")
-        btn.setObjectName("welcomeChatButton")
-        btn.setAccessibleName("Mở trò chuyện")
-        btn.setMinimumSize(320, 78)
-        btn.setMaximumWidth(480)
-        btn.setIcon(QIcon(str(chat)))
-        btn.setIconSize(QSize(46, 46))
-        btn.clicked.connect(self.chat_requested)
-        row.addWidget(btn)
-        row.addStretch()
-        layout.addLayout(row)
         layout.addStretch(3)
         self.setStyleSheet("""
-            QLabel#welcomeSchool { color: white; font-size: 14px; font-weight: 700; }
-            QLabel#welcomeHeading { color: white; font-size: 32px; font-weight: 800; }
-            QLabel#welcomeSubtitle { color: #eef2f4; font-size: 17px; }
-            QPushButton#welcomeChatButton {
-                color: white; background: rgba(12, 25, 36, 210);
-                border: 2px solid #f2bf6e; border-radius: 17px;
-                font-size: 17px; font-weight: 700; padding: 8px;
-            }
-            QPushButton#welcomeChatButton:pressed { background: #3b4b59; }
+            QLabel#welcomeSchoolPtit { color: #ff4545; font-size: 15px; font-weight: 800; }
+            QLabel#welcomeSchoolFee1 { color: #48a9ff; font-size: 14px; font-weight: 800; }
+            QLabel#welcomeHeading { color: white; font-size: 29px; font-weight: 800; }
+            QLabel#welcomeSubtitle { color: #eef2f4; font-size: 19px; font-weight: 600; }
         """)
 
     def _read_background(self):

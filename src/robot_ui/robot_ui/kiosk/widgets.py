@@ -162,13 +162,21 @@ class HomePage(QWidget):
 
 
 def monochrome_icon(path: Path, color: QColor) -> QIcon:
-    """Use image luminance as alpha so the opaque white asset becomes transparent."""
-    grayscale = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
-    if grayscale is None:
+    """Tint a monochrome icon using its alpha channel, or white luminance fallback."""
+    image_data = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
+    if image_data is None:
         return QIcon(str(path))
-    alpha = 255 - grayscale
-    alpha[alpha < 24] = 0
-    rgba = np.empty((*grayscale.shape, 4), dtype=np.uint8)
+    if image_data.ndim == 3 and image_data.shape[2] == 4 and (image_data[:, :, 3] < 255).any():
+        alpha = image_data[:, :, 3].copy()
+    else:
+        grayscale = (
+            image_data
+            if image_data.ndim == 2
+            else cv2.cvtColor(image_data[:, :, :3], cv2.COLOR_BGR2GRAY)
+        )
+        alpha = 255 - grayscale
+        alpha[alpha < 24] = 0
+    rgba = np.empty((alpha.shape[0], alpha.shape[1], 4), dtype=np.uint8)
     rgba[:, :, 0] = color.red()
     rgba[:, :, 1] = color.green()
     rgba[:, :, 2] = color.blue()
@@ -768,8 +776,8 @@ class NavButton(QPushButton):
             color = QColor("#ffb32c" if dark_background else "#d97800")
         else:
             color = QColor("#ffffff" if dark_background else "#26343c")
-        # Preserve the supplied full-colour JPEG Settings icon.
-        if self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
+        # Preserve the full-colour Settings icon (PNG alpha or JPEG) instead of monochrome tinting.
+        if self.page_id == "settings" or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
             self.setIcon(QIcon(str(self.icon_path)))
         else:
             self.setIcon(monochrome_icon(self.icon_path, color))
