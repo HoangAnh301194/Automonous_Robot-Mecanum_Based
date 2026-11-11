@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.llm_client import LLMWorker
-from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, WelcomePage
+from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
 from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, NavigationPage
@@ -457,10 +457,17 @@ class KioskWindow(QMainWindow):
             back_icon=icon_path("back.png"),
             voice_icons=voice_icons,
         )
+        self.service_page = ServicePage(
+            back_icon=icon_path("back.png"),
+            wait_icon=icon_path("service_wait.png"),
+            continue_icon=icon_path("service_continue.png"),
+            service_icon=icon_path("service.png"),
+        )
         self.pages = {
             "idle": self.idle_page,
             "home": self.home_page,
             "chat": self.chat_page,
+            "service": self.service_page,
             "admin": self.admin_page,
             "navigation": self.navigation_page,
         }
@@ -479,6 +486,8 @@ class KioskWindow(QMainWindow):
         )
         self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
+        self.home_page.service_requested.connect(self._on_service_requested)
+        self.service_page.back_requested.connect(self.go_back)
         self.chat_page.home_requested.connect(self.go_back)
         self.admin_page.back_requested.connect(self.go_back)
         self.admin_page.logout_requested.connect(self.go_back)
@@ -590,7 +599,7 @@ class KioskWindow(QMainWindow):
             prev_page = self._page_history.pop()
             self.show_page(prev_page, track_history=False)
         else:
-            if self._active_page in {"admin", "chat"}:
+            if self._active_page in {"admin", "chat", "service"}:
                 self.show_page("home", track_history=False)
             elif self._active_page == "navigation":
                 self.show_page("admin", track_history=False)
@@ -627,7 +636,7 @@ class KioskWindow(QMainWindow):
         self.show_page("home")
 
     def _on_service_requested(self) -> None:
-        self._request_admin_login()
+        self.show_page("service")
 
     def _on_emergency_stop(self) -> None:
         print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)

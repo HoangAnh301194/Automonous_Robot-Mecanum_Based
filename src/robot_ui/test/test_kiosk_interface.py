@@ -13,7 +13,7 @@ import pytest
 pytest.importorskip("PyQt5.QtWidgets")
 from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton
 
-from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, WelcomePage
+from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
 from robot_ui.kiosk.widgets import BottomNavigation
 
 
@@ -374,6 +374,84 @@ def test_chat_page_reset_conversation(app):
     texts = [lbl.text() for lbl in page.findChildren(QLabel, "bubbleText")]
     assert len(texts) == 1
     assert "Xin chào! Tôi là Souta Robot" in texts[0]
+
+
+def test_service_page_elements_and_selection(app):
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ServicePage(
+        back_icon=missing,
+        wait_icon=missing,
+        continue_icon=missing,
+        service_icon=missing,
+    )
+
+    # 1. Header elements
+    assert page.findChild(QLabel, "serviceHeaderTitle").text() == "SERVICE"
+    assert "Souta Robot · Phục vụ nước" in page.findChild(QLabel, "serviceHeaderSubtitle").text()
+
+    # 2. Main content elements
+    assert page.findChild(QLabel, "serviceMainTitle").text() == "Dịch vụ phục vụ nước"
+    assert "Vui lòng lựa chọn chức năng bên dưới" in page.findChild(QLabel, "serviceInstruction").text()
+
+    # 3. Two large cards
+    assert page.btn_wait is not None
+    assert page.btn_continue is not None
+    assert page.btn_wait.property("mode") == "wait"
+    assert page.btn_continue.property("mode") == "continue"
+
+    # Initial state
+    assert page.get_selected_mode() is None
+    assert page.btn_wait.property("selected") is False
+    assert page.btn_continue.property("selected") is False
+
+    # Selection 1: Chờ phục vụ
+    page.btn_wait.click()
+    assert page.get_selected_mode() == "wait"
+    assert page.btn_wait.property("selected") is True
+    assert page.btn_continue.property("selected") is False
+
+    # Selection 2: Hoàn tất & tiếp tục
+    page.btn_continue.click()
+    assert page.get_selected_mode() == "continue"
+    assert page.btn_wait.property("selected") is False
+    assert page.btn_continue.property("selected") is True
+
+    # 4. Footer
+    footer = page.findChild(QLabel, "serviceFooter")
+    assert footer is not None
+    assert "Giao diện thử nghiệm — chưa kết nối điều khiển robot" in footer.text()
+
+    # 5. Back button emits back_requested
+    seen_back = []
+    page.back_requested.connect(lambda: seen_back.append(True))
+    page.back_button.click()
+    assert seen_back == [True]
+
+
+def test_service_page_layout_dimensions(app):
+    from robot_ui.kiosk.assets import icon_path
+    page = ServicePage(
+        back_icon=icon_path("back.png"),
+        wait_icon=icon_path("service_wait.png"),
+        continue_icon=icon_path("service_continue.png"),
+        service_icon=icon_path("service.png"),
+    )
+
+    # Test 800x480
+    page.resize(800, 480)
+    page.show()
+    app.processEvents()
+    assert page.width() == 800
+    assert page.height() == 480
+    assert page.btn_wait.width() == 280
+    assert page.btn_continue.width() == 280
+
+    # Test 1280x720
+    page.resize(1280, 720)
+    app.processEvents()
+    assert page.width() == 1280
+    assert page.height() == 720
+
 
 
 
