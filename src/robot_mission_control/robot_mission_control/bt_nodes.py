@@ -399,7 +399,7 @@ class ActionPatrol(Action):
     def __init__(self, name="ActionPatrol", node=None):
         super().__init__(name)
         self.node = node
-        self.default_points = ["tram_nuoc", "diem_A", "diem_B", "diem_C"]
+        self.default_points = ["khoihanh", "diem1", "diem2", "diem3"]
         self.patrol_points = []
         self.current_idx = 0
         self.action_client = None

@@ -103,6 +103,9 @@ class MissionControllerNode(Node):
         self.srv_trigger_finish = self.create_service(
             Trigger, '/mission/trigger_finish', self.cb_srv_trigger_finish
         )
+        self.srv_reload_route = self.create_service(
+            Trigger, '/mission/reload_route', self.cb_reload_route
+        )
 
         # 6. Dựng cây Behavior Tree thông minh
         self.tree = self.build_behavior_tree()
@@ -206,6 +209,13 @@ class MissionControllerNode(Node):
         response.success = True
         response.message = "Tạm dừng tuần tra"
         self.publish_log("Lệnh HMI: Tạm dừng tuần tra.")
+        return response
+
+    def cb_reload_route(self, request, response):
+        self.blackboard.set('PATROL_ROUTE_CHANGED', True)
+        response.success = True
+        response.message = "Đã nạp lại lộ trình tuần tra mới."
+        self.publish_log("🔄 Đã nạp lại lộ trình tuần tra mới từ cấu hình.")
         return response
 
     def publish_log(self, text: str):

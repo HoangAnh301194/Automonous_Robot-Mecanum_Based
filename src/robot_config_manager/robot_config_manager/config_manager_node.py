@@ -14,7 +14,7 @@ class ConfigManagerNode(Node):
         super().__init__('config_manager_node')
         
         # Determine workspace config path
-        self.config_dir = os.path.join(os.path.expanduser('~'), 'robot_ws', 'config')
+        self.config_dir = os.path.join(os.path.expanduser('~'), 'ros2_ws', 'config')
         if not os.path.exists(self.config_dir):
             os.makedirs(self.config_dir)
             

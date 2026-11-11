@@ -21,9 +21,9 @@ from PyQt5.QtCore import QPoint, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
-    QFrame, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSlider, QTabWidget, QTextEdit,
-    QVBoxLayout, QWidget,
+    QFrame, QGridLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox,
+    QProgressBar, QPushButton, QRadioButton, QScrollArea, QSlider, QTableWidget, QTableWidgetItem,
+    QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 import rclpy
@@ -39,9 +39,22 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 from rclpy.time import Time
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, Int32MultiArray, String
+from std_srvs.srv import Trigger
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+try:
+    from robot_interfaces.msg import TrackedPerson, TrackedPersonArray
+    HAS_TRACKED_PERSON_MSG = True
+except ImportError:
+    HAS_TRACKED_PERSON_MSG = False
+
+try:
+    from robot_interfaces.srv import SaveLocation, SaveRoute
+    HAS_CONFIG_SRVS = True
+except ImportError:
+    HAS_CONFIG_SRVS = False
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WS_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
@@ -164,7 +177,7 @@ SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_exi
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 class RosInterface(Node):
-    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None):
+    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None):
         super().__init__("desktop_nav_gui_v3")
         self.log_callback = log_callback
         self.map_callback = map_callback
@@ -174,6 +187,8 @@ class RosInterface(Node):
         self.nav_feedback_callback = nav_feedback_callback
         self.nav_status_callback = nav_status_callback
         self.human_callback = human_callback
+        self.mission_log_callback = mission_log_callback
+        self.popup_cmd_callback = popup_cmd_callback
         self.current_goal_x = None
         self.current_goal_y = None
         self.initial_goal_dist = None
@@ -188,7 +203,6 @@ class RosInterface(Node):
         self.scan_sub = self.create_subscription(LaserScan, "/scan", self.on_scan, QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10))
         self.dataenc_sub = self.create_subscription(Int32MultiArray, "/dataenc", self.on_dataenc, 20)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
-        self.waypoints_pub = self.create_publisher(String, "/nhiemvuboss/waypoints_json", 10)
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.current_goal_handle = None
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
@@ -196,12 +210,127 @@ class RosInterface(Node):
         self.cancel_through_poses_client = self.create_client(CancelGoal, "/navigate_through_poses/_action/cancel_goal")
         self.human_detected_pub = self.create_publisher(Bool, "/human_detected_in_path", 10)
         self.human_detected_sub = self.create_subscription(Bool, "/human_detected_in_path", self.on_human_detected_msg, 10)
+
+        # Mission Control interfaces
+        self.mission_log_sub = self.create_subscription(String, "/mission/status_log", self.on_mission_log_msg, 10)
+        self.popup_cmd_sub = self.create_subscription(String, "/mission/service_popup_cmd", self.on_popup_cmd_msg, 10)
+        self.serve_trigger_pub = self.create_publisher(Bool, "/mission/serve_trigger", 10)
+        self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
+        self.wave_detected_pub = self.create_publisher(Bool, "/pose/wave_detected", 10)
+        self.wave_status_pub = self.create_publisher(String, "/pose/wave_status", 10)
+        if HAS_TRACKED_PERSON_MSG:
+            self.tracked_people_pub = self.create_publisher(TrackedPersonArray, "/perception/tracked_people", 10)
+        else:
+            self.tracked_people_pub = None
+
+        self.cli_start_patrol = self.create_client(Trigger, "/mission/start_patrol")
+        self.cli_pause_patrol = self.create_client(Trigger, "/mission/pause_patrol")
+        self.cli_trigger_serve = self.create_client(Trigger, "/mission/trigger_serve")
+        self.cli_trigger_finish = self.create_client(Trigger, "/mission/trigger_finish")
+        self.cli_reload_route = self.create_client(Trigger, "/mission/reload_route")
+        if HAS_CONFIG_SRVS:
+            self.cli_save_location = self.create_client(SaveLocation, "/config/save_location")
+            self.cli_save_route = self.create_client(SaveRoute, "/config/save_route")
+        else:
+            self.cli_save_location = None
+            self.cli_save_route = None
+
         self.pose_timer = self.create_timer(0.05, self.publish_pose_from_tf)
 
     def publish_mock_human(self, is_human: bool):
         msg = Bool()
         msg.data = bool(is_human)
         self.human_detected_pub.publish(msg)
+        if HAS_TRACKED_PERSON_MSG and self.tracked_people_pub is not None:
+            arr = TrackedPersonArray()
+            arr.header.stamp = self.get_clock().now().to_msg()
+            arr.header.frame_id = "base_footprint"
+            if is_human:
+                p = TrackedPerson()
+                p.track_id = "mock_human_1"
+                p.position.x = 1.2
+                p.position.y = 0.0
+                p.position.z = 0.0
+                p.distance_xy_m = 1.2
+                p.depth_m = 1.2
+                p.position_valid = True
+                p.depth_valid = True
+                p.is_waving = False
+                p.wave_valid = True
+                p.detection_confidence = 0.99
+                arr.people.append(p)
+            self.tracked_people_pub.publish(arr)
+
+    def publish_mock_waving(self, is_waving: bool):
+        msg = Bool()
+        msg.data = bool(is_waving)
+        self.wave_detected_pub.publish(msg)
+        if is_waving:
+            st = String()
+            st.data = "[person_99] Waving with Right hand!"
+            self.wave_status_pub.publish(st)
+        if HAS_TRACKED_PERSON_MSG and self.tracked_people_pub is not None:
+            arr = TrackedPersonArray()
+            arr.header.stamp = self.get_clock().now().to_msg()
+            arr.header.frame_id = "base_footprint"
+            if is_waving:
+                p = TrackedPerson()
+                p.track_id = "99"
+                p.position.x = 2.2
+                p.position.y = 0.4
+                p.position.z = 0.0
+                p.distance_xy_m = math.hypot(2.2, 0.4)
+                p.depth_m = 2.2
+                p.position_valid = True
+                p.depth_valid = True
+                p.is_waving = True
+                p.wave_valid = True
+                p.detection_confidence = 0.99
+                arr.people.append(p)
+            self.tracked_people_pub.publish(arr)
+
+    def call_mission_trigger(self, client, label: str):
+        if client.service_is_ready():
+            client.call_async(Trigger.Request())
+            self.log(f"[Mission] Đã gửi lệnh: {label}")
+            return True
+        if client.wait_for_service(timeout_sec=0.3):
+            client.call_async(Trigger.Request())
+            self.log(f"[Mission] Đã gửi lệnh: {label}")
+            return True
+        self.log(f"[Mission] Lỗi: Service {label} chưa bật (Hãy chạy backend.launch.py)!")
+        return False
+
+    def sync_patrol_config(self, waypoints, route_name="patrol_route"):
+        synced = False
+        if HAS_CONFIG_SRVS and self.cli_save_location is not None and self.cli_save_route is not None:
+            if self.cli_save_location.wait_for_service(timeout_sec=0.2):
+                for wp in waypoints:
+                    req = SaveLocation.Request()
+                    req.name = str(wp["name"])
+                    req.x = float(wp["x"])
+                    req.y = float(wp["y"])
+                    req.yaw = float(wp.get("yaw", 0.0))
+                    self.cli_save_location.call_async(req)
+                synced = True
+            if self.cli_save_route.wait_for_service(timeout_sec=0.2):
+                r_req = SaveRoute.Request()
+                r_req.route_name = route_name
+                r_req.waypoints = [str(wp["name"]) for wp in waypoints]
+                self.cli_save_route.call_async(r_req)
+                synced = True
+        if self.cli_reload_route.wait_for_service(timeout_sec=0.2):
+            self.cli_reload_route.call_async(Trigger.Request())
+            self.log("[Mission] Đã gửi tín hiệu reload lộ trình sang Mission Controller.")
+        return synced
+
+    def on_mission_log_msg(self, msg):
+        if self.mission_log_callback:
+            self.mission_log_callback(msg.data)
+
+    def on_popup_cmd_msg(self, msg):
+        if self.popup_cmd_callback:
+            self.popup_cmd_callback(msg.data)
 
     def on_human_detected_msg(self, msg):
         if self.human_callback:
@@ -400,12 +529,6 @@ class RosInterface(Node):
         self.log("✅ Đã phanh xe và gửi lệnh CancelGoal tới Nav2.")
         return True
 
-    def send_waypoint_batch(self, waypoints):
-        msg = String()
-        msg.data = json.dumps({"waypoints": waypoints}, ensure_ascii=False)
-        self.waypoints_pub.publish(msg)
-        self.log(f"Gửi batch waypoint cho nhiemvuboss: {len(waypoints)} điểm")
-        self.emit_nav_status("📍 GỬI TẬP WAYPOINT", f"Đã gửi chuỗi {len(waypoints)} waypoint cho bộ điều hướng tự động.", "#3b82f6")
 
 class MapViewer(QLabel):
     def __init__(self, ros_node_getter, on_map_click=None, on_map_drag=None, parent=None):
@@ -692,18 +815,21 @@ class MainWindow(QWidget):
     nav_feedback_signal = pyqtSignal(float, float, float, float, int)
     nav_thought_signal = pyqtSignal(str, str, str)
     human_signal = pyqtSignal(bool)
+    mission_log_signal = pyqtSignal(str)
+    mission_popup_signal = pyqtSignal(str)
     LAYER1_SIM, LAYER1_REAL = "layer1_sim", "layer1_real"
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Robot Control GUI v3 - Map Editor")
-        self.resize(1200, 760)
+        self.setWindowTitle("Robot Control GUI v3 - Autonomous Patrol & Map Console")
+        self.resize(1320, 820)
         self.temp_files = []
         self.map_dir = _pick_first_existing([DEFAULT_MAP_DIR, MO_HINH_MAP_DIR, WS_ROOT])
         self.selected_map_file = ""
         self.batch_waypoint_mode = False
+        self.patrol_waypoint_mode = False
         self.batch_waypoints = []
         self.is_shutting_down = False
         self.one_shot_procs = []
@@ -725,13 +851,19 @@ class MainWindow(QWidget):
         self.nav_feedback_signal.connect(self._on_nav_feedback_ui)
         self.nav_thought_signal.connect(self._on_nav_thought_ui)
         self.human_signal.connect(self._on_human_detected_ui)
+        self.mission_log_signal.connect(self._on_mission_log_ui)
+        self.mission_popup_signal.connect(self._on_mission_popup_ui)
         self.init_ui()
+        self.load_patrol_config_from_yaml(silent=True)
         self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 & Gazebo cũ trước khi khởi động.")
         self.init_ros()
         self.refresh_map_list()
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self.refresh_status)
         self.status_timer.start(500)
+        self.mock_timer = QTimer(self)
+        self.mock_timer.timeout.connect(self._on_mock_timer_tick)
+        self.mock_timer.start(400)
 
     def init_ui(self):
         self.rb_sim = QRadioButton("Simulation (Gazebo)")
@@ -784,10 +916,10 @@ class MainWindow(QWidget):
         self.edt_save_map_name = QLineEdit("my_map/new_map")
         self.btn_save_map = QPushButton("Lưu map (Serialize)"); self.btn_save_map.clicked.connect(self.save_map)
         self.btn_batch_mode = QPushButton("Waypoint Mode: OFF"); self.btn_batch_mode.clicked.connect(self.toggle_batch_waypoint_mode)
-        self.btn_batch_clear = QPushButton("Clear A.."); self.btn_batch_clear.clicked.connect(self.clear_batch_waypoints)
+        self.btn_batch_clear = QPushButton("Clear Điểm"); self.btn_batch_clear.clicked.connect(self.clear_batch_waypoints)
         self.btn_batch_undo = QPushButton("Undo"); self.btn_batch_undo.clicked.connect(self.undo_batch_waypoint)
-        self.btn_batch_send = QPushButton("Gửi A.. cho nhiemvuboss"); self.btn_batch_send.clicked.connect(self.send_batch_waypoints_to_boss)
-        self.lbl_batch_info = QLabel("Batch: 0 điểm"); self.lbl_batch_info.setWordWrap(True)
+        self.btn_batch_send = QPushButton("🚀 Lưu & Mở Tab Mission"); self.btn_batch_send.clicked.connect(self.open_mission_tab_from_batch)
+        self.lbl_batch_info = QLabel("Patrol Route: 0 điểm"); self.lbl_batch_info.setWordWrap(True)
         map_group = QGroupBox("Quản lý map"); map_layout = QGridLayout()
         map_layout.addWidget(self.lbl_map_folder, 0, 0, 1, 3)
         map_layout.addWidget(self.btn_choose_map_folder, 1, 0); map_layout.addWidget(self.btn_refresh_maps, 1, 1); map_layout.addWidget(self.btn_choose_map_file, 1, 2)
@@ -936,12 +1068,184 @@ class MainWindow(QWidget):
         left_layout.addWidget(control_group); left_layout.addWidget(self.tabs_info, stretch=1)
         left_widget = QWidget(); left_widget.setLayout(left_layout)
         left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True); left_scroll.setWidget(left_widget)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(320)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(340)
         self.map_view = MapViewer(self.get_ros_node, on_map_click=self.on_map_clicked, on_map_drag=self.on_map_dragged)
         right_layout = QVBoxLayout(); right_layout.addWidget(self.map_view)
-        right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(260)
-        root_layout = QHBoxLayout(); root_layout.addWidget(left_scroll, stretch=0); root_layout.addWidget(right_widget, stretch=1)
-        root_layout.setContentsMargins(6, 6, 6, 6); root_layout.setSpacing(6); self.setLayout(root_layout)
+        right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(320)
+
+        # === TAB LỚN 1: BẢN ĐỒ & VẬN HÀNH HỆ THỐNG ===
+        self.tab_system = QWidget()
+        tab1_layout = QHBoxLayout(self.tab_system)
+        tab1_layout.addWidget(left_scroll, stretch=0)
+        tab1_layout.addWidget(right_widget, stretch=1)
+        tab1_layout.setContentsMargins(6, 6, 6, 6)
+        tab1_layout.setSpacing(6)
+
+        # === TAB LỚN 2: TRUNG TÂM TUẦN TRA & PHỤC VỤ (MISSION DASHBOARD) ===
+        self.tab_mission = QWidget()
+        mission_root = QHBoxLayout(self.tab_mission)
+        mission_root.setContentsMargins(8, 8, 8, 8)
+        mission_root.setSpacing(10)
+
+        # --- CỘT TRÁI TAB 2: THIẾT LẬP LỘ TRÌNH & BẢN ĐỒ CHẤM ĐIỂM ---
+        mission_left_widget = QWidget()
+        mission_left = QVBoxLayout(mission_left_widget)
+        mission_left.setContentsMargins(0, 0, 0, 0)
+        mission_left.setSpacing(6)
+
+        setup_group = QGroupBox("📍 Thiết Lập Lộ Trình Tuần Tra (locations.yaml & routes.yaml)")
+        setup_layout = QVBoxLayout()
+        toolbar_row1 = QHBoxLayout()
+        self.btn_patrol_pick_mode = QPushButton("🎯 Chấm điểm trên Map: OFF")
+        self.btn_patrol_pick_mode.setStyleSheet("font-weight: bold; padding: 6px 10px;")
+        self.btn_patrol_pick_mode.clicked.connect(self.toggle_patrol_waypoint_mode)
+        self.btn_patrol_undo = QPushButton("↩ Hoàn tác")
+        self.btn_patrol_undo.setStyleSheet("padding: 6px 10px;")
+        self.btn_patrol_undo.clicked.connect(self.undo_batch_waypoint)
+        self.btn_patrol_clear = QPushButton("🗑️ Xóa hết")
+        self.btn_patrol_clear.setStyleSheet("padding: 6px 10px;")
+        self.btn_patrol_clear.clicked.connect(self.clear_batch_waypoints)
+        toolbar_row1.addWidget(self.btn_patrol_pick_mode)
+        toolbar_row1.addWidget(self.btn_patrol_undo)
+        toolbar_row1.addWidget(self.btn_patrol_clear)
+
+        toolbar_row2 = QHBoxLayout()
+        self.btn_patrol_load = QPushButton("📂 Nạp từ Config")
+        self.btn_patrol_load.setStyleSheet("padding: 7px 10px;")
+        self.btn_patrol_load.clicked.connect(lambda: self.load_patrol_config_from_yaml(silent=False))
+        self.btn_patrol_save = QPushButton("💾 LƯU & ÁP DỤNG LỘ TRÌNH")
+        self.btn_patrol_save.setStyleSheet("background-color: #2563eb; color: white; font-weight: bold; padding: 7px 12px; border-radius: 4px;")
+        self.btn_patrol_save.clicked.connect(self.save_patrol_config_to_yaml)
+        toolbar_row2.addWidget(self.btn_patrol_load)
+        toolbar_row2.addWidget(self.btn_patrol_save, stretch=1)
+
+        self.lbl_patrol_hint = QLabel(
+            "Bật 'Chấm điểm trên Map: ON' rồi click lên bản đồ bên dưới để thêm lần lượt Trạm nước (khoihanh) → diem1 → diem2 → diem3..."
+        )
+        self.lbl_patrol_hint.setWordWrap(True)
+        self.lbl_patrol_hint.setStyleSheet("color: #475569; font-size: 11px;")
+
+        setup_layout.addLayout(toolbar_row1)
+        setup_layout.addLayout(toolbar_row2)
+        setup_layout.addWidget(self.lbl_patrol_hint)
+        setup_group.setLayout(setup_layout)
+        mission_left.addWidget(setup_group)
+
+        self.patrol_map_view = MapViewer(self.get_ros_node, on_map_click=self.on_patrol_map_clicked)
+        self.patrol_map_view.setMinimumHeight(300)
+        mission_left.addWidget(self.patrol_map_view, stretch=3)
+
+        wp_table_group = QGroupBox("📋 Danh sách các điểm tuần tra (có thể sửa trực tiếp X, Y trước khi Lưu)")
+        wp_table_layout = QVBoxLayout()
+        self.table_waypoints = QTableWidget(0, 4)
+        self.table_waypoints.setHorizontalHeaderLabels(["Tên điểm", "X (m)", "Y (m)", "Ghi chú"])
+        self.table_waypoints.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table_waypoints.setMinimumHeight(150)
+        wp_table_layout.addWidget(self.table_waypoints)
+        wp_table_group.setLayout(wp_table_layout)
+        mission_left.addWidget(wp_table_group, stretch=2)
+
+        # --- CỘT PHẢI TAB 2: GIÁM SÁT FSM, ĐIỀU KHIỂN & SANDBOX ---
+        mission_right_widget = QWidget()
+        mission_right = QVBoxLayout(mission_right_widget)
+        mission_right.setContentsMargins(0, 0, 0, 0)
+        mission_right.setSpacing(8)
+
+        self.fsm_banner_frame = QFrame()
+        self.fsm_banner_frame.setStyleSheet(
+            "QFrame { background-color: #0f172a; border: 2px solid #38bdf8; border-radius: 8px; padding: 10px; }"
+        )
+        fsm_banner_layout = QVBoxLayout(self.fsm_banner_frame)
+        self.lbl_fsm_state = QLabel("🤖 TRẠNG THÁI: CHỜ LỆNH / ĐANG KHỞI ĐỘNG")
+        self.lbl_fsm_state.setStyleSheet("font-size: 17px; font-weight: bold; color: #38bdf8;")
+        self.lbl_fsm_state.setWordWrap(True)
+        self.lbl_fsm_detail = QLabel("Kết nối với mission_controller_node để xem hành vi thời gian thực của Behavior Tree.")
+        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #e2e8f0;")
+        self.lbl_fsm_detail.setWordWrap(True)
+        fsm_banner_layout.addWidget(self.lbl_fsm_state)
+        fsm_banner_layout.addWidget(self.lbl_fsm_detail)
+        mission_right.addWidget(self.fsm_banner_frame)
+
+        ctrl_mission_group = QGroupBox("🎮 Điều khiển Nhiệm vụ Tuần Tra")
+        ctrl_mission_layout = QHBoxLayout()
+        self.btn_fsm_start_patrol = QPushButton("▶ BẮT ĐẦU TUẦN TRA")
+        self.btn_fsm_start_patrol.setStyleSheet(
+            "background-color: #16a34a; color: white; font-size: 14px; font-weight: bold; padding: 12px; border-radius: 6px;"
+        )
+        self.btn_fsm_start_patrol.clicked.connect(self.on_fsm_start_patrol)
+        self.btn_fsm_pause_patrol = QPushButton("⏸ TẠM DỪNG TUẦN TRA")
+        self.btn_fsm_pause_patrol.setStyleSheet(
+            "background-color: #d97706; color: white; font-size: 14px; font-weight: bold; padding: 12px; border-radius: 6px;"
+        )
+        self.btn_fsm_pause_patrol.clicked.connect(self.on_fsm_pause_patrol)
+        ctrl_mission_layout.addWidget(self.btn_fsm_start_patrol)
+        ctrl_mission_layout.addWidget(self.btn_fsm_pause_patrol)
+        ctrl_mission_group.setLayout(ctrl_mission_layout)
+        mission_right.addWidget(ctrl_mission_group)
+
+        route_group = QGroupBox("🗺️ Lộ trình tuần tra hiện tại")
+        route_layout = QVBoxLayout()
+        self.lbl_fsm_route_seq = QLabel("Chưa có điểm nào.")
+        self.lbl_fsm_route_seq.setWordWrap(True)
+        self.lbl_fsm_route_seq.setStyleSheet("font-weight: bold; color: #1e293b; font-size: 12px;")
+        self.lbl_fsm_current_target = QLabel("🎯 Mục tiêu hiện tại: Chưa xác định")
+        self.lbl_fsm_current_target.setStyleSheet("color: #2563eb; font-weight: bold; font-size: 12px;")
+        route_layout.addWidget(self.lbl_fsm_route_seq)
+        route_layout.addWidget(self.lbl_fsm_current_target)
+        route_group.setLayout(route_layout)
+        mission_right.addWidget(route_group)
+
+        sandbox_group = QGroupBox("🧪 Developer Sandbox (Giả lập Cảm biến & Phục vụ không cần Camera)")
+        sandbox_layout = QGridLayout()
+        self.chk_fsm_mock_human = QCheckBox("👤 Giả lập: Người cản đường (<1.8m)")
+        self.chk_fsm_mock_human.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.chk_fsm_mock_human.toggled.connect(self.on_fsm_mock_human_toggled)
+        self.chk_fsm_mock_wave = QCheckBox("👋 Giả lập: Người giơ tay vẫy")
+        self.chk_fsm_mock_wave.setStyleSheet("font-weight: bold; color: #7c3aed;")
+        self.chk_fsm_mock_wave.toggled.connect(self.on_fsm_mock_wave_toggled)
+        self.btn_fsm_trigger_serve = QPushButton("☕ Bấm Giả Lập: Lấy Nước")
+        self.btn_fsm_trigger_serve.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+        self.btn_fsm_trigger_serve.clicked.connect(self.on_fsm_trigger_serve)
+        self.btn_fsm_trigger_finish = QPushButton("✅ Bấm Giả Lập: Đã Hài Lòng")
+        self.btn_fsm_trigger_finish.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
+        self.btn_fsm_trigger_finish.clicked.connect(self.on_fsm_trigger_finish)
+        sandbox_layout.addWidget(self.chk_fsm_mock_human, 0, 0)
+        sandbox_layout.addWidget(self.chk_fsm_mock_wave, 0, 1)
+        sandbox_layout.addWidget(self.btn_fsm_trigger_serve, 1, 0)
+        sandbox_layout.addWidget(self.btn_fsm_trigger_finish, 1, 1)
+        sandbox_group.setLayout(sandbox_layout)
+        mission_right.addWidget(sandbox_group)
+
+        fsm_log_group = QGroupBox("📜 Nhật ký hành vi tự động (/mission/status_log)")
+        fsm_log_layout = QVBoxLayout()
+        self.fsm_log_box = QTextEdit()
+        self.fsm_log_box.setReadOnly(True)
+        self.fsm_log_box.setStyleSheet(
+            "background-color: #0b0f19; color: #e2e8f0; font-family: Monospace, Consolas, monospace; font-size: 11px; border: 1px solid #334155; border-radius: 4px;"
+        )
+        self.btn_clear_fsm_log = QPushButton("Xóa log FSM")
+        self.btn_clear_fsm_log.clicked.connect(lambda: self.fsm_log_box.clear())
+        fsm_log_layout.addWidget(self.fsm_log_box, stretch=1)
+        fsm_log_layout.addWidget(self.btn_clear_fsm_log)
+        fsm_log_group.setLayout(fsm_log_layout)
+        mission_right.addWidget(fsm_log_group, stretch=1)
+
+        mission_root.addWidget(mission_left_widget, stretch=1)
+        mission_root.addWidget(mission_right_widget, stretch=1)
+
+        # === THANH TAB LỚN TOÀN CỬA SỔ ===
+        self.main_tabs = QTabWidget()
+        self.main_tabs.setStyleSheet(
+            "QTabBar::tab { font-size: 13px; font-weight: bold; padding: 10px 20px; }"
+            "QTabBar::tab:selected { background-color: #1e293b; color: #38bdf8; border-bottom: 3px solid #38bdf8; }"
+        )
+        self.main_tabs.addTab(self.tab_system, "🗺️ BẢN ĐỒ & VẬN HÀNH HỆ THỐNG")
+        self.main_tabs.addTab(self.tab_mission, "🚀 TRUNG TÂM TUẦN TRA & PHỤC VỤ (MISSION)")
+
+        root_layout = QVBoxLayout()
+        root_layout.setContentsMargins(4, 4, 4, 4)
+        root_layout.addWidget(self.main_tabs)
+        self.setLayout(root_layout)
         self.on_robot_mode_changed(); self.refresh_batch_waypoint_views(); self.refresh_serial_ports()
 
     def init_ros(self):
@@ -956,6 +1260,8 @@ class MainWindow(QWidget):
             nav_feedback_callback=self.on_new_nav_feedback,
             nav_status_callback=self.on_new_nav_status,
             human_callback=self.on_human_detected,
+            mission_log_callback=self.on_mission_log,
+            popup_cmd_callback=self.on_popup_cmd,
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True); self.ros_spin_thread.start()
         self.append_log("ROS2 node v3 đã khởi động.")
@@ -1097,11 +1403,19 @@ class MainWindow(QWidget):
 
     def _on_new_map_ui(self, msg):
         self.map_view.update_map(msg)
+        if hasattr(self, "patrol_map_view"):
+            self.patrol_map_view.update_map(msg)
 
     def _on_new_pose_ui(self, x, y, yaw, source):
         self.map_view.update_pose(x, y, yaw, source)
+        if hasattr(self, "patrol_map_view"):
+            self.patrol_map_view.update_pose(x, y, yaw, source)
+
     def _on_new_scan_ui(self, msg, scan_points_world):
         self.map_view.update_scan(msg, scan_points_world)
+        if hasattr(self, "patrol_map_view"):
+            self.patrol_map_view.update_scan(msg, scan_points_world)
+
     def _on_new_dataenc_ui(self, values):
         if not values:
             self.lbl_dataenc.setText("Encoder: [No Data]")
@@ -1113,38 +1427,327 @@ class MainWindow(QWidget):
     def on_map_dragged(self, wx, wy):
         pass
 
+    def _add_patrol_waypoint_at(self, wx, wy):
+        idx = len(self.batch_waypoints)
+        name = self.waypoint_name_from_index(idx)
+        note = "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra {idx}"
+        self.batch_waypoints.append({
+            "name": name,
+            "x": float(wx),
+            "y": float(wy),
+            "yaw": 0.0,
+            "note": note,
+            "frame_id": "map",
+        })
+        self.refresh_batch_waypoint_views()
+        self.append_log(f"Thêm điểm tuần tra {name}: x={wx:.3f}, y={wy:.3f}")
+
     def on_map_clicked(self, wx, wy):
         if self.batch_waypoint_mode:
-            name = self.waypoint_name_from_index(len(self.batch_waypoints))
-            self.batch_waypoints.append({"name": name, "x": float(wx), "y": float(wy), "yaw": 0.0, "frame_id": "map"})
-            self.refresh_batch_waypoint_views()
-            self.append_log(f"Thêm waypoint {name}: x={wx:.3f}, y={wy:.3f}")
+            self._add_patrol_waypoint_at(wx, wy)
+            return True
+        return False
+
+    def on_patrol_map_clicked(self, wx, wy):
+        if self.patrol_waypoint_mode:
+            self._add_patrol_waypoint_at(wx, wy)
             return True
         return False
 
     def waypoint_name_from_index(self, idx):
-        alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        if idx < len(alphabet): return alphabet[idx]
-        return f"{alphabet[idx % len(alphabet)]}{idx // len(alphabet)}"
+        if idx == 0:
+            return "khoihanh"
+        return f"diem{idx}"
+
     def refresh_batch_waypoint_views(self):
         self.btn_batch_mode.setText(f"Waypoint Mode: {'ON' if self.batch_waypoint_mode else 'OFF'}")
-        self.lbl_batch_info.setText(f"Batch: {len(self.batch_waypoints)} điểm")
+        self.lbl_batch_info.setText(f"Patrol Route: {len(self.batch_waypoints)} điểm")
         self.map_view.update_waypoint_batch(self.batch_waypoints)
+        if hasattr(self, "patrol_map_view"):
+            self.patrol_map_view.update_waypoint_batch(self.batch_waypoints)
+        if hasattr(self, "btn_patrol_pick_mode"):
+            self.btn_patrol_pick_mode.setText(
+                f"🎯 Chấm điểm trên Map: {'ON' if self.patrol_waypoint_mode else 'OFF'}"
+            )
+            if self.patrol_waypoint_mode:
+                self.btn_patrol_pick_mode.setStyleSheet(
+                    "background-color: #16a34a; color: white; font-weight: bold; padding: 6px 10px; border-radius: 4px;"
+                )
+            else:
+                self.btn_patrol_pick_mode.setStyleSheet("font-weight: bold; padding: 6px 10px;")
+        if hasattr(self, "table_waypoints"):
+            self.table_waypoints.blockSignals(True)
+            self.table_waypoints.setRowCount(len(self.batch_waypoints))
+            for row, wp in enumerate(self.batch_waypoints):
+                self.table_waypoints.setItem(row, 0, QTableWidgetItem(str(wp.get("name", f"diem{row}"))))
+                self.table_waypoints.setItem(row, 1, QTableWidgetItem(f"{float(wp.get('x', 0.0)):.3f}"))
+                self.table_waypoints.setItem(row, 2, QTableWidgetItem(f"{float(wp.get('y', 0.0)):.3f}"))
+                note = wp.get("note", "Trạm nước / Khởi hành" if wp.get("name") == "khoihanh" else f"Điểm tuần tra {row}")
+                self.table_waypoints.setItem(row, 3, QTableWidgetItem(str(note)))
+            self.table_waypoints.blockSignals(False)
+        if hasattr(self, "lbl_fsm_route_seq"):
+            if self.batch_waypoints:
+                names = [str(wp.get("name", "?")) for wp in self.batch_waypoints]
+                self.lbl_fsm_route_seq.setText(" ➔ ".join(names) + " ➔ (lặp lại)")
+            else:
+                self.lbl_fsm_route_seq.setText("Chưa có điểm tuần tra nào.")
+
     def toggle_batch_waypoint_mode(self):
         self.batch_waypoint_mode = not self.batch_waypoint_mode
         self.refresh_batch_waypoint_views()
-        self.append_log("Waypoint mode bật: click map để thêm A/B/C..." if self.batch_waypoint_mode else "Waypoint mode tắt.")
+        self.append_log("Waypoint mode (Tab 1) bật: click map để thêm điểm." if self.batch_waypoint_mode else "Waypoint mode (Tab 1) tắt.")
+
+    def toggle_patrol_waypoint_mode(self):
+        self.patrol_waypoint_mode = not self.patrol_waypoint_mode
+        self.refresh_batch_waypoint_views()
+        self.append_log("Chế độ chấm điểm tuần tra (Tab 2) BẬT: click lên bản đồ để đặt điểm." if self.patrol_waypoint_mode else "Chế độ chấm điểm tuần tra (Tab 2) TẮT.")
+
     def undo_batch_waypoint(self):
-        if not self.batch_waypoints: return
-        removed = self.batch_waypoints.pop(); self.refresh_batch_waypoint_views(); self.append_log(f"Undo waypoint {removed['name']}")
+        if not self.batch_waypoints:
+            return
+        removed = self.batch_waypoints.pop()
+        self.refresh_batch_waypoint_views()
+        self.append_log(f"Hoàn tác điểm tuần tra: {removed['name']}")
+
     def clear_batch_waypoints(self):
-        if not self.batch_waypoints: return
-        self.batch_waypoints = []; self.refresh_batch_waypoint_views(); self.append_log("Đã clear toàn bộ waypoint batch.")
-    def send_batch_waypoints_to_boss(self):
-        if not self.batch_waypoints: QMessageBox.warning(self, "Thiếu waypoint", "Bạn chưa có waypoint A/B/C/... nào."); return
-        node = self.get_ros_node()
-        if node is None: QMessageBox.warning(self, "ROS chưa sẵn sàng", "ROS node của GUI chưa chạy."); return
-        node.send_waypoint_batch(self.batch_waypoints); self.append_log("Đã gửi waypoint batch cho nhiemvuboss.")
+        if not self.batch_waypoints:
+            return
+        self.batch_waypoints = []
+        self.refresh_batch_waypoint_views()
+        self.append_log("Đã xóa toàn bộ danh sách điểm tuần tra.")
+
+    def open_mission_tab_from_batch(self):
+        if self.batch_waypoints:
+            self.save_patrol_config_to_yaml(show_dialog=False)
+        if hasattr(self, "main_tabs"):
+            self.main_tabs.setCurrentIndex(1)
+
+    def load_patrol_config_from_yaml(self, silent=False):
+        loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
+        route_file = os.path.join(CONFIG_DIR, "routes.yaml")
+        locations = {}
+        routes = {}
+        try:
+            if os.path.exists(loc_file):
+                with open(loc_file, "r", encoding="utf-8") as f:
+                    locations = yaml.safe_load(f) or {}
+            if os.path.exists(route_file):
+                with open(route_file, "r", encoding="utf-8") as f:
+                    routes = yaml.safe_load(f) or {}
+        except Exception as exc:
+            if not silent:
+                QMessageBox.warning(self, "Lỗi đọc Config", f"Không thể đọc file config YAML:\n{exc}")
+            self.append_log(f"[Config] Lỗi đọc YAML: {exc}")
+            return False
+
+        patrol_names = routes.get("patrol_route")
+        if not isinstance(patrol_names, list) or not patrol_names:
+            patrol_names = list(locations.keys())
+
+        loaded = []
+        for idx, name in enumerate(patrol_names):
+            coords = locations.get(name)
+            if not isinstance(coords, dict):
+                continue
+            note = "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra ({name})"
+            loaded.append({
+                "name": str(name),
+                "x": float(coords.get("x", 0.0)),
+                "y": float(coords.get("y", 0.0)),
+                "yaw": float(coords.get("yaw", 0.0)),
+                "note": note,
+                "frame_id": "map",
+            })
+
+        self.batch_waypoints = loaded
+        self.refresh_batch_waypoint_views()
+        self.append_log(f"[Config] Đã nạp {len(loaded)} điểm tuần tra từ {CONFIG_DIR}.")
+        if not silent:
+            QMessageBox.information(self, "Nạp cấu hình thành công", f"Đã nạp {len(loaded)} điểm tuần tra từ locations.yaml & routes.yaml.")
+        return True
+
+    def _sync_waypoints_from_table(self):
+        if not hasattr(self, "table_waypoints"):
+            return
+        rows = self.table_waypoints.rowCount()
+        updated = []
+        for row in range(rows):
+            item_name = self.table_waypoints.item(row, 0)
+            item_x = self.table_waypoints.item(row, 1)
+            item_y = self.table_waypoints.item(row, 2)
+            item_note = self.table_waypoints.item(row, 3)
+            name = (item_name.text().strip() if item_name else "") or self.waypoint_name_from_index(row)
+            prev_wp = self.batch_waypoints[row] if row < len(self.batch_waypoints) else {}
+            try:
+                x = float(item_x.text().strip()) if item_x else float(prev_wp.get("x", 0.0))
+                y = float(item_y.text().strip()) if item_y else float(prev_wp.get("y", 0.0))
+            except ValueError:
+                x = float(prev_wp.get("x", 0.0))
+                y = float(prev_wp.get("y", 0.0))
+            note = item_note.text().strip() if item_note else prev_wp.get("note", "")
+            updated.append({
+                "name": name,
+                "x": x,
+                "y": y,
+                "yaw": float(prev_wp.get("yaw", 0.0)),
+                "note": note,
+                "frame_id": "map",
+            })
+        self.batch_waypoints = updated
+
+    def save_patrol_config_to_yaml(self, show_dialog=True):
+        self._sync_waypoints_from_table()
+        if not self.batch_waypoints:
+            if show_dialog:
+                QMessageBox.warning(self, "Chưa có điểm nào", "Hãy chấm ít nhất 1 điểm trên bản đồ trước khi lưu lộ trình.")
+            return False
+
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
+        route_file = os.path.join(CONFIG_DIR, "routes.yaml")
+
+        try:
+            locations = {}
+            if os.path.exists(loc_file):
+                with open(loc_file, "r", encoding="utf-8") as f:
+                    locations = yaml.safe_load(f) or {}
+            routes = {}
+            if os.path.exists(route_file):
+                with open(route_file, "r", encoding="utf-8") as f:
+                    routes = yaml.safe_load(f) or {}
+
+            route_names = []
+            for wp in self.batch_waypoints:
+                name = str(wp["name"])
+                route_names.append(name)
+                locations[name] = {
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                }
+            routes["patrol_route"] = route_names
+
+            with open(loc_file, "w", encoding="utf-8") as f:
+                yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
+            with open(route_file, "w", encoding="utf-8") as f:
+                yaml.safe_dump(routes, f, allow_unicode=True, sort_keys=False)
+        except Exception as exc:
+            if show_dialog:
+                QMessageBox.critical(self, "Lỗi lưu Config", f"Không thể ghi YAML:\n{exc}")
+            self.append_log(f"[Config] Lỗi ghi YAML: {exc}")
+            return False
+
+        if self.ros_node is not None:
+            self.ros_node.sync_patrol_config(self.batch_waypoints, route_name="patrol_route")
+
+        self.refresh_batch_waypoint_views()
+        self.append_log(f"[Config] Đã lưu {len(self.batch_waypoints)} điểm vào locations.yaml & routes.yaml.")
+        if show_dialog:
+            QMessageBox.information(
+                self,
+                "Đã lưu lộ trình",
+                f"Đã lưu {len(self.batch_waypoints)} điểm vào:\n- {loc_file}\n- {route_file}\n\nLộ trình: {' ➔ '.join(route_names)}",
+            )
+        return True
+
+    def _set_fsm_banner(self, title: str, detail: str, border_color: str, bg_color: str = "#0f172a"):
+        if not hasattr(self, "fsm_banner_frame"):
+            return
+        self.lbl_fsm_state.setText(title)
+        self.lbl_fsm_state.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {border_color};")
+        self.lbl_fsm_detail.setText(detail)
+        self.fsm_banner_frame.setStyleSheet(
+            f"QFrame {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 8px; padding: 10px; }}"
+        )
+
+    def on_mission_log(self, text: str):
+        self.mission_log_signal.emit(str(text))
+
+    def on_popup_cmd(self, cmd: str):
+        self.mission_popup_signal.emit(str(cmd))
+
+    def _on_mission_log_ui(self, text: str):
+        now_str = time.strftime("%H:%M:%S")
+        if hasattr(self, "fsm_log_box"):
+            self.fsm_log_box.append(f"<span style='color:#64748b;'>[{now_str}]</span> {text}")
+
+        lower = text.lower()
+        if "khẩn cấp" in lower or "emergency" in lower:
+            self._set_fsm_banner("🚨 KHẨN CẤP (EMERGENCY STOP)", text, "#ef4444", "#450a0a")
+        elif "vẫy" in lower or "tiếp cận" in lower:
+            self._set_fsm_banner("👋 ĐANG TIẾP CẬN NGƯỜI VẪY TAY", text, "#a855f7", "#2e1065")
+        elif "phục vụ" in lower or "lấy nước" in lower or "hài lòng" in lower:
+            self._set_fsm_banner("☕ ĐANG PHỤC VỤ KHÁCH", text, "#3b82f6", "#0c4a6e")
+        elif "chắn đường" in lower or "gặp người" in lower:
+            self._set_fsm_banner("🧍 GẶP NGƯỜI CẢN ĐƯỜNG (TẠM DỪNG)", text, "#f97316", "#431407")
+        elif "tạm dừng tuần tra" in lower:
+            self._set_fsm_banner("⏸ ĐÃ TẠM DỪNG TUẦN TRA", text, "#94a3b8", "#1e293b")
+        elif "[tuần tra]" in lower or "bắt đầu tuần tra" in lower or "lộ trình tuần tra" in lower:
+            self._set_fsm_banner("🚀 ĐANG TUẦN TRA TỰ ĐỘNG", text, "#22c55e", "#052e16")
+            if "đến điểm:" in text and hasattr(self, "lbl_fsm_current_target"):
+                pt = text.split("đến điểm:", 1)[-1].strip()
+                self.lbl_fsm_current_target.setText(f"🎯 Mục tiêu hiện tại: {pt}")
+
+    def _on_mission_popup_ui(self, cmd: str):
+        now_str = time.strftime("%H:%M:%S")
+        if hasattr(self, "fsm_log_box"):
+            self.fsm_log_box.append(f"<span style='color:#38bdf8;'>[{now_str}] [POPUP KIOSK] {cmd}</span>")
+        if cmd == "SHOW_5S_INVITE":
+            self._set_fsm_banner("☕ MỜI KHÁCH LẤY NƯỚC (ĐẾM NGƯỢC 5S)", "Phát hiện người đứng trước robot. Bấm 'Lấy Nước' nếu muốn nhận nước.", "#0ea5e9", "#0c4a6e")
+        elif cmd == "SHOW_SERVING":
+            self._set_fsm_banner("☕ ĐANG PHỤC VỤ NƯỚC (KHÓA PHANH)", "Khách đang lấy nước. Bấm 'Đã Hài Lòng' khi hoàn tất.", "#3b82f6", "#172554")
+        elif cmd == "HIDE":
+            self._set_fsm_banner("🚗 ĐÃ ĐÓNG POPUP PHỤC VỤ", "Quay trở lại trạng thái tuần tra bình thường.", "#22c55e", "#052e16")
+
+    def on_fsm_start_patrol(self):
+        if self.ros_node is None:
+            QMessageBox.warning(self, "ROS chưa sẵn sàng", "ROS node chưa khởi động.")
+            return
+        self.ros_node.call_mission_trigger(self.ros_node.cli_start_patrol, "Bắt đầu Tuần Tra (/mission/start_patrol)")
+
+    def on_fsm_pause_patrol(self):
+        if self.ros_node is None:
+            QMessageBox.warning(self, "ROS chưa sẵn sàng", "ROS node chưa khởi động.")
+            return
+        self.ros_node.call_mission_trigger(self.ros_node.cli_pause_patrol, "Tạm dừng Tuần Tra (/mission/pause_patrol)")
+
+    def on_fsm_mock_human_toggled(self, checked):
+        if self.ros_node is None:
+            return
+        if checked and hasattr(self, "chk_fsm_mock_wave") and self.chk_fsm_mock_wave.isChecked():
+            self.chk_fsm_mock_wave.setChecked(False)
+        self.ros_node.publish_mock_human(checked)
+        self.append_log(f"[Sandbox] Giả lập người cản đường: {'BẬT' if checked else 'TẮT'}")
+
+    def on_fsm_mock_wave_toggled(self, checked):
+        if self.ros_node is None:
+            return
+        if checked and hasattr(self, "chk_fsm_mock_human") and self.chk_fsm_mock_human.isChecked():
+            self.chk_fsm_mock_human.setChecked(False)
+        self.ros_node.publish_mock_waving(checked)
+        self.append_log(f"[Sandbox] Giả lập người giơ tay vẫy: {'BẬT' if checked else 'TẮT'}")
+
+    def _on_mock_timer_tick(self):
+        if self.ros_node is None:
+            return
+        if hasattr(self, "chk_fsm_mock_wave") and self.chk_fsm_mock_wave.isChecked():
+            self.ros_node.publish_mock_waving(True)
+        elif hasattr(self, "chk_fsm_mock_human") and self.chk_fsm_mock_human.isChecked():
+            self.ros_node.publish_mock_human(True)
+
+    def on_fsm_trigger_serve(self):
+        if self.ros_node is None:
+            return
+        msg = Bool(); msg.data = True
+        self.ros_node.serve_trigger_pub.publish(msg)
+        self.ros_node.call_mission_trigger(self.ros_node.cli_trigger_serve, "Lấy Nước (/mission/trigger_serve)")
+
+    def on_fsm_trigger_finish(self):
+        if self.ros_node is None:
+            return
+        msg = Bool(); msg.data = True
+        self.ros_node.finish_serving_pub.publish(msg)
+        self.ros_node.call_mission_trigger(self.ros_node.cli_trigger_finish, "Đã Hài Lòng (/mission/trigger_finish)")
 
     def choose_map_folder(self):
         folder = QFileDialog.getExistingDirectory(self, "Chọn thư mục chứa map YAML", self.map_dir if os.path.exists(self.map_dir) else os.path.expanduser("~"))
