@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import Enum
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -599,6 +600,22 @@ class MicState(Enum):
     ERROR = "error"
 
 
+EMOJI_PATTERN = re.compile(
+    r"[\U00010000-\U0010ffff\u2600-\u26ff\u2700-\u27bf\ufe00-\ufe0f\u200d]+",
+    flags=re.UNICODE,
+)
+
+
+def strip_emojis(text: str) -> str:
+    """Loại bỏ emoji/icon Unicode để tránh lỗi font (ô vuông rỗng) trên Linux Qt5."""
+    if not text:
+        return text
+    cleaned = EMOJI_PATTERN.sub("", text)
+    cleaned = re.sub(r" +([,.\?!;:])", r"\1", cleaned)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in cleaned.splitlines()]
+    return "\n".join(lines).strip()
+
+
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     home_requested = pyqtSignal()
@@ -788,6 +805,7 @@ class ChatPage(QWidget):
         return QIcon()
 
     def _add_message(self, sender: str, message: str, from_user: bool = False) -> None:
+        display_message = message if from_user else (strip_emojis(message) or message)
         row = QWidget()
         row.setObjectName("chatMessageRow")
         row_layout = QHBoxLayout(row)
@@ -803,7 +821,7 @@ class ChatPage(QWidget):
 
         sender_label = QLabel(sender)
         sender_label.setObjectName("userBubbleSender" if from_user else "robotBubbleSender")
-        body = QLabel(message)
+        body = QLabel(display_message)
         body.setObjectName("bubbleText")
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextSelectableByMouse)
@@ -1039,13 +1057,15 @@ class ChatPage(QWidget):
     def receive_response(self, response: str) -> None:
         """Hiển thị response từ LLM và mở khóa input."""
         self.set_busy(False)
-        self._add_message("Souta Robot", response)
+        clean_text = strip_emojis(response)
+        self._add_message("Souta Robot", clean_text or response)
 
     def receive_error(self, error_msg: str) -> None:
         """Hiển thị lỗi và mở khóa input."""
         self.set_busy(False)
-        self._add_message("Souta Robot", f"⚠️ Lỗi: {error_msg}")
-        self.set_status(f"⚠️ {error_msg}")
+        clean_msg = strip_emojis(error_msg) or error_msg
+        self._add_message("Souta Robot", f"Lỗi: {clean_msg}")
+        self.set_status(f"Lỗi: {clean_msg}")
 
     def set_busy(self, busy: bool) -> None:
         """Khoá/mở input trong khi đang chờ LLM."""

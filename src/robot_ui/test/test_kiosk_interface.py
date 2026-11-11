@@ -381,6 +381,33 @@ def test_chat_page_reset_conversation(app):
     assert "Xin chào! Tôi là Souta Robot" in texts[0]
 
 
+def test_strip_emojis_function():
+    from robot_ui.kiosk.widgets import strip_emojis
+
+    sample_1 = "おはよう！Chào buổi sáng! Mình là Souta 🤖 Rất vui được gặp bạn!"
+    assert strip_emojis(sample_1) == "おはよう！Chào buổi sáng! Mình là Souta Rất vui được gặp bạn!"
+
+    sample_2 = "Chào bạn 🤖✨! Mình là robot Souta 🎉."
+    assert strip_emojis(sample_2) == "Chào bạn! Mình là robot Souta."
+
+    sample_3 = "Không có emoji ở đây."
+    assert strip_emojis(sample_3) == "Không có emoji ở đây."
+
+    sample_4 = "Dòng 1 🤖\nDòng 2 🚀"
+    assert strip_emojis(sample_4) == "Dòng 1\nDòng 2"
+
+
+def test_chat_page_strips_emojis_from_response(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    page.receive_response("おはよう！Chào buổi sáng! Mình là Souta 🤖 Rất vui được gặp bạn!")
+    texts = [lbl.text() for lbl in page.findChildren(QLabel, "bubbleText")]
+    assert any("Mình là Souta Rất vui được gặp bạn!" in t for t in texts)
+    assert not any("🤖" in t for t in texts)
+
+
 def test_service_page_elements_and_selection(app):
     missing = Path("/nonexistent-kiosk-test-asset")
     page = ServicePage(
