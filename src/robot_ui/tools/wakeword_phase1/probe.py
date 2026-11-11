@@ -183,26 +183,15 @@ def capture_cmd(source: str) -> list[str]:
 
 def record_sample(path: Path, duration: float, source: str):
     path.parent.mkdir(parents=True, exist_ok=True)
-    process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL)
-    try:
-        try:
-            process.communicate(timeout=duration + 1.5)
-        except subprocess.TimeoutExpired as exc:
-            pcm = exc.output or b""
-        else:
-            raise RuntimeError("Microphone capture ended unexpectedly")
-    finally:
-        if process.poll() is None:
-            process.terminate()
-        try:
-            extra, _ = process.communicate(timeout=1)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            extra, _ = process.communicate()
-    pcm = (pcm + extra)[:round(duration * 16000) * 2]
+    # GNU timeout bounds capture even when the USB microphone goes silent.
+    command = ["timeout", "--signal=TERM", "--kill-after=1s",
+               f"{duration}s", *capture_cmd(source)]
+    result = subprocess.run(command, stdout=subprocess.PIPE,
+                            stderr=subprocess.DEVNULL, timeout=duration + 5,
+                            check=False)
+    pcm = result.stdout[:round(duration * 16000) * 2]
     if len(pcm) < 3200:
-        raise RuntimeError("No usable PCM received from microphone")
+        raise RuntimeError(f"No usable PCM received from microphone (exit={result.returncode})")
     with wave.open(str(path), "wb") as fp:
         fp.setnchannels(1)
         fp.setsampwidth(2)
