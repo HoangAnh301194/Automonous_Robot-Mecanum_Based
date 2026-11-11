@@ -150,7 +150,7 @@ class TestKioskAI(unittest.TestCase):
             self.assertIs(owned, proc)
             argv = popen.call_args.args[0]
             self.assertEqual(argv, ["/usr/local/bin/9router",
-                                    "--no-browser", "--port", "20128"])
+                                    "--tray", "--no-browser", "--port", "20128"])
             stop_local_9router(owned)
             killpg.assert_called_once_with(4321, __import__("signal").SIGTERM)
             proc.wait.assert_called_once_with(timeout=3)

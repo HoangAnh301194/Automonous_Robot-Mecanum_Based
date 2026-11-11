@@ -69,7 +69,11 @@ def start_local_9router(
             return None
     else:
         exe = shutil.which("9router")
-        argv = [exe, "--no-browser", "--port", str(port)] if exe else []
+        if not exe:
+            npm_bin = Path.home() / ".npm-global" / "bin" / "9router"
+            if npm_bin.is_file():
+                exe = str(npm_bin)
+        argv = [exe, "--tray", "--no-browser", "--port", str(port)] if exe else []
         if not argv:
             docker = shutil.which("docker")
             if docker:
