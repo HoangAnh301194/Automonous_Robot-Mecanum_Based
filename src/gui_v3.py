@@ -963,7 +963,7 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.lbl_nav2_status, 10, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 11, 0, 1, 2)
         control_layout.addWidget(self.lbl_dataenc, 12, 0, 1, 2)
         self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
-        self.chk_mock_human.setStyleSheet("color: #38bdf8; font-weight: bold;")
+        self.chk_mock_human.setStyleSheet("color: #0f172a; font-weight: bold;")
         self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
         self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
         control_layout.addWidget(self.chk_mock_human, 13, 0, 1, 2)
@@ -992,18 +992,18 @@ class MainWindow(QWidget):
         # 1. Banner suy nghĩ hiện tại
         self.mind_banner_frame = QFrame()
         self.mind_banner_frame.setStyleSheet(
-            "QFrame { background-color: #0f172a; border: 2px solid #3b82f6; border-radius: 6px; padding: 6px; }"
+            "QFrame { background-color: #ffffff; border: 2px solid #2563eb; border-radius: 6px; padding: 6px; }"
         )
         banner_layout = QVBoxLayout(self.mind_banner_frame)
         banner_layout.setContentsMargins(6, 6, 6, 6)
         banner_layout.setSpacing(4)
         self.lbl_mind_title = QLabel("🤖 Robot đang nghĩ gì:")
-        self.lbl_mind_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #94a3b8;")
+        self.lbl_mind_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #334155;")
         self.lbl_mind_status = QLabel("Chưa có lệnh điều hướng")
-        self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
+        self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #0f172a;")
         self.lbl_mind_status.setWordWrap(True)
         self.lbl_mind_desc = QLabel("Robot đang ở trạng thái chờ. Hãy click mục tiêu trên bản đồ để bắt đầu.")
-        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #cbd5e1; line-height: 1.3;")
+        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
         self.lbl_mind_desc.setWordWrap(True)
         banner_layout.addWidget(self.lbl_mind_title)
         banner_layout.addWidget(self.lbl_mind_status)
@@ -1017,7 +1017,7 @@ class MainWindow(QWidget):
         nav_info_layout.setSpacing(4)
 
         self.lbl_mind_goal = QLabel("🎯 Mục tiêu: Chưa nhận")
-        self.lbl_mind_goal.setStyleSheet("font-weight: bold; color: #f1f5f9;")
+        self.lbl_mind_goal.setStyleSheet("font-weight: bold; color: #0f172a;")
         self.lbl_mind_dist = QLabel("📏 Còn lại: -- m")
         self.lbl_mind_time = QLabel("⏱ Thời gian: --")
         self.lbl_mind_recovery = QLabel("🔄 Tự cứu (Recovery): 0 lần")
@@ -1028,8 +1028,8 @@ class MainWindow(QWidget):
         self.pbar_nav.setTextVisible(True)
         self.pbar_nav.setFormat("Tiến độ: %p%")
         self.pbar_nav.setStyleSheet(
-            "QProgressBar { border: 1px solid #475569; border-radius: 4px; text-align: center; background-color: #1e293b; color: white; font-weight: bold; height: 18px; }"
-            "QProgressBar::chunk { background-color: #10b981; border-radius: 3px; }"
+            "QProgressBar { border: 1px solid #cbd5e1; border-radius: 4px; text-align: center; background-color: #ffffff; color: #0f172a; font-weight: bold; height: 18px; }"
+            "QProgressBar::chunk { background-color: #22c55e; border-radius: 3px; }"
         )
 
         nav_info_layout.addWidget(self.lbl_mind_goal, 0, 0, 1, 2)
@@ -1043,7 +1043,7 @@ class MainWindow(QWidget):
         # 3. Nhật ký suy nghĩ gần nhất
         thought_hist_header = QHBoxLayout()
         lbl_hist_title = QLabel("📝 Lịch sử phản ứng gần nhất:")
-        lbl_hist_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #94a3b8;")
+        lbl_hist_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #334155;")
         self.btn_clear_thoughts = QPushButton("Xóa")
         self.btn_clear_thoughts.setFixedSize(45, 20)
         self.btn_clear_thoughts.setStyleSheet("font-size: 10px; padding: 0px;")
@@ -1057,7 +1057,7 @@ class MainWindow(QWidget):
         self.thought_history_box.setReadOnly(True)
         self.thought_history_box.setMinimumHeight(100)
         self.thought_history_box.setStyleSheet(
-            "background-color: #0b0f19; color: #a5f3fc; font-family: Monospace, Consolas, monospace; font-size: 10px; border: 1px solid #334155; border-radius: 4px;"
+            "background-color: #ffffff; color: #000000; font-family: Monospace, Consolas, monospace; font-size: 10px; border: 1px solid #cbd5e1; border-radius: 4px;"
         )
         tab_mind_layout.addWidget(self.thought_history_box, stretch=1)
         tab_mind.setLayout(tab_mind_layout)
@@ -1153,14 +1153,14 @@ class MainWindow(QWidget):
 
         self.fsm_banner_frame = QFrame()
         self.fsm_banner_frame.setStyleSheet(
-            "QFrame { background-color: #0f172a; border: 2px solid #38bdf8; border-radius: 8px; padding: 10px; }"
+            "QFrame { background-color: #ffffff; border: 2px solid #2563eb; border-radius: 8px; padding: 10px; }"
         )
         fsm_banner_layout = QVBoxLayout(self.fsm_banner_frame)
         self.lbl_fsm_state = QLabel("🤖 TRẠNG THÁI: CHỜ LỆNH / ĐANG KHỞI ĐỘNG")
-        self.lbl_fsm_state.setStyleSheet("font-size: 17px; font-weight: bold; color: #38bdf8;")
+        self.lbl_fsm_state.setStyleSheet("font-size: 17px; font-weight: bold; color: #1d4ed8;")
         self.lbl_fsm_state.setWordWrap(True)
         self.lbl_fsm_detail = QLabel("Kết nối với mission_controller_node để xem hành vi thời gian thực của Behavior Tree.")
-        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #e2e8f0;")
+        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #0f172a;")
         self.lbl_fsm_detail.setWordWrap(True)
         fsm_banner_layout.addWidget(self.lbl_fsm_state)
         fsm_banner_layout.addWidget(self.lbl_fsm_detail)
@@ -1187,9 +1187,9 @@ class MainWindow(QWidget):
         route_layout = QVBoxLayout()
         self.lbl_fsm_route_seq = QLabel("Chưa có điểm nào.")
         self.lbl_fsm_route_seq.setWordWrap(True)
-        self.lbl_fsm_route_seq.setStyleSheet("font-weight: bold; color: #1e293b; font-size: 12px;")
+        self.lbl_fsm_route_seq.setStyleSheet("font-weight: bold; color: #0f172a; font-size: 12px;")
         self.lbl_fsm_current_target = QLabel("🎯 Mục tiêu hiện tại: Chưa xác định")
-        self.lbl_fsm_current_target.setStyleSheet("color: #2563eb; font-weight: bold; font-size: 12px;")
+        self.lbl_fsm_current_target.setStyleSheet("color: #1d4ed8; font-weight: bold; font-size: 12px;")
         route_layout.addWidget(self.lbl_fsm_route_seq)
         route_layout.addWidget(self.lbl_fsm_current_target)
         route_group.setLayout(route_layout)
@@ -1198,10 +1198,10 @@ class MainWindow(QWidget):
         sandbox_group = QGroupBox("🧪 Developer Sandbox (Giả lập Cảm biến & Phục vụ không cần Camera)")
         sandbox_layout = QGridLayout()
         self.chk_fsm_mock_human = QCheckBox("👤 Giả lập: Người cản đường (<1.8m)")
-        self.chk_fsm_mock_human.setStyleSheet("font-weight: bold; color: #0284c7;")
+        self.chk_fsm_mock_human.setStyleSheet("font-weight: bold; color: #0f172a;")
         self.chk_fsm_mock_human.toggled.connect(self.on_fsm_mock_human_toggled)
         self.chk_fsm_mock_wave = QCheckBox("👋 Giả lập: Người giơ tay vẫy")
-        self.chk_fsm_mock_wave.setStyleSheet("font-weight: bold; color: #7c3aed;")
+        self.chk_fsm_mock_wave.setStyleSheet("font-weight: bold; color: #0f172a;")
         self.chk_fsm_mock_wave.toggled.connect(self.on_fsm_mock_wave_toggled)
         self.btn_fsm_trigger_serve = QPushButton("☕ Bấm Giả Lập: Lấy Nước")
         self.btn_fsm_trigger_serve.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; padding: 8px; border-radius: 4px;")
@@ -1221,7 +1221,7 @@ class MainWindow(QWidget):
         self.fsm_log_box = QTextEdit()
         self.fsm_log_box.setReadOnly(True)
         self.fsm_log_box.setStyleSheet(
-            "background-color: #0b0f19; color: #e2e8f0; font-family: Monospace, Consolas, monospace; font-size: 11px; border: 1px solid #334155; border-radius: 4px;"
+            "background-color: #ffffff; color: #000000; font-family: Monospace, Consolas, monospace; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;"
         )
         self.btn_clear_fsm_log = QPushButton("Xóa log FSM")
         self.btn_clear_fsm_log.clicked.connect(lambda: self.fsm_log_box.clear())
@@ -1236,8 +1236,8 @@ class MainWindow(QWidget):
         # === THANH TAB LỚN TOÀN CỬA SỔ ===
         self.main_tabs = QTabWidget()
         self.main_tabs.setStyleSheet(
-            "QTabBar::tab { font-size: 13px; font-weight: bold; padding: 10px 20px; }"
-            "QTabBar::tab:selected { background-color: #1e293b; color: #38bdf8; border-bottom: 3px solid #38bdf8; }"
+            "QTabBar::tab { background-color: #f1f5f9; color: #334155; font-size: 13px; font-weight: bold; padding: 10px 20px; border: 1px solid #cbd5e1; }"
+            "QTabBar::tab:selected { background-color: #ffffff; color: #000000; border-bottom: 3px solid #2563eb; }"
         )
         self.main_tabs.addTab(self.tab_system, "🗺️ BẢN ĐỒ & VẬN HÀNH HỆ THỐNG")
         self.main_tabs.addTab(self.tab_mission, "🚀 TRUNG TÂM TUẦN TRA & PHỤC VỤ (MISSION)")
@@ -1291,19 +1291,21 @@ class MainWindow(QWidget):
         now_str = time.strftime("%H:%M:%S")
         if is_human:
             self.lbl_mind_status.setText("👤 PHÁT HIỆN CÓ NGƯỜI TRƯỚC MẶT")
-            self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #38bdf8;")
+            self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #0284c7;")
             self.lbl_mind_desc.setText("Camera AI phát hiện có người trong cự ly an toàn (<1.8m). Robot đang chủ động phanh dừng nhường đường (tạm khóa tự lùi/xoay).")
+            self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
             self.mind_banner_frame.setStyleSheet(
-                "QFrame { background-color: #0c4a6e; border: 2px solid #38bdf8; border-radius: 6px; padding: 6px; }"
+                "QFrame { background-color: #ffffff; border: 2px solid #0284c7; border-radius: 6px; padding: 6px; }"
             )
-            self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: #38bdf8;'>👤 PHÁT HIỆN NGƯỜI</b>: Đang phanh dừng chờ nhường đường.")
+            self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: #0284c7;'>👤 PHÁT HIỆN NGƯỜI</b>: Đang phanh dừng chờ nhường đường.")
         else:
             if "NGƯỜI" in self.lbl_mind_status.text():
                 self.lbl_mind_status.setText("🚗 ĐƯỜNG ĐÃ THÔNG THOÁNG")
                 self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #16a34a;")
                 self.lbl_mind_desc.setText("Không còn người chắn trước mũi xe. Robot tiếp tục di chuyển theo lộ trình.")
+                self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
                 self.mind_banner_frame.setStyleSheet(
-                    "QFrame { background-color: #0f172a; border: 2px solid #16a34a; border-radius: 6px; padding: 6px; }"
+                    "QFrame { background-color: #ffffff; border: 2px solid #16a34a; border-radius: 6px; padding: 6px; }"
                 )
                 self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: #16a34a;'>ĐƯỜNG THOÁNG</b>: Người đã rời đi, tiếp tục hành trình.")
 
@@ -1328,8 +1330,9 @@ class MainWindow(QWidget):
         self.lbl_mind_status.setText(title)
         self.lbl_mind_status.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {color};")
         self.lbl_mind_desc.setText(desc)
+        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
         self.mind_banner_frame.setStyleSheet(
-            f"QFrame {{ background-color: #0f172a; border: 2px solid {color}; border-radius: 6px; padding: 6px; }}"
+            f"QFrame {{ background-color: #ffffff; border: 2px solid {color}; border-radius: 6px; padding: 6px; }}"
         )
         now_str = time.strftime("%H:%M:%S")
         self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: {color};'>{title}</b>: {desc}")
@@ -1650,12 +1653,13 @@ class MainWindow(QWidget):
             )
         return True
 
-    def _set_fsm_banner(self, title: str, detail: str, border_color: str, bg_color: str = "#0f172a"):
+    def _set_fsm_banner(self, title: str, detail: str, border_color: str, bg_color: str = "#ffffff"):
         if not hasattr(self, "fsm_banner_frame"):
             return
         self.lbl_fsm_state.setText(title)
         self.lbl_fsm_state.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {border_color};")
         self.lbl_fsm_detail.setText(detail)
+        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #0f172a;")
         self.fsm_banner_frame.setStyleSheet(
             f"QFrame {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 8px; padding: 10px; }}"
         )
@@ -1673,17 +1677,17 @@ class MainWindow(QWidget):
 
         lower = text.lower()
         if "khẩn cấp" in lower or "emergency" in lower:
-            self._set_fsm_banner("🚨 KHẨN CẤP (EMERGENCY STOP)", text, "#ef4444", "#450a0a")
+            self._set_fsm_banner("🚨 KHẨN CẤP (EMERGENCY STOP)", text, "#dc2626", "#ffffff")
         elif "vẫy" in lower or "tiếp cận" in lower:
-            self._set_fsm_banner("👋 ĐANG TIẾP CẬN NGƯỜI VẪY TAY", text, "#a855f7", "#2e1065")
+            self._set_fsm_banner("👋 ĐANG TIẾP CẬN NGƯỜI VẪY TAY", text, "#7c3aed", "#ffffff")
         elif "phục vụ" in lower or "lấy nước" in lower or "hài lòng" in lower:
-            self._set_fsm_banner("☕ ĐANG PHỤC VỤ KHÁCH", text, "#3b82f6", "#0c4a6e")
+            self._set_fsm_banner("☕ ĐANG PHỤC VỤ KHÁCH", text, "#2563eb", "#ffffff")
         elif "chắn đường" in lower or "gặp người" in lower:
-            self._set_fsm_banner("🧍 GẶP NGƯỜI CẢN ĐƯỜNG (TẠM DỪNG)", text, "#f97316", "#431407")
+            self._set_fsm_banner("🧍 GẶP NGƯỜI CẢN ĐƯỜNG (TẠM DỪNG)", text, "#ea580c", "#ffffff")
         elif "tạm dừng tuần tra" in lower:
-            self._set_fsm_banner("⏸ ĐÃ TẠM DỪNG TUẦN TRA", text, "#94a3b8", "#1e293b")
+            self._set_fsm_banner("⏸ ĐÃ TẠM DỪNG TUẦN TRA", text, "#475569", "#ffffff")
         elif "[tuần tra]" in lower or "bắt đầu tuần tra" in lower or "lộ trình tuần tra" in lower:
-            self._set_fsm_banner("🚀 ĐANG TUẦN TRA TỰ ĐỘNG", text, "#22c55e", "#052e16")
+            self._set_fsm_banner("🚀 ĐANG TUẦN TRA TỰ ĐỘNG", text, "#16a34a", "#ffffff")
             if "đến điểm:" in text and hasattr(self, "lbl_fsm_current_target"):
                 pt = text.split("đến điểm:", 1)[-1].strip()
                 self.lbl_fsm_current_target.setText(f"🎯 Mục tiêu hiện tại: {pt}")
@@ -1691,13 +1695,13 @@ class MainWindow(QWidget):
     def _on_mission_popup_ui(self, cmd: str):
         now_str = time.strftime("%H:%M:%S")
         if hasattr(self, "fsm_log_box"):
-            self.fsm_log_box.append(f"<span style='color:#38bdf8;'>[{now_str}] [POPUP KIOSK] {cmd}</span>")
+            self.fsm_log_box.append(f"<span style='color:#0284c7;'>[{now_str}] [POPUP KIOSK] {cmd}</span>")
         if cmd == "SHOW_5S_INVITE":
-            self._set_fsm_banner("☕ MỜI KHÁCH LẤY NƯỚC (ĐẾM NGƯỢC 5S)", "Phát hiện người đứng trước robot. Bấm 'Lấy Nước' nếu muốn nhận nước.", "#0ea5e9", "#0c4a6e")
+            self._set_fsm_banner("☕ MỜI KHÁCH LẤY NƯỚC (ĐẾM NGƯỢC 5S)", "Phát hiện người đứng trước robot. Bấm 'Lấy Nước' nếu muốn nhận nước.", "#0284c7", "#ffffff")
         elif cmd == "SHOW_SERVING":
-            self._set_fsm_banner("☕ ĐANG PHỤC VỤ NƯỚC (KHÓA PHANH)", "Khách đang lấy nước. Bấm 'Đã Hài Lòng' khi hoàn tất.", "#3b82f6", "#172554")
+            self._set_fsm_banner("☕ ĐANG PHỤC VỤ NƯỚC (KHÓA PHANH)", "Khách đang lấy nước. Bấm 'Đã Hài Lòng' khi hoàn tất.", "#2563eb", "#ffffff")
         elif cmd == "HIDE":
-            self._set_fsm_banner("🚗 ĐÃ ĐÓNG POPUP PHỤC VỤ", "Quay trở lại trạng thái tuần tra bình thường.", "#22c55e", "#052e16")
+            self._set_fsm_banner("🚗 ĐÃ ĐÓNG POPUP PHỤC VỤ", "Quay trở lại trạng thái tuần tra bình thường.", "#16a34a", "#ffffff")
 
     def on_fsm_start_patrol(self):
         if self.ros_node is None:
