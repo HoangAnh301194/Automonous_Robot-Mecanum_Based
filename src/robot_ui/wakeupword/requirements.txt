@@ -1,0 +1,3 @@
+# Wake Word Phase 1 Dependencies (Python 3.10)
+# Minimal, isolated dependencies. Does NOT include ROS 2, PyTorch, or PyQt5.
+vosk==0.3.45

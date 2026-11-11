@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Phase 1 offline wake-phrase baseline: Vosk ASR keyword matching, NOT trained KWS.
+"""Phase 1 offline wake-phrase baseline: Vosk ASR keyword matching.
 
-This experiment is intentionally independent of the ROS/Qt kiosk. Install
-pretrained Vosk models separately; no audio is uploaded or retained in live mode.
+Self-contained module for Souta robot. Independent of ROS 2 and Kiosk UI.
 """
 from __future__ import annotations
 
@@ -18,13 +17,15 @@ import unicodedata
 import wave
 from pathlib import Path
 
+DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "keywords.json"
+
+# Fallback definitions for backward-compatibility with tests & direct imports
 MODEL_DIRS = {
     "vi_sota_oi": "vosk-model-small-vn-0.4",
     "en_hey_souta": "vosk-model-small-en-us-0.15",
     "ja_soutakun": "vosk-model-small-ja-0.22",
 }
 
-# Deliberately narrow aliases: do not guess broad sound-alike phrases.
 ALIASES = {
     "vi_sota_oi": ["sota ơi", "souta ơi"],
     "en_hey_souta": ["hey souta", "hey sota"],
@@ -32,9 +33,39 @@ ALIASES = {
 }
 
 
-def normalize(text: str, language: str) -> str:
+def load_config(config_path: Path | None = None) -> dict:
+    """Load keyword and model configurations from JSON."""
+    path = config_path or DEFAULT_CONFIG_PATH
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Invalid JSON in config {path}: {exc}") from exc
+
+    if "keywords" not in data or not isinstance(data["keywords"], dict):
+        raise ValueError("Config must have a top-level 'keywords' object")
+
+    for kw_id, kw_cfg in data["keywords"].items():
+        for field in ("language", "display_name", "model", "aliases", "enabled"):
+            if field not in kw_cfg:
+                raise ValueError(f"Keyword '{kw_id}' missing required field: {field}")
+        if not isinstance(kw_cfg["aliases"], list) or not kw_cfg["aliases"]:
+            raise ValueError(f"Keyword '{kw_id}' aliases must be a non-empty list")
+
+    return data
+
+
+def get_active_keywords(config: dict) -> dict:
+    """Return dictionary of enabled keywords."""
+    return {k: v for k, v in config.get("keywords", {}).items() if v.get("enabled", True)}
+
+
+def normalize(text: str, language_or_label: str) -> str:
+    """Normalize text with Unicode NFKC, casefolding, and Japanese kana conversion."""
     text = unicodedata.normalize("NFKC", text).casefold()
-    if language == "ja_soutakun":
+    if language_or_label == "ja" or language_or_label.startswith("ja_"):
+        # Convert Katakana to Hiragana (U+30A1 - U+30F6 -> U+3041 - U+3096)
         text = "".join(
             chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c
             for c in text
@@ -44,13 +75,14 @@ def normalize(text: str, language: str) -> str:
 
 
 def match_wake_phrase(text: str, label: str, aliases: dict | None = None) -> bool:
+    """Check if recognized text matches any configured alias for the keyword."""
     variants = (aliases or ALIASES).get(label, [])
     normalized = normalize(text, label)
     for variant in variants:
         phrase = normalize(variant, label)
         if not phrase:
             continue
-        if label.startswith("ja_"):
+        if label.startswith("ja_") or label == "ja":
             if phrase in normalized:
                 return True
         elif re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", normalized):
@@ -58,37 +90,52 @@ def match_wake_phrase(text: str, label: str, aliases: dict | None = None) -> boo
     return False
 
 
-def load_aliases(path: str | None) -> dict:
-    aliases = {name: list(values) for name, values in ALIASES.items()}
+def load_aliases(path: str | None, base_aliases: dict | None = None) -> dict:
+    """Load and validate alias overrides from a JSON file."""
+    aliases = {name: list(values) for name, values in (base_aliases or ALIASES).items()}
     if path:
         loaded = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(loaded, dict):
             raise ValueError("Aliases must be a JSON object keyed by wake-word ID")
         for label, variants in loaded.items():
-            if label not in MODEL_DIRS or not isinstance(variants, list):
+            if label not in aliases and label not in MODEL_DIRS:
                 raise ValueError(f"Invalid alias entry: {label}")
-            if not all(isinstance(v, str) and v.strip() for v in variants):
+            if not isinstance(variants, list) or not all(isinstance(v, str) and v.strip() for v in variants):
                 raise ValueError(f"Empty or non-string alias for {label}")
             aliases[label] = variants
     return aliases
 
 
-def load_models(models_dir: Path):
+def load_models(models_dir: Path, active_keywords: dict | None = None):
+    """Load Vosk library and active language models."""
     try:
         import vosk
     except ImportError as exc:
-        raise SystemExit("Missing vosk. Install in an isolated Python environment: pip install vosk") from exc
+        raise SystemExit(
+            "Missing vosk library. Please run:\n"
+            "  bash install.sh\n"
+            "or: pip install -r requirements.txt"
+        ) from exc
+
     vosk.SetLogLevel(-1)
     models = {}
-    for label, dirname in MODEL_DIRS.items():
-        folder = models_dir / dirname
+    items = active_keywords if active_keywords is not None else {
+        k: {"model": m} for k, m in MODEL_DIRS.items()
+    }
+    for kw_id, kw_cfg in items.items():
+        model_name = kw_cfg.get("model", MODEL_DIRS.get(kw_id))
+        folder = models_dir / model_name
         if not folder.is_dir():
-            raise SystemExit(f"Missing model for {label}: {folder}")
-        models[label] = vosk.Model(str(folder))
+            raise SystemExit(
+                f"Missing model folder for {kw_id}: {folder}\n"
+                f"Please download it via: python download_models.py --models-dir {models_dir}"
+            )
+        models[kw_id] = vosk.Model(str(folder))
     return vosk, models
 
 
 def open_wav(path: Path):
+    """Open and validate 16-bit mono 16kHz PCM WAV."""
     handle = wave.open(str(path), "rb")
     if (handle.getnchannels(), handle.getsampwidth(), handle.getframerate()) != (1, 2, 16000):
         handle.close()
@@ -96,8 +143,9 @@ def open_wav(path: Path):
     return handle
 
 
-def recognize_file(path: Path, vosk, models: dict) -> tuple[dict, float, float]:
-    recognizers = {name: vosk.KaldiRecognizer(model, 16000) for name, model in models.items()}
+def recognize_file(path: Path, vosk_module, models: dict) -> tuple[dict, float, float]:
+    """Recognize a single WAV file across all models."""
+    recognizers = {name: vosk_module.KaldiRecognizer(model, 16000) for name, model in models.items()}
     start = time.monotonic()
     segments = {name: [] for name in models}
     with open_wav(path) as wav:
@@ -120,7 +168,8 @@ def recognize_file(path: Path, vosk, models: dict) -> tuple[dict, float, float]:
     return transcripts, time.monotonic() - start, duration
 
 
-def evaluate(manifest: Path, vosk, models: dict, aliases: dict, report: Path | None):
+def evaluate(manifest: Path, vosk_module, models: dict, aliases: dict, report: Path | None):
+    """Evaluate offline manifest for recall and false accept rate."""
     records = []
     with manifest.open(newline="", encoding="utf-8-sig") as fp:
         for row in csv.DictReader(fp):
@@ -130,9 +179,9 @@ def evaluate(manifest: Path, vosk, models: dict, aliases: dict, report: Path | N
             if not path.is_absolute():
                 path = manifest.parent / path
             expected = row["expected"].strip() or "none"
-            if expected != "none" and expected not in MODEL_DIRS:
+            if expected != "none" and expected not in models:
                 raise ValueError(f"Unknown expected label: {expected}")
-            transcripts, elapsed, duration = recognize_file(path, vosk, models)
+            transcripts, elapsed, duration = recognize_file(path, vosk_module, models)
             detected = [label for label, transcript in transcripts.items()
                         if match_wake_phrase(transcript, label, aliases)]
             outcome = ("correct" if expected in detected and len(detected) == 1 else
@@ -156,7 +205,7 @@ def evaluate(manifest: Path, vosk, models: dict, aliases: dict, report: Path | N
             "total": sum(r["expected"] == name for r in positives),
             "correct": sum(r["expected"] == name and r["outcome"] == "correct" for r in positives),
         }
-        for name in MODEL_DIRS
+        for name in models
     }
     summary = {
         "positive_recall": positive_correct / len(positives) if positives else None,
@@ -173,7 +222,7 @@ def evaluate(manifest: Path, vosk, models: dict, aliases: dict, report: Path | N
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps({"summary": summary, "samples": records},
                                      indent=2, ensure_ascii=False), encoding="utf-8")
-        print(f"Wrote report: {report} (includes transcripts; handle as personal data)")
+        print(f"Wrote report: {report}")
 
 
 def capture_cmd(source: str) -> list[str]:
@@ -182,8 +231,8 @@ def capture_cmd(source: str) -> list[str]:
 
 
 def record_sample(path: Path, duration: float, source: str):
+    """Record a PCM sample directly to 16kHz mono WAV."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    # GNU timeout bounds capture even when the USB microphone goes silent.
     command = ["timeout", "--signal=TERM", "--kill-after=1s",
                f"{duration}s", *capture_cmd(source)]
     result = subprocess.run(command, stdout=subprocess.PIPE,
@@ -200,10 +249,10 @@ def record_sample(path: Path, duration: float, source: str):
     print(f"Recorded {len(pcm) / 32000:.2f}s to {path}")
 
 
-def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float,
+def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: float,
                debug_transcripts: bool = False, debug_partials: bool = False):
-    # ONE microphone capture. All recognizers consume the same PCM frames.
-    recognizers = {name: vosk.KaldiRecognizer(model, 16000) for name, model in models.items()}
+    """One parec capture feeding all recognizers concurrently."""
+    recognizers = {name: vosk_module.KaldiRecognizer(model, 16000) for name, model in models.items()}
     process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
                                stderr=subprocess.DEVNULL, bufsize=0)
     next_allowed = 0.0
@@ -221,7 +270,7 @@ def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float,
             pcm = process.stdout.read(3200)
             if not pcm:
                 if process.poll() is not None:
-                    raise RuntimeError(f"parec exited with {process.returncode}")
+                    raise RuntimeError(f"parec exited with code {process.returncode}")
                 continue
             audio_seconds += len(pcm) / 32000
             t0 = time.monotonic()
@@ -255,7 +304,7 @@ def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float,
                       file=sys.stderr, flush=True)
                 last_stat = time.monotonic()
     except KeyboardInterrupt:
-        print("\nStopped")
+        print("\nStopped.")
     finally:
         process.terminate()
         try:
@@ -268,6 +317,8 @@ def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float,
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("record", "evaluate", "live"))
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG_PATH,
+                        help="Path to keywords.json configuration")
     parser.add_argument("--models-dir", type=Path, default=Path.home() / "vosk-models")
     parser.add_argument("--source", default="@DEFAULT_SOURCE@", help="PulseAudio source name")
     parser.add_argument("--duration", type=float, default=4, help="Record duration, seconds")
@@ -281,23 +332,35 @@ def main(argv=None) -> int:
     parser.add_argument("--debug-partials", action="store_true",
                         help="Print throttled partial Vosk transcripts (privacy-sensitive; live mode only)")
     args = parser.parse_args(argv)
+
     if args.command == "record":
         if not args.output or not 0.5 <= args.duration <= 60:
             parser.error("record requires --output and 0.5 <= --duration <= 60")
         record_sample(args.output, args.duration, args.source)
         return 0
-    aliases = load_aliases(args.aliases)
-    vosk, models = load_models(args.models_dir)
+
+    if args.config.is_file():
+        config = load_config(args.config)
+        active = get_active_keywords(config)
+        base_aliases = {k: v["aliases"] for k, v in active.items()}
+    else:
+        active = {k: {"model": m} for k, m in MODEL_DIRS.items()}
+        base_aliases = ALIASES
+
+    aliases = load_aliases(args.aliases, base_aliases)
+    models_dir = args.models_dir.expanduser().resolve()
+    vosk_module, models = load_models(models_dir, active)
+
     if args.command == "evaluate":
         if not args.manifest:
             parser.error("evaluate requires --manifest")
-        evaluate(args.manifest, vosk, models, aliases, args.report)
+        evaluate(args.manifest, vosk_module, models, aliases, args.report)
     else:
-        live_probe(vosk, models, aliases, args.source, max(0, args.cooldown),
+        live_probe(vosk_module, models, aliases, args.source, max(0, args.cooldown),
                    debug_transcripts=args.debug_transcripts,
                    debug_partials=args.debug_partials)
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

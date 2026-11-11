@@ -1,0 +1,16 @@
+# Virtual environment & Python cache
+.venvs/
+__pycache__/
+*.py[cod]
+
+# Audio recordings & evaluation datasets
+samples/
+*.wav
+*.csv
+!tests/**
+results.json
+report.json
+
+# Model weights and archives
+*.zip
+*.zip.tmp

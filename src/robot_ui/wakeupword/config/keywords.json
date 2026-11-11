@@ -1,0 +1,25 @@
+{
+  "keywords": {
+    "vi_sota_oi": {
+      "language": "vi",
+      "display_name": "Sota ơi",
+      "model": "vosk-model-small-vn-0.4",
+      "aliases": ["sota ơi", "souta ơi"],
+      "enabled": true
+    },
+    "en_hey_souta": {
+      "language": "en",
+      "display_name": "Hey Souta",
+      "model": "vosk-model-small-en-us-0.15",
+      "aliases": ["hey souta", "hey sota"],
+      "enabled": true
+    },
+    "ja_soutakun": {
+      "language": "ja",
+      "display_name": "Soutakun",
+      "model": "vosk-model-small-ja-0.22",
+      "aliases": ["そうたくん", "そうた君", "ソウタクン"],
+      "enabled": true
+    }
+  }
+}

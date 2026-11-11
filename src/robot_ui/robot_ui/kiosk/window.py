@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+import logging
 import os
 import time
 
@@ -14,7 +15,10 @@ from robot_ui.kiosk.llm_client import LLMWorker, TurnContext
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
+from robot_ui.kiosk.wakeword_worker import WakeWordWorker
 from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, MicState, NavigationPage
+
+LOG = logging.getLogger(__name__)
 
 
 KIOSK_STYLESHEET = """
@@ -593,6 +597,11 @@ class KioskWindow(QMainWindow):
         signals.tts_started.connect(lambda _s, _t: self.chat_page.set_speaker_speaking(True))
         signals.tts_finished.connect(lambda _s, _t: self.chat_page.set_speaker_speaking(False))
 
+        # Wake word worker for idle page transition
+        self._wakeword_worker = WakeWordWorker(signals, self)
+        signals.wake_word_detected.connect(self._on_wake_word_detected)
+        self._wakeword_worker.start()
+
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
         self.idle_page.video.set_video(self.emotions.path("idle"))
@@ -657,8 +666,12 @@ class KioskWindow(QMainWindow):
         if page_id == "idle":
             self.idle_page.video.start()
             self._update_emotion()
+            if hasattr(self, "_wakeword_worker"):
+                self._wakeword_worker.resume_listening()
         else:
             self.idle_page.video.pause()
+            if hasattr(self, "_wakeword_worker"):
+                self._wakeword_worker.pause_listening()
         if page_id == "navigation":
             self.ros_node.request_locations()
 
@@ -837,6 +850,24 @@ class KioskWindow(QMainWindow):
         if not response.startswith("⚠️"):
             self._voice_controller.handle_llm_response(session_id, response)
 
+    def _on_wake_word_detected(self, keyword: str) -> None:
+        """Handle wake word event when robot is waiting on idle screen."""
+        LOG.info("[KioskWindow] Wake word '%s' detected (current page: '%s')", keyword, self._active_page)
+        self._last_activity_at = time.monotonic()
+
+        # When in idle page (Mochi motion), transition to chat and greet immediately
+        if self._active_page == "idle":
+            self.show_page("chat")
+            greetings = {
+                "vi_sota_oi": "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?",
+                "en_hey_souta": "Hello! I am Souta Robot. How can I help you today?",
+                "ja_soutakun": "こんにちは！ソウタロボットです。何かご用でしょうか？",
+            }
+            greeting = greetings.get(keyword, "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
+            self.chat_page.receive_response(greeting)
+            if self._voice_controller.is_speaker_enabled():
+                self._voice_controller.handle_llm_response(self._llm_worker.session_id, greeting)
+
     def eventFilter(self, watched: Any, event: QEvent) -> bool:
         input_events = (
             QEvent.MouseButtonPress, QEvent.KeyPress,
@@ -909,6 +940,8 @@ class KioskWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:
         QApplication.instance().removeEventFilter(self)
+        if hasattr(self, "_wakeword_worker"):
+            self._wakeword_worker.stop()
         self.chat_page.stop_speaking()
         self._voice_controller.shutdown()
         self._llm_worker.reset_session()

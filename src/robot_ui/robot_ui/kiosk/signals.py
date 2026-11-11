@@ -23,3 +23,6 @@ class KioskSignals(QObject):
     voice_transcript_ready = pyqtSignal(int, int, str)    # (session_id, turn_id, transcript)
     tts_started = pyqtSignal(int, int)                    # (session_id, turn_id)
     tts_finished = pyqtSignal(int, int)                   # (session_id, turn_id)
+    # Wake word signals
+    wake_word_detected = pyqtSignal(str)                  # (keyword_id, e.g. "vi_sota_oi")
+
