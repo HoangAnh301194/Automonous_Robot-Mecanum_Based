@@ -325,6 +325,8 @@ class KioskWindow(QMainWindow):
         self.idle_page = HomePage()
         # Idle must show only the animated Mochi face, without telemetry/menu.
         self.idle_page.battery_label.hide()
+        self.idle_page.setAttribute(Qt.WA_AcceptTouchEvents, True)
+        self.idle_page.video.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.home_page = WelcomePage(
             background=icon_path("background.jpg"),
             ptit=icon_path("logoPtit.jpg"),
