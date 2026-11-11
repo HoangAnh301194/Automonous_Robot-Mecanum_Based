@@ -1,4 +1,4 @@
-> **Giao diện Kiosk mới (nhánh `simulator_interface`):** Idle Dasai Mochi → Home PTIT → Chat / Admin PIN. Xem [README_INTERFACE.md](README_INTERFACE.md) để biết luồng màn hình, biến môi trường và cách chạy.
+> **Giao diện Kiosk mới (nhánh `simulator_interface`):** Idle Souta Robot → Home PTIT → Chat / Admin PIN. Xem [README_INTERFACE.md](README_INTERFACE.md) để biết luồng màn hình, biến môi trường và cách chạy.
 
 # Robot UI — Souta
 

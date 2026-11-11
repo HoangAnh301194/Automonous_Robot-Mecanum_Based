@@ -51,7 +51,7 @@ class WelcomePage(QWidget):
         title.setAlignment(Qt.AlignCenter)
         title.setWordWrap(True)
         layout.addWidget(title)
-        subtitle = QLabel("Dasai Mochi  ·  Trợ lý robot tại Học viện")
+        subtitle = QLabel("Souta Robot  ·  Trợ lý robot tại Học viện")
         subtitle.setObjectName("welcomeSubtitle")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
@@ -59,7 +59,7 @@ class WelcomePage(QWidget):
 
         row = QHBoxLayout()
         row.addStretch()
-        btn = QPushButton("  Trò chuyện với Dasai Mochi")
+        btn = QPushButton("  Trò chuyện với Souta Robot")
         btn.setObjectName("welcomeChatButton")
         btn.setAccessibleName("Mở trò chuyện")
         btn.setMinimumSize(320, 78)

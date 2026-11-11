@@ -613,7 +613,7 @@ class ChatPage(QWidget):
         heading.setSpacing(0)
         title = QLabel("TRÒ CHUYỆN")
         title.setObjectName("chatTitle")
-        subtitle = QLabel("Trợ lý Dasai Mochi")
+        subtitle = QLabel("Trợ lý Souta Robot")
         subtitle.setObjectName("chatSubtitle")
         heading.addWidget(title)
         heading.addWidget(subtitle)
@@ -669,7 +669,7 @@ class ChatPage(QWidget):
         root.addWidget(input_bar)
 
         self._llm_status_label = llm_status  # giữ tham chiếu để cập nhật
-        self._add_message("Dasai Mochi", "Xin chào! Tôi là Dasai Mochi. Tôi có thể giúp gì cho bạn?")
+        self._add_message("Souta Robot", "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
 
     def _add_message(self, sender: str, message: str, from_user: bool = False) -> None:
         row = QWidget()
@@ -724,7 +724,7 @@ class ChatPage(QWidget):
                 item.widget().deleteLater()
         self.set_busy(False)
         self.input.clear()
-        self._add_message("Dasai Mochi", "Xin chào! Tôi là Dasai Mochi. Tôi có thể giúp gì cho bạn?")
+        self._add_message("Souta Robot", "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
 
     def set_llm_status(self, status: str) -> None:
         """Cập nhật label trạng thái LLM ở header."""
@@ -733,12 +733,12 @@ class ChatPage(QWidget):
     def receive_response(self, response: str) -> None:
         """Hiển thị response từ LLM và mở khóa input."""
         self.set_busy(False)
-        self._add_message("Dasai Mochi", response)
+        self._add_message("Souta Robot", response)
 
     def receive_error(self, error_msg: str) -> None:
         """Hiển thị lỗi và mở khóa input."""
         self.set_busy(False)
-        self._add_message("Dasai Mochi", f"⚠️ Lỗi: {error_msg}")
+        self._add_message("Souta Robot", f"⚠️ Lỗi: {error_msg}")
 
     def set_busy(self, busy: bool) -> None:
         """Khoá/mở input trong khi đang chờ LLM."""

@@ -315,7 +315,7 @@ class KioskWindow(QMainWindow):
             self._idle_timeout_seconds = 120
         self._last_activity_at = time.monotonic()
 
-        self.setWindowTitle("Robot Assistant")
+        self.setWindowTitle("Souta Robot")
         self.setMinimumSize(800, 480)
         self.setStyleSheet(KIOSK_STYLESHEET)
 
@@ -323,7 +323,7 @@ class KioskWindow(QMainWindow):
         self.setCentralWidget(central)
         self.stack = QStackedWidget(central)
         self.idle_page = HomePage()
-        # Idle must show only the animated Mochi face, without telemetry/menu.
+        # Idle must show only the animated Souta Robot face, without telemetry/menu.
         self.idle_page.battery_label.hide()
         self.idle_page.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.idle_page.video.setAttribute(Qt.WA_AcceptTouchEvents, True)

@@ -9,7 +9,7 @@ Implementation: `robot_ui/kiosk/window.py`, `widgets.py`, `pages.py`.
 START
   |
   v
-IDLE (Dasai Mochi face / MP4, full screen, no dock or telemetry)
+IDLE (Souta Robot face / MP4, full screen, no dock or telemetry)
   | tap anywhere
   v
 HOME (background.jpg, PTIT + FEE1 logos)
@@ -65,7 +65,7 @@ The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 
 * Opening Admin requires a PIN every time after logout/timeout.
 * Visitor timeout clears the current chat/LLM session for privacy and
-  returns to the animated Mochi face.
+  returns to the animated Souta Robot face.
 * Screen transitions and timeouts **never cancel an ongoing Nav2 goal**.
 * Existing `/map`, robot status, LLM and navigation ROS interfaces are reused.
 * `background.jpg`, `logoPtit.jpg`, `fee1.jpeg`, `setting_icon.jpeg`,
@@ -80,14 +80,14 @@ use a strong PIN / secret storage and consider local OS access control.
 
 ## Manual smoke checks
 
-1. Launch Kiosk. It should show only Mochi's face, no Home/Map/Chat dock.
+1. Launch Kiosk. It should show only Souta Robot's face, no Home/Map/Chat dock.
 2. Tap anywhere. The Home screen should show the institution background,
    PTIT/FEE1 logos and only Home + Settings in the bottom dock.
 3. Tap Chat. Confirm 9router conversation works; return via header button.
 4. Tap Settings. Wrong PIN stays locked; PIN `1` opens Admin.
 5. From Admin open Map & Nav2; use the back arrow to return to Admin.
 6. Logout; ensure Map & Nav2 is no longer accessible without PIN.
-7. Leave the screen idle; verify return to Mochi and reset of Chat.
+7. Leave the screen idle; verify return to Souta Robot and reset of Chat.
 8. Confirm changing pages **does not** send Nav2 cancel goals.
 
 Offscreen GUI smoke tests:

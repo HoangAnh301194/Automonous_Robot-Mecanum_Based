@@ -16,7 +16,7 @@ def package_share() -> Path:
 
 
 def icon_path(filename: str) -> Path:
-    return package_share() / "emotion_dasaimochi" / filename
+    return package_share() / "souta_robot" / filename
 
 
 class EmotionCatalog:
@@ -31,7 +31,7 @@ class EmotionCatalog:
 
     def path(self, name: str) -> Path:
         filename = self._emotions.get(name) or self._emotions[self.default]
-        return package_share() / "emotion_dasaimochi" / "videomp4" / filename
+        return package_share() / "souta_robot" / "videomp4" / filename
 
     def has(self, name: str) -> bool:
         return name in self._emotions

@@ -98,7 +98,7 @@ def main(args: list[str] | None = None) -> int:
         )
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     application = QApplication([app_args[0]])
-    application.setApplicationName("Robot Assistant")
+    application.setApplicationName("Souta Robot")
     if options.hide_cursor:
         application.setOverrideCursor(Qt.BlankCursor)
 
