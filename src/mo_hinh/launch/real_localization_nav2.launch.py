@@ -6,6 +6,7 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from ament_index_python.packages import get_package_share_directory
+from nav2_common.launch import RewrittenYaml
 
 import os
 
@@ -20,6 +21,7 @@ def generate_launch_description():
     default_map_yaml = resolve_path('maps', 'my_map.yaml')
     default_map_graph = resolve_path('maps', 'my_slam_graph')
     default_nav2_params = resolve_path('config', 'nav2_params.yaml')
+    default_bt_xml = resolve_path('config', 'navigate_to_pose_smart_recovery.xml')
     default_slam_loc_params = resolve_path('config', 'slam_localization.yaml')
     default_rviz_config = resolve_path('config', 'rviz.rviz')
 
@@ -32,6 +34,12 @@ def generate_launch_description():
     nav2_params_file = LaunchConfiguration('nav2_params_file')
     slam_params_file = LaunchConfiguration('slam_params_file')
     rviz_config_file = LaunchConfiguration('rviz_config_file')
+
+    configured_params = RewrittenYaml(
+        source_file=nav2_params_file,
+        param_rewrites={'default_nav_to_pose_bt_xml': default_bt_xml},
+        convert_types=True,
+    )
 
     use_amcl = IfCondition(PythonExpression(["'", localization_mode, "' == 'amcl'"]))
     use_slam_toolbox = IfCondition(
@@ -47,7 +55,7 @@ def generate_launch_description():
             'slam': 'False',
             'map': map_yaml,
             'use_sim_time': use_sim_time,
-            'params_file': nav2_params_file,
+            'params_file': configured_params,
             'autostart': autostart,
         }.items()
     )
@@ -74,7 +82,7 @@ def generate_launch_description():
         condition=use_slam_toolbox,
         launch_arguments={
             'use_sim_time': use_sim_time,
-            'params_file': nav2_params_file,
+            'params_file': configured_params,
             'autostart': autostart,
         }.items()
     )

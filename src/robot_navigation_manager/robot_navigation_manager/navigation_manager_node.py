@@ -1,3 +1,6 @@
+import math
+import threading
+
 import rclpy
 from rclpy.node import Node
 from rclpy.action import ActionServer, ActionClient, CancelResponse
@@ -10,18 +13,13 @@ from robot_interfaces.msg import NavigationStatus
 from nav2_msgs.action import NavigateToPose
 from geometry_msgs.msg import PoseStamped
 
-import math
-import time
 
 class NavigationManagerNode(Node):
     def __init__(self):
         super().__init__('navigation_manager_node')
 
-        # We use ReentrantCallbackGroup to allow concurrent callbacks 
-        # (e.g. calling service while in action server callback)
         self.cb_group = ReentrantCallbackGroup()
 
-        # Action Server: DirectGo (from Mission Control or UI)
         self._action_server = ActionServer(
             self,
             DirectGo,
@@ -31,31 +29,30 @@ class NavigationManagerNode(Node):
             callback_group=self.cb_group
         )
 
-        # Service Client: Get Location (from Config Manager)
         self.get_loc_client = self.create_client(
-            GetLocation, 
+            GetLocation,
             '/config/get_location',
             callback_group=self.cb_group
         )
 
-        # Action Client: NavigateToPose (to Nav2)
         self.nav2_client = ActionClient(
-            self, 
-            NavigateToPose, 
+            self,
+            NavigateToPose,
             'navigate_to_pose',
             callback_group=self.cb_group
         )
 
-        # Publisher: NavigationStatus
         self.status_pub = self.create_publisher(NavigationStatus, '/navigation/status', 10)
         self.timer = self.create_timer(1.0, self.publish_status, callback_group=self.cb_group)
 
-        # State tracking
+        self._goal_lock = threading.Lock()
+        self._exec_seq = 0
+        self._active_direct_goal = None
+        self.nav2_goal_handle = None
+
         self.current_goal_name = "None"
         self.status_string = "IDLE"
         self.distance_remaining = -1.0
-        
-        self.nav2_goal_handle = None
 
         self.get_logger().info('Navigation Manager Node started.')
 
@@ -67,149 +64,206 @@ class NavigationManagerNode(Node):
         self.status_pub.publish(msg)
 
     async def get_location_pose(self, location_name):
-        while not self.get_loc_client.wait_for_service(timeout_sec=1.0):
+        if not self.get_loc_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().warn('Waiting for /config/get_location service...')
-            
+            return None
+
         req = GetLocation.Request()
         req.name = location_name
-        
+
         future = self.get_loc_client.call_async(req)
         try:
-            # Need to await the future properly
             response = await future
             if response.success:
                 return response
-            else:
-                self.get_logger().error(f"Location not found: {response.message}")
-                return None
+            self.get_logger().error(f"Location not found: {response.message}")
+            return None
         except Exception as e:
             self.get_logger().error(f"Service call failed: {e}")
             return None
 
     def cancel_callback(self, goal_handle):
         self.get_logger().info('Received cancel request for DirectGo.')
-        # If we have an active nav2 goal, cancel it
-        if self.nav2_goal_handle is not None:
+        with self._goal_lock:
+            is_current = (goal_handle is self._active_direct_goal)
+            nav2_handle = self.nav2_goal_handle if is_current else None
+        if nav2_handle is not None:
             self.get_logger().info('Canceling Nav2 NavigateToPose goal...')
-            self.nav2_goal_handle.cancel_goal_async()
-            
-        self.status_string = "CANCELLED"
+            try:
+                nav2_handle.cancel_goal_async()
+            except Exception:
+                pass
+        if is_current:
+            self.status_string = "CANCELING"
         return CancelResponse.ACCEPT
+
+    def _finish_canceled(self, goal_handle, my_seq, result, msg="DirectGo cancelled"):
+        goal_handle.canceled()
+        with self._goal_lock:
+            if my_seq == self._exec_seq:
+                self.status_string = "CANCELLED"
+                self.current_goal_name = "None"
+                self.distance_remaining = -1.0
+                self.nav2_goal_handle = None
+                self._active_direct_goal = None
+        result.success = False
+        result.finish_message = msg
+        return result
 
     async def execute_callback(self, goal_handle):
         target = goal_handle.request.target_location
         self.get_logger().info(f'Received DirectGo request to: {target}')
-        
-        self.current_goal_name = target
-        self.status_string = "FETCHING_LOCATION"
-        
-        # 1. Get coordinates from Config Manager
-        loc_response = await self.get_location_pose(target)
-        
+
+        with self._goal_lock:
+            self._exec_seq += 1
+            my_seq = self._exec_seq
+            prev_nav2 = self.nav2_goal_handle
+            self.nav2_goal_handle = None
+            self._active_direct_goal = goal_handle
+            self.current_goal_name = target
+            self.status_string = "FETCHING_LOCATION"
+
+        if prev_nav2 is not None:
+            try:
+                prev_nav2.cancel_goal_async()
+            except Exception:
+                pass
+
         result = DirectGo.Result()
-        
+        loc_response = await self.get_location_pose(target)
+
+        if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+            return self._finish_canceled(goal_handle, my_seq, result)
+
         if loc_response is None:
-            self.status_string = "FAILED"
-            self.current_goal_name = "None"
+            with self._goal_lock:
+                if my_seq == self._exec_seq:
+                    self.status_string = "FAILED"
+                    self.current_goal_name = "None"
+                    self._active_direct_goal = None
             result.success = False
             result.finish_message = "Failed to get location coordinates"
             goal_handle.abort()
             return result
-            
+
         self.get_logger().info(f'Location found: x={loc_response.x}, y={loc_response.y}, yaw={loc_response.yaw}')
-        
-        # 2. Wait for Nav2 Action Server
-        self.status_string = "WAITING_FOR_NAV2"
+
+        with self._goal_lock:
+            if my_seq == self._exec_seq:
+                self.status_string = "WAITING_FOR_NAV2"
+
         if not self.nav2_client.wait_for_server(timeout_sec=5.0):
-            self.status_string = "FAILED"
+            if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+                return self._finish_canceled(goal_handle, my_seq, result)
+            with self._goal_lock:
+                if my_seq == self._exec_seq:
+                    self.status_string = "FAILED"
+                    self.current_goal_name = "None"
+                    self._active_direct_goal = None
             result.success = False
             result.finish_message = "Nav2 Action Server not available"
             goal_handle.abort()
             return result
 
-        # 3. Construct Nav2 Goal
+        if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+            return self._finish_canceled(goal_handle, my_seq, result)
+
         nav2_goal = NavigateToPose.Goal()
         nav2_goal.pose.header.frame_id = 'map'
         nav2_goal.pose.header.stamp = self.get_clock().now().to_msg()
         nav2_goal.pose.pose.position.x = loc_response.x
         nav2_goal.pose.pose.position.y = loc_response.y
         nav2_goal.pose.pose.position.z = 0.0
-        
-        # Convert yaw to quaternion (simple conversion for z-axis rotation)
         nav2_goal.pose.pose.orientation.z = math.sin(loc_response.yaw / 2.0)
         nav2_goal.pose.pose.orientation.w = math.cos(loc_response.yaw / 2.0)
-        
-        self.status_string = "MOVING"
+
+        with self._goal_lock:
+            if my_seq != self._exec_seq:
+                return self._finish_canceled(goal_handle, my_seq, result, "DirectGo preempted")
+            self.status_string = "MOVING"
+
         self.get_logger().info('Sending goal to Nav2 NavigateToPose...')
-        
-        # 4. Send Goal to Nav2
         send_goal_future = self.nav2_client.send_goal_async(
             nav2_goal,
-            feedback_callback=self.nav2_feedback_callback
+            feedback_callback=lambda fb, s=my_seq: self.nav2_feedback_callback(fb, s)
         )
-        
-        self.nav2_goal_handle = await send_goal_future
-        
-        if not self.nav2_goal_handle.accepted:
-            self.status_string = "FAILED"
+        local_nav2_handle = await send_goal_future
+
+        if not local_nav2_handle.accepted:
+            if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+                return self._finish_canceled(goal_handle, my_seq, result)
+            with self._goal_lock:
+                if my_seq == self._exec_seq:
+                    self.status_string = "FAILED"
+                    self.current_goal_name = "None"
+                    self._active_direct_goal = None
             result.success = False
             result.finish_message = "Nav2 rejected the goal"
             goal_handle.abort()
             return result
 
+        with self._goal_lock:
+            if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+                preempted = True
+            else:
+                self.nav2_goal_handle = local_nav2_handle
+                preempted = False
+
+        if preempted:
+            try:
+                local_nav2_handle.cancel_goal_async()
+            except Exception:
+                pass
+            return self._finish_canceled(goal_handle, my_seq, result)
+
         self.get_logger().info('Nav2 accepted the goal. Waiting for result...')
-        
-        # 5. Wait for Result
-        get_result_future = self.nav2_goal_handle.get_result_async()
-        
-        # Periodically check if our goal_handle was canceled while waiting
-        while not get_result_future.done():
-            if goal_handle.is_cancel_requested:
-                # Cancel Nav2 goal and wait for its cancellation
-                if self.nav2_goal_handle is not None:
-                    await self.nav2_goal_handle.cancel_goal_async()
-                goal_handle.canceled()
-                self.status_string = "CANCELLED"
-                self.current_goal_name = "None"
-                result.success = False
-                result.finish_message = "DirectGo cancelled by user"
-                return result
-            time.sleep(0.1) # Sleep briefly to avoid busy loop
-            
+        get_result_future = local_nav2_handle.get_result_async()
+        done_event = threading.Event()
+        get_result_future.add_done_callback(lambda _fut: done_event.set())
+
+        while not done_event.wait(timeout=0.05):
+            if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+                try:
+                    await local_nav2_handle.cancel_goal_async()
+                except Exception:
+                    pass
+                return self._finish_canceled(goal_handle, my_seq, result, "DirectGo cancelled by caller")
+
         nav2_result = get_result_future.result()
-        
-        # Check Nav2 final status
-        # In rclpy, result status are in nav2_result.status, 4 = SUCCEEDED, 5 = CANCELED, 6 = ABORTED
-        if nav2_result.status == 4: # SUCCEEDED
-            self.status_string = "REACHED_GOAL"
+
+        if goal_handle.is_cancel_requested or my_seq != self._exec_seq:
+            return self._finish_canceled(goal_handle, my_seq, result, "DirectGo cancelled")
+
+        if nav2_result.status == 4:
+            final_status = "REACHED_GOAL"
             result.success = True
             result.finish_message = "Successfully reached target location"
             goal_handle.succeed()
-        elif nav2_result.status == 5: # CANCELED
-            self.status_string = "CANCELLED"
+        elif nav2_result.status == 5:
+            final_status = "CANCELLED"
             result.success = False
             result.finish_message = "Navigation was cancelled"
             goal_handle.canceled()
         else:
-            self.status_string = "FAILED"
+            final_status = "FAILED"
             result.success = False
             result.finish_message = "Nav2 failed to reach goal"
             goal_handle.abort()
 
-        self.current_goal_name = "None"
-        self.distance_remaining = -1.0
-        self.nav2_goal_handle = None
-        
+        with self._goal_lock:
+            if my_seq == self._exec_seq:
+                self.status_string = final_status
+                self.current_goal_name = "None"
+                self.distance_remaining = -1.0
+                self.nav2_goal_handle = None
+                self._active_direct_goal = None
+
         return result
 
-    def nav2_feedback_callback(self, feedback_msg):
-        # Update distance remaining based on Nav2 feedback
+    def nav2_feedback_callback(self, feedback_msg, seq=None):
+        if seq is not None and seq != self._exec_seq:
+            return
         self.distance_remaining = feedback_msg.feedback.distance_remaining
-        # Also publish distance to DirectGo action feedback
-        # Wait, DirectGo is an action server, we need to access its goal_handle?
-        # Since execute_callback is managing the action, maybe we shouldn't publish DirectGo feedback here directly
-        # but just update the state, or we need to pass goal_handle.
-        # For simplicity, we just update the internal state, and let NavigationStatus broadcast it.
 
 def main(args=None):
     rclpy.init(args=args)

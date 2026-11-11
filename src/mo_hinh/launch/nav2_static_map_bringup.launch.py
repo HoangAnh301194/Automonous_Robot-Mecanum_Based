@@ -4,6 +4,7 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
+from nav2_common.launch import RewrittenYaml
 
 import os
 import glob
@@ -90,6 +91,7 @@ def generate_launch_description():
 
     default_map_yaml = resolve_path('maps', 'my_map.yaml')
     default_nav2_params = resolve_path('config', 'nav2_params.yaml')
+    default_bt_xml = resolve_path('config', 'navigate_to_pose_smart_recovery.xml')
     default_rviz_config = resolve_path('config', 'rviz.rviz')
     urdf_file = resolve_path('urdf', 'xe.urdf')
     scan_filter_config = resolve_path('config', 'scan_filter.yaml')
@@ -97,6 +99,12 @@ def generate_launch_description():
     map_yaml_file = LaunchConfiguration('map')
     nav2_params_file = LaunchConfiguration('params_file')
     rviz_config_file = LaunchConfiguration('rviz_config_file')
+
+    configured_params = RewrittenYaml(
+        source_file=nav2_params_file,
+        param_rewrites={'default_nav_to_pose_bt_xml': default_bt_xml},
+        convert_types=True,
+    )
 
     with open(urdf_file, 'r', encoding='utf-8') as f:
         robot_description = f.read()
@@ -162,7 +170,7 @@ def generate_launch_description():
         launch_arguments={
             'map': map_yaml_file,
             'use_sim_time': 'false',
-            'params_file': nav2_params_file,
+            'params_file': configured_params,
             'autostart': 'true'
         }.items()
     )
