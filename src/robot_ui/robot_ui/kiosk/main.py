@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 import threading
+from pathlib import Path
 
 import rclpy
 from PyQt5.QtCore import QLibraryInfo, Qt
