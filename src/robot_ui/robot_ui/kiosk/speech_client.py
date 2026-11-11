@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from .pronunciation import normalize_pronunciation
+
 LOG = logging.getLogger(__name__)
 
 # Default endpoints and models
@@ -115,35 +117,84 @@ def detect_language(text: str, hint: str | None = None) -> str:
 def resolve_voice_and_text(text: str, language_hint: str | None = None) -> tuple[str, str]:
     """
     Resolve (voice_id, normalized_tts_text).
-    For Vietnamese: replaces 'Souta' / 'souta' with 'Sota' for natural phonetics.
+    Applies markdown cleanup, language detection, and technical pronunciation normalization.
     """
     cleaned = clean_markdown_for_tts(text)
     lang = detect_language(cleaned, hint=language_hint)
     voice_id = VOICE_MAP.get(lang, DEFAULT_TTS_MODEL_VI)
 
-    tts_text = cleaned
-    if lang == "vi":
-        # Replace Souta -> Sota for natural Vietnamese TTS pronunciation
-        tts_text = re.sub(r"\b[Ss]outa\b", "Sota", tts_text)
-        # PTIT -> Pi-ti-ai-ti
-        tts_text = re.sub(r"\bPTIT\b", "Pi-ti-ai-ti", tts_text, flags=re.IGNORECASE)
-        # Academic titles to natural speech words
-        tts_text = re.sub(r"\b(PGS|P\.GS)\.?\s*(TS|T\.S)\.?", "Phó giáo sư Tiến sĩ", tts_text, flags=re.IGNORECASE)
-        tts_text = re.sub(r"\b(GS|G\.S)\.?\s*(TS|T\.S)\.?", "Giáo sư Tiến sĩ", tts_text, flags=re.IGNORECASE)
-        tts_text = re.sub(r"\b(PGS|P\.GS)\.?", "Phó giáo sư", tts_text, flags=re.IGNORECASE)
-        tts_text = re.sub(r"\b(GS|G\.S)\.?", "Giáo sư", tts_text, flags=re.IGNORECASE)
-        tts_text = re.sub(r"\b(TS|T\.S)\.?", "Tiến sĩ", tts_text)
-        tts_text = re.sub(r"\b(ThS|Th\.S)\.?", "Thạc sĩ", tts_text)
-        tts_text = re.sub(r"\bAI\b", "Ây-ai", tts_text)
-        tts_text = re.sub(r"\bFEE[-_]?1\b", "Khoa Điện tử 1", tts_text, flags=re.IGNORECASE)
-        tts_text = re.sub(r"\s+([,.;!?])", r"\1", tts_text)
-        tts_text = re.sub(r"\s+", " ", tts_text).strip()
+    # Normalize technical acronyms and titles according to language dictionary
+    tts_text = normalize_pronunciation(cleaned, language=lang)
 
     # Truncate text if extremely long to prevent network timeout
     if len(tts_text) > 1500:
         tts_text = tts_text[:1500].rsplit(" ", 1)[0] + "..."
 
     return voice_id, tts_text
+
+
+class SentenceSegmenter:
+    """Incremental sentence splitter with safety checks for titles, decimals, and abbreviations."""
+
+    _SENTENCE_END_RE = re.compile(r'([.!?]+(?:\s+|\n+)|[。！？])')
+    _TITLE_PREFIX_RE = re.compile(
+        r'(?:\b(?:TS|T\.S|ThS|Th\.S|PGS|P\.GS|GS|G\.S|Dr|Mr|Mrs|Ms|Prof|v\.v|etc|approx|e\.g|i\.e)\.)$',
+        re.IGNORECASE,
+    )
+    _DECIMAL_RE = re.compile(r'\b\d+\.$')
+
+    def __init__(self, min_sentence_chars: int = 5) -> None:
+        self.min_chars = min_sentence_chars
+        self._buffer = ""
+
+    def push_delta(self, delta: str) -> list[str]:
+        """Push a new text delta and return any newly completed sentences."""
+        if not delta:
+            return []
+        self._buffer += delta
+        return self._extract_sentences()
+
+    def flush(self) -> list[str]:
+        """Flush remaining text buffer as the final sentence."""
+        remaining = self._buffer.strip()
+        self._buffer = ""
+        if remaining:
+            return [remaining]
+        return []
+
+    def _extract_sentences(self) -> list[str]:
+        completed: list[str] = []
+        while True:
+            dnl = self._buffer.find("\n\n")
+            if dnl != -1 and dnl >= self.min_chars:
+                candidate = self._buffer[:dnl].strip()
+                self._buffer = self._buffer[dnl + 2:]
+                if candidate:
+                    completed.append(candidate)
+                continue
+
+            match = None
+            for m in self._SENTENCE_END_RE.finditer(self._buffer):
+                prefix = self._buffer[:m.end()].strip()
+                if self._TITLE_PREFIX_RE.search(prefix) or self._DECIMAL_RE.search(prefix):
+                    continue
+                match = m
+                break
+
+            if not match:
+                break
+
+            split_pos = match.end()
+            candidate = self._buffer[:split_pos].strip()
+            self._buffer = self._buffer[split_pos:]
+
+            if len(candidate) >= self.min_chars:
+                completed.append(candidate)
+            elif candidate:
+                self._buffer = candidate + " " + self._buffer
+                break
+
+        return completed
 
 
 def is_hallucination(text: str) -> bool:

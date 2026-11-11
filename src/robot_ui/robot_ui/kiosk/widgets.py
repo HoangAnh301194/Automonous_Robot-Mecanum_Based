@@ -806,6 +806,16 @@ class ChatPage(QWidget):
         self._typing_timer.timeout.connect(self._update_typing_dots)
         self._suggestions_widget: QWidget | None = None
 
+        # SSE Streaming Bubble support with coalesced throttling
+        self._current_streaming_row: QWidget | None = None
+        self._current_streaming_body: QLabel | None = None
+        self._current_streaming_text: str = ""
+        self._streaming_turn_id: int | None = None
+        self._stream_pending_text: str = ""
+        self._stream_throttle_timer = QTimer(self)
+        self._stream_throttle_timer.setInterval(40)
+        self._stream_throttle_timer.timeout.connect(self._on_stream_throttle_timeout)
+
         self._pulse_timer = QTimer(self)
         self._pulse_timer.timeout.connect(self._animate_listening_pulse)
         self._pulse_state = False
@@ -1145,8 +1155,8 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Đang xử lý câu hỏi...")
             self.mic_btn.setProperty("listening", "false")
-            self._stop_speaking_btn.setText("Dừng")
-            self._stop_speaking_btn.setToolTip("Hủy câu hỏi đang xử lý")
+            self._stop_speaking_btn.setText("Dừng phản hồi")
+            self._stop_speaking_btn.setToolTip("Dừng câu hỏi đang xử lý")
             self._stop_speaking_btn.show()
             self.set_status("Thinking...")
         elif state == MicState.TTS_PROCESSING:
@@ -1154,8 +1164,8 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Đang tạo giọng nói...")
             self.mic_btn.setProperty("listening", "false")
-            self._stop_speaking_btn.setText("Dừng nói")
-            self._stop_speaking_btn.setToolTip("Dừng phát âm thanh")
+            self._stop_speaking_btn.setText("Dừng")
+            self._stop_speaking_btn.setToolTip("Hủy tạo âm thanh")
             self._stop_speaking_btn.show()
             self.set_status("Đang tạo giọng nói...")
         elif state == MicState.SPEAKING:
@@ -1259,7 +1269,13 @@ class ChatPage(QWidget):
 
     def reset_conversation(self) -> None:
         self.stop_speaking()
+        self._stream_throttle_timer.stop()
         self._remove_typing_indicator()
+        self._current_streaming_row = None
+        self._current_streaming_body = None
+        self._current_streaming_text = ""
+        self._stream_pending_text = ""
+        self._streaming_turn_id = None
         while self._messages_layout.count() > 1:
             item = self._messages_layout.takeAt(0)
             if item.widget() is not None:
@@ -1302,14 +1318,102 @@ class ChatPage(QWidget):
         self._llm_status_label.style().unpolish(self._llm_status_label)
         self._llm_status_label.style().polish(self._llm_status_label)
 
+    def _create_streaming_bubble(self, sender: str) -> tuple[QWidget, QLabel]:
+        row = QWidget()
+        row.setObjectName("chatMessageRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+
+        bubble = QFrame()
+        bubble.setObjectName("robotBubble")
+        bubble.setMaximumWidth(580)
+        bubble_layout = QVBoxLayout(bubble)
+        bubble_layout.setContentsMargins(14, 10, 14, 10)
+        bubble_layout.setSpacing(4)
+
+        sender_label = QLabel(sender)
+        sender_label.setObjectName("robotBubbleSender")
+        body = QLabel("...")
+        body.setObjectName("bubbleText")
+        body.setWordWrap(True)
+        body.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        bubble_layout.addWidget(sender_label)
+        bubble_layout.addWidget(body)
+
+        row_layout.addWidget(bubble)
+        row_layout.addStretch(1)
+
+        self._messages_layout.insertWidget(self._messages_layout.count() - 1, row)
+        return row, body
+
+    def receive_stream_delta(self, session_id: int, turn_id: int, delta: str) -> None:
+        """Receive incremental SSE token from LLM, displaying smoothly with coalesce throttling."""
+        if self._current_streaming_row is None or self._streaming_turn_id != turn_id:
+            self._remove_typing_indicator()
+            row, body = self._create_streaming_bubble("Souta Robot")
+            self._current_streaming_row = row
+            self._current_streaming_body = body
+            self._current_streaming_text = ""
+            self._stream_pending_text = ""
+            self._streaming_turn_id = turn_id
+            self._stop_speaking_btn.setText("Dừng phản hồi")
+            self._stop_speaking_btn.show()
+
+        self._stream_pending_text += delta
+        if not self._stream_throttle_timer.isActive():
+            self._stream_throttle_timer.start(40)
+
+    def _on_stream_throttle_timeout(self) -> None:
+        self._stream_throttle_timer.stop()
+        if self._current_streaming_body is None:
+            return
+        self._current_streaming_text += self._stream_pending_text
+        self._stream_pending_text = ""
+        display = strip_emojis(self._current_streaming_text) or self._current_streaming_text
+        self._current_streaming_body.setText(display)
+        self.messages.verticalScrollBar().setValue(self.messages.verticalScrollBar().maximum())
+
+    def finalize_stream(self, session_id: int, turn_id: int, full_text: str, interrupted: bool = False) -> None:
+        """Finalize streamed message bubble on stream complete or user stop."""
+        self._stream_throttle_timer.stop()
+        if self._stream_pending_text:
+            self._current_streaming_text += self._stream_pending_text
+            self._stream_pending_text = ""
+        self._remove_typing_indicator()
+
+        final_content = full_text.strip() if full_text.strip() else self._current_streaming_text.strip()
+        if interrupted and final_content:
+            final_content += " (Đã dừng)"
+
+        if self._current_streaming_body is not None:
+            display = strip_emojis(final_content) or final_content
+            self._current_streaming_body.setText(display)
+        elif final_content:
+            display = strip_emojis(final_content) or final_content
+            self._add_message("Souta Robot", display)
+
+        self._current_streaming_row = None
+        self._current_streaming_body = None
+        self._current_streaming_text = ""
+        self._streaming_turn_id = None
+        self.set_busy(False)
+
     def receive_response(self, response: str) -> None:
         """Hiển thị response từ LLM và mở khóa input."""
+        if self._current_streaming_body is not None:
+            self.finalize_stream(0, 0, response, interrupted=False)
+            return
         self.set_busy(False)
         clean_text = strip_emojis(response)
         self._add_message("Souta Robot", clean_text or response)
 
     def receive_error(self, error_msg: str) -> None:
         """Hiển thị lỗi và mở khóa input."""
+        self._stream_throttle_timer.stop()
+        self._current_streaming_row = None
+        self._current_streaming_body = None
+        self._streaming_turn_id = None
         self.set_busy(False)
         clean_msg = strip_emojis(error_msg) or error_msg
         self._add_message("Souta Robot", f"Lỗi: {clean_msg}")
@@ -1328,6 +1432,9 @@ class ChatPage(QWidget):
         else:
             self._send_btn.setText("Gửi")
             self._remove_typing_indicator()
+            self.set_status("Sẵn sàng trò chuyện")
+            if self._mic_state in (MicState.READY, MicState.UNAVAILABLE):
+                self.mic_btn.setEnabled(True)
             self.set_status("Sẵn sàng trò chuyện")
             if self._mic_state in (MicState.READY, MicState.UNAVAILABLE):
                 self.mic_btn.setEnabled(True)

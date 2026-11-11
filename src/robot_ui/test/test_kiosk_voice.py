@@ -281,16 +281,18 @@ def test_chat_page_icons_and_states(app):
     page.set_mic_state(MicState.LLM_PROCESSING)
     assert not page.mic_btn.isEnabled()
     assert not page._stop_speaking_btn.isHidden()
-    assert page._stop_speaking_btn.text() == "Dừng"
+    assert page._stop_speaking_btn.text() == "Dừng phản hồi"
 
     # TTS_PROCESSING (shows stop speaking button)
     page.set_mic_state(MicState.TTS_PROCESSING)
     assert not page.mic_btn.isEnabled()
     assert not page._stop_speaking_btn.isHidden()
+    assert page._stop_speaking_btn.text() == "Dừng"
 
     # SPEAKING (shows stop speaking button)
     page.set_mic_state(MicState.SPEAKING)
     assert not page._stop_speaking_btn.isHidden()
+    assert page._stop_speaking_btn.text() == "Dừng nói"
 
     # Back to READY (hides stop speaking button)
     page.set_speaker_speaking(False)

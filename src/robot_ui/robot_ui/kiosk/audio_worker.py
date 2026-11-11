@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import threading
 import time
 from enum import Enum
@@ -10,7 +11,9 @@ from typing import Any, Callable
 
 from .audio_capture import AudioCapture
 from .audio_player import AudioPlayer
+from .llm_client import TurnContext
 from .speech_client import (
+    SentenceSegmenter,
     resolve_voice_and_text,
     synthesize_speech_9router,
     transcribe_audio_groq,
@@ -32,7 +35,7 @@ class VoiceState(Enum):
 
 
 class VoiceController:
-    """Coordinates microphone recording, Groq STT, LLM response TTS, and mpv playback."""
+    """Coordinates microphone recording, Groq STT, incremental sentence TTS, and mpv playback."""
 
     def __init__(
         self,
@@ -53,8 +56,18 @@ class VoiceController:
         self._lock = threading.Lock()
         self._session_id = 0
         self._turn_id = 0
+        self._generation_id = 0
+        self._tts_generation_id = 0
         self._state = VoiceState.READY
         self._speaker_enabled = True
+
+        # Streaming Sentence-by-Sentence TTS Queues
+        self._segmenter = SentenceSegmenter(min_sentence_chars=6)
+        self._segment_index = 0
+        self._tts_queue: queue.Queue[tuple[TurnContext, int, str, bool]] = queue.Queue(maxsize=50)
+        self._playback_queue: queue.Queue[tuple[TurnContext, int, bytes, bool]] = queue.Queue(maxsize=50)
+        self._playback_done_event = threading.Event()
+        self._shutdown_event = threading.Event()
 
         # Components
         self.capture = AudioCapture(
@@ -67,6 +80,21 @@ class VoiceController:
             on_playback_finished=self._on_playback_finished,
             on_playback_error=self._on_playback_error,
         )
+
+        # Start background workers for sentence TTS synthesis and sequential playback
+        self._tts_thread = threading.Thread(
+            target=self._tts_worker_loop,
+            name="voice-tts-worker",
+            daemon=True,
+        )
+        self._tts_thread.start()
+
+        self._playback_thread = threading.Thread(
+            target=self._playback_worker_loop,
+            name="voice-playback-worker",
+            daemon=True,
+        )
+        self._playback_thread.start()
 
     # ------------------------------------------------------------------
     # Properties
@@ -112,7 +140,7 @@ class VoiceController:
         with self._lock:
             self._speaker_enabled = enabled
         self.player.set_muted(not enabled)
-        if not enabled and self._state == VoiceState.SPEAKING:
+        if not enabled:
             self.stop_speaking()
 
     def set_volume(self, volume: int) -> None:
@@ -129,7 +157,7 @@ class VoiceController:
                 return
 
         # Stop ongoing speech before listening (half-duplex)
-        if self._state == VoiceState.SPEAKING:
+        if self._state in (VoiceState.SPEAKING, VoiceState.TTS_PROCESSING):
             self.stop_speaking()
 
         self.start_listening()
@@ -137,14 +165,16 @@ class VoiceController:
     def start_listening(self) -> bool:
         with self._lock:
             self._turn_id += 1
+            self._generation_id += 1
+            self._tts_generation_id += 1
             session_id = self._session_id
             turn_id = self._turn_id
 
+        self._clear_queues()
         self._set_state(VoiceState.LISTENING, "Đang nghe... Chạm lần nữa để gửi")
         success = self.capture.start()
         if not success:
             self._set_state(VoiceState.UNAVAILABLE, "Không tìm thấy microphone")
-            # Automatically restore to ready after 2.5s
             threading.Timer(2.5, lambda: self._restore_ready_if_state(VoiceState.UNAVAILABLE)).start()
             return False
         return True
@@ -154,55 +184,176 @@ class VoiceController:
         self.capture.stop()
 
     def stop_speaking(self) -> None:
-        """Stop current speech synthesis and mpv playback immediately."""
-        self.player.stop()
+        """Stop current speech synthesis and mpv playback immediately without losing history."""
         with self._lock:
+            self._tts_generation_id += 1
             if self._state in (VoiceState.TTS_PROCESSING, VoiceState.SPEAKING):
                 self._state = VoiceState.READY
+            sid = self._session_id
+            tid = self._turn_id
+
+        self._clear_queues()
+        self.player.stop()
+        self._playback_done_event.set()
         self._emit_state("Sẵn sàng trò chuyện")
+        if self.on_tts_finished:
+            try:
+                self.on_tts_finished(sid, tid)
+            except Exception as exc:
+                LOG.warning("Error in on_tts_finished callback: %s", exc)
 
     def reset_session(self) -> None:
         """Invalidate all in-flight STT/TTS callbacks and abort playback/capture."""
         with self._lock:
             self._session_id += 1
             self._turn_id += 1
+            self._generation_id += 1
+            self._tts_generation_id += 1
             self._state = VoiceState.READY
         self.capture.cancel()
+        self._clear_queues()
         self.player.stop()
+        self._playback_done_event.set()
         self._emit_state("Sẵn sàng trò chuyện")
 
     def notify_llm_processing(self) -> None:
         """Called when LLM begins thinking for a user query."""
+        with self._lock:
+            self._generation_id += 1
+            self._tts_generation_id += 1
+            self._segment_index = 0
+            self._segmenter = SentenceSegmenter(min_sentence_chars=6)
+        self._clear_queues()
         self._set_state(VoiceState.LLM_PROCESSING, "Đang xử lý câu hỏi...")
 
+    def handle_stream_delta(self, context: TurnContext, delta: str) -> None:
+        """Process incremental LLM delta and enqueue completed sentences for TTS synthesis."""
+        with self._lock:
+            if (
+                context.session_id != self._session_id
+                or context.generation_id != self._generation_id
+                or not self._speaker_enabled
+                or not self.tts_enabled
+            ):
+                return
+            tts_gen_id = self._tts_generation_id
+
+        ctx = TurnContext(
+            session_id=context.session_id,
+            turn_id=context.turn_id,
+            generation_id=context.generation_id,
+            tts_generation_id=tts_gen_id,
+        )
+
+        completed_sentences = self._segmenter.push_delta(delta)
+        for sentence in completed_sentences:
+            with self._lock:
+                idx = self._segment_index
+                self._segment_index += 1
+                if self._state == VoiceState.LLM_PROCESSING:
+                    self._state = VoiceState.TTS_PROCESSING
+                    self._emit_state("Đang tạo giọng nói...")
+            try:
+                self._tts_queue.put((ctx, idx, sentence, False), block=False)
+            except queue.Full:
+                LOG.warning("TTS sentence queue full, dropping sentence segment %d", idx)
+
+    def handle_stream_completed(self, context: TurnContext, full_text: str) -> None:
+        """Flush remaining text buffer as final sentence segment when LLM finishes."""
+        with self._lock:
+            if (
+                context.session_id != self._session_id
+                or context.generation_id != self._generation_id
+                or not self._speaker_enabled
+                or not self.tts_enabled
+            ):
+                return
+            tts_gen_id = self._tts_generation_id
+
+        ctx = TurnContext(
+            session_id=context.session_id,
+            turn_id=context.turn_id,
+            generation_id=context.generation_id,
+            tts_generation_id=tts_gen_id,
+        )
+
+        remaining_sentences = self._segmenter.flush()
+        if not remaining_sentences and self._segment_index == 0:
+            # Fallback if no sentences were emitted yet
+            if full_text.strip():
+                remaining_sentences = [full_text.strip()]
+
+        if not remaining_sentences:
+            # Nothing to speak
+            try:
+                self._tts_queue.put((ctx, self._segment_index, "", True), block=False)
+            except queue.Full:
+                pass
+            return
+
+        for i, sentence in enumerate(remaining_sentences):
+            with self._lock:
+                idx = self._segment_index
+                self._segment_index += 1
+                is_last = (i == len(remaining_sentences) - 1)
+                if self._state == VoiceState.LLM_PROCESSING:
+                    self._state = VoiceState.TTS_PROCESSING
+                    self._emit_state("Đang tạo giọng nói...")
+            try:
+                self._tts_queue.put((ctx, idx, sentence, is_last), block=False)
+            except queue.Full:
+                LOG.warning("TTS sentence queue full, dropping final segment %d", idx)
+
+    def handle_stream_interrupted(self, context: TurnContext) -> None:
+        """Called when LLM generation was cancelled mid-stream."""
+        self.stop_speaking()
+
     def handle_llm_response(self, session_id: int, text: str) -> None:
-        """Called when LLM returns an assistant response."""
+        """Full response fallback for non-streaming or direct text queries."""
         with self._lock:
             if session_id != self._session_id:
                 LOG.info("Discarding stale LLM response from prior session.")
                 return
-            if not self._speaker_enabled:
+            if not self._speaker_enabled or not self.tts_enabled:
                 self._state = VoiceState.READY
                 self._emit_state("Sẵn sàng trò chuyện")
                 return
             turn_id = self._turn_id
+            gen_id = self._generation_id
+            tts_gen_id = self._tts_generation_id
+            self._segment_index = 0
+            self._segmenter = SentenceSegmenter(min_sentence_chars=6)
 
-        # Trigger TTS in background thread
-        threading.Thread(
-            target=self._synthesize_and_play,
-            args=(session_id, turn_id, text),
-            name=f"tts-worker-{turn_id}",
-            daemon=True,
-        ).start()
+        ctx = TurnContext(
+            session_id=session_id,
+            turn_id=turn_id,
+            generation_id=gen_id,
+            tts_generation_id=tts_gen_id,
+        )
+        self.handle_stream_completed(ctx, text)
 
     def shutdown(self) -> None:
-        """Gracefully release all audio hardware and subprocesses."""
+        """Gracefully release all audio hardware, threads, and subprocesses."""
+        self._shutdown_event.set()
         self.capture.cancel()
+        self.stop_speaking()
         self.player.shutdown()
 
     # ------------------------------------------------------------------
     # Internal Pipeline
     # ------------------------------------------------------------------
+
+    def _clear_queues(self) -> None:
+        while not self._tts_queue.empty():
+            try:
+                self._tts_queue.get_nowait()
+            except queue.Empty:
+                break
+        while not self._playback_queue.empty():
+            try:
+                self._playback_queue.get_nowait()
+            except queue.Empty:
+                break
 
     def _set_state(self, state: VoiceState, msg: str) -> None:
         with self._lock:
@@ -225,7 +376,6 @@ class VoiceController:
             turn_id = self._turn_id
 
         self._set_state(VoiceState.STT_PROCESSING, "Đang nhận dạng giọng nói...")
-
         threading.Thread(
             target=self._transcribe_worker,
             args=(session_id, turn_id, wav_bytes),
@@ -266,66 +416,125 @@ class VoiceController:
             return
 
         LOG.info("STT transcript ready: '%s'", transcript)
-        # Notify UI to submit transcript to conversation
         if self.on_transcript_ready:
             self.on_transcript_ready(session_id, turn_id, transcript)
 
-    def _synthesize_and_play(self, session_id: int, turn_id: int, text: str) -> None:
-        self._set_state(VoiceState.TTS_PROCESSING, "Đang tạo giọng nói...")
-        if self.on_tts_started:
-            self.on_tts_started(session_id, turn_id)
+    # ------------------------------------------------------------------
+    # Background Workers for Sequential Sentence TTS and Playback
+    # ------------------------------------------------------------------
 
-        try:
-            voice_id, tts_text = resolve_voice_and_text(text)
-            audio_data = synthesize_speech_9router(
-                tts_text,
-                voice_id=voice_id,
-                base_url=self.tts_base_url,
-            )
-        except Exception as exc:
-            LOG.exception("TTS synthesis failed: %s", exc)
+    def _tts_worker_loop(self) -> None:
+        """Continuously pulls sentence text, calls Edge TTS via 9Router, and puts into playback queue."""
+        while not self._shutdown_event.is_set():
+            try:
+                ctx, seg_idx, sentence, is_last = self._tts_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
             with self._lock:
-                if session_id != self._session_id or turn_id != self._turn_id:
-                    return
-            self._set_state(VoiceState.READY, "Không thể tạo giọng nói")
-            if self.on_tts_finished:
-                self.on_tts_finished(session_id, turn_id)
-            return
+                if (
+                    ctx.session_id != self._session_id
+                    or ctx.turn_id != self._turn_id
+                    or ctx.tts_generation_id != self._tts_generation_id
+                    or not self._speaker_enabled
+                ):
+                    continue
 
-        with self._lock:
-            if session_id != self._session_id or turn_id != self._turn_id:
-                LOG.info("Discarding stale TTS audio.")
-                return
-            if not self._speaker_enabled:
-                self._state = VoiceState.READY
-                self._emit_state("Sẵn sàng trò chuyện")
-                if self.on_tts_finished:
-                    self.on_tts_finished(session_id, turn_id)
-                return
+            audio_data = b""
+            if sentence.strip():
+                try:
+                    voice_id, tts_text = resolve_voice_and_text(sentence)
+                    audio_data = synthesize_speech_9router(
+                        tts_text,
+                        voice_id=voice_id,
+                        base_url=self.tts_base_url,
+                    )
+                except Exception as exc:
+                    LOG.warning("Sentence TTS synthesis failed for segment %d: %s", seg_idx, exc)
+                    audio_data = b""
 
-        self._set_state(VoiceState.SPEAKING, "Souta đang nói...")
-        played = self.player.play(audio_data, request_id=turn_id)
-        if not played:
-            self._set_state(VoiceState.READY, "Sẵn sàng trò chuyện")
-            if self.on_tts_finished:
-                self.on_tts_finished(session_id, turn_id)
+            with self._lock:
+                if (
+                    ctx.session_id != self._session_id
+                    or ctx.turn_id != self._turn_id
+                    or ctx.tts_generation_id != self._tts_generation_id
+                    or not self._speaker_enabled
+                ):
+                    continue
+
+            self._playback_queue.put((ctx, seg_idx, audio_data, is_last))
+
+    def _playback_worker_loop(self) -> None:
+        """Pulls audio segments and plays them in strict sequential index order without overlapping."""
+        buffered: dict[int, tuple[TurnContext, bytes, bool]] = {}
+        expected_seg_idx = 0
+
+        while not self._shutdown_event.is_set():
+            try:
+                ctx, seg_idx, audio_data, is_last = self._playback_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+
+            with self._lock:
+                if (
+                    ctx.session_id != self._session_id
+                    or ctx.turn_id != self._turn_id
+                    or ctx.tts_generation_id != self._tts_generation_id
+                    or not self._speaker_enabled
+                ):
+                    buffered.clear()
+                    expected_seg_idx = 0
+                    continue
+
+            buffered[seg_idx] = (ctx, audio_data, is_last)
+
+            # Play segments strictly in sequential index order (0, 1, 2...)
+            while expected_seg_idx in buffered:
+                seg_ctx, seg_audio, seg_is_last = buffered.pop(expected_seg_idx)
+                expected_seg_idx += 1
+
+                with self._lock:
+                    if (
+                        seg_ctx.session_id != self._session_id
+                        or seg_ctx.turn_id != self._turn_id
+                        or seg_ctx.tts_generation_id != self._tts_generation_id
+                        or not self._speaker_enabled
+                    ):
+                        buffered.clear()
+                        expected_seg_idx = 0
+                        break
+
+                if seg_audio:
+                    self._playback_done_event.clear()
+                    played = self.player.play(seg_audio, request_id=seg_ctx.turn_id)
+                    if played:
+                        # Wait for this sentence to finish playing before starting next sentence
+                        self._playback_done_event.wait(timeout=30.0)
+
+                if seg_is_last:
+                    buffered.clear()
+                    expected_seg_idx = 0
+                    with self._lock:
+                        if self._state == VoiceState.SPEAKING:
+                            self._state = VoiceState.READY
+                            self._emit_state("Sẵn sàng trò chuyện")
+                    if self.on_tts_finished:
+                        self.on_tts_finished(seg_ctx.session_id, seg_ctx.turn_id)
 
     def _on_playback_started(self, request_id: int) -> None:
-        LOG.info("Playback started (turn_id=%d)", request_id)
+        """AudioPlayer actually began streaming to mpv."""
+        LOG.info("Audio playback started (turn_id=%d)", request_id)
+        with self._lock:
+            self._state = VoiceState.SPEAKING
+        self._emit_state("Souta đang nói...")
+        if self.on_tts_started:
+            self.on_tts_started(self._session_id, request_id)
 
     def _on_playback_finished(self, request_id: int) -> None:
-        LOG.info("Playback finished (turn_id=%d)", request_id)
-        with self._lock:
-            if self._state == VoiceState.SPEAKING:
-                self._state = VoiceState.READY
-        self._emit_state("Sẵn sàng trò chuyện")
-        if self.on_tts_finished:
-            self.on_tts_finished(self._session_id, request_id)
+        """mpv process finished playing current sentence."""
+        LOG.info("Audio playback finished (turn_id=%d)", request_id)
+        self._playback_done_event.set()
 
     def _on_playback_error(self, request_id: int, err_msg: str) -> None:
-        LOG.error("Playback error (turn_id=%d): %s", request_id, err_msg)
-        with self._lock:
-            self._state = VoiceState.READY
-        self._emit_state("Lỗi phát âm thanh")
-        if self.on_tts_finished:
-            self.on_tts_finished(self._session_id, request_id)
+        LOG.error("Audio playback error (turn_id=%d): %s", request_id, err_msg)
+        self._playback_done_event.set()

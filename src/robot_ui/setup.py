@@ -9,7 +9,7 @@ package_name = "robot_ui"
 data_files = [
     ("share/ament_index/resource_index/packages", ["resource/robot_ui"]),
     ("share/robot_ui", ["package.xml"]),
-    ("share/robot_ui/config", ["config/emotions.json"]),
+    ("share/robot_ui/config", ["config/emotions.json", "config/tts_pronunciation.json"]),
     ("share/robot_ui/launch", ["launch/kiosk.launch.py"]),
     (
         "share/robot_ui/souta_robot",

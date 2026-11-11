@@ -1,0 +1,96 @@
+{
+  "vi": {
+    "replacements": [
+      {
+        "pattern": "\\b(?:PGS|P\\.GS)\\.?\\s*(?:TS|T\\.S)\\.?",
+        "replacement": "Phó giáo sư Tiến sĩ",
+        "case_sensitive": false,
+        "description": "Học hàm học vị PGS.TS"
+      },
+      {
+        "pattern": "\\b(?:GS|G\\.S)\\.?\\s*(?:TS|T\\.S)\\.?",
+        "replacement": "Giáo sư Tiến sĩ",
+        "case_sensitive": false,
+        "description": "Học hàm học vị GS.TS"
+      },
+      {
+        "pattern": "\\b(?:PGS|P\\.GS)\\.?",
+        "replacement": "Phó giáo sư",
+        "case_sensitive": false,
+        "description": "Học hàm PGS"
+      },
+      {
+        "pattern": "\\b(?:GS|G\\.S)\\.?",
+        "replacement": "Giáo sư",
+        "case_sensitive": false,
+        "description": "Học hàm GS"
+      },
+      {
+        "pattern": "\\b(?:TS|T\\.S)\\.?",
+        "replacement": "Tiến sĩ",
+        "case_sensitive": true,
+        "description": "Học vị TS"
+      },
+      {
+        "pattern": "\\b(?:ThS|Th\\.S)\\.?",
+        "replacement": "Thạc sĩ",
+        "case_sensitive": true,
+        "description": "Học vị ThS"
+      },
+      {
+        "pattern": "\\bPTIT\\b",
+        "replacement": "Pi-ti-ai-ti",
+        "case_sensitive": false,
+        "description": "Học viện PTIT"
+      },
+      {
+        "pattern": "\\bFEE[-_]?1\\b",
+        "replacement": "Khoa Điện tử 1",
+        "case_sensitive": false,
+        "description": "Khoa FEE1"
+      },
+      {
+        "pattern": "\\b[Ss]outa\\b",
+        "replacement": "Sota",
+        "case_sensitive": false,
+        "description": "Tên robot Souta"
+      },
+      {
+        "pattern": "\\bIoT\\b",
+        "replacement": "ai âu ti",
+        "case_sensitive": false,
+        "description": "Thuật ngữ Internet of Things (đọc là ai âu ti, không đọc là i o tê)"
+      },
+      {
+        "pattern": "\\bAI\\b",
+        "replacement": "ây ai",
+        "case_sensitive": true,
+        "description": "Thuật ngữ Trí tuệ nhân tạo AI (in hoa để không nhầm với đại từ tiếng Việt)"
+      },
+      {
+        "pattern": "\\bAPI\\b",
+        "replacement": "ây pi ai",
+        "case_sensitive": false,
+        "description": "Giao diện lập trình ứng dụng API"
+      },
+      {
+        "pattern": "\\bCPU\\b",
+        "replacement": "xi pi iu",
+        "case_sensitive": false,
+        "description": "Bộ vi xử lý CPU"
+      },
+      {
+        "pattern": "\\bGPU\\b",
+        "replacement": "gi pi iu",
+        "case_sensitive": false,
+        "description": "Bộ xử lý đồ họa GPU"
+      },
+      {
+        "pattern": "\\bUSB\\b",
+        "replacement": "iu ét bi",
+        "case_sensitive": false,
+        "description": "Cổng kết nối USB"
+      }
+    ]
+  }
+}

@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.audio_worker import VoiceController, VoiceState
-from robot_ui.kiosk.llm_client import LLMWorker
+from robot_ui.kiosk.llm_client import LLMWorker, TurnContext
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
@@ -528,6 +528,9 @@ class KioskWindow(QMainWindow):
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         # LLM signals
         signals.llm_response_ready.connect(self._receive_llm_response)
+        signals.llm_stream_delta.connect(self._on_llm_stream_delta)
+        signals.llm_stream_completed.connect(self._on_llm_stream_completed)
+        signals.llm_stream_interrupted.connect(self._on_llm_stream_interrupted)
         signals.llm_status_changed.connect(self.chat_page.set_llm_status)
 
         # LLM worker – thread-safe callbacks emit vào signals (an toàn với Qt)
@@ -537,9 +540,21 @@ class KioskWindow(QMainWindow):
         def _on_llm_error(session_id: int, err: str) -> None:
             signals.llm_response_ready.emit(session_id, f"⚠️ {err}")
 
+        def _on_llm_stream_delta(ctx: TurnContext, delta: str) -> None:
+            signals.llm_stream_delta.emit(ctx.session_id, ctx.turn_id, delta)
+
+        def _on_llm_stream_complete(ctx: TurnContext, full_text: str) -> None:
+            signals.llm_stream_completed.emit(ctx.session_id, ctx.turn_id, full_text)
+
+        def _on_llm_stream_interrupted(ctx: TurnContext) -> None:
+            signals.llm_stream_interrupted.emit(ctx.session_id, ctx.turn_id)
+
         self._llm_worker = LLMWorker(
             on_response=_on_llm_response,
             on_error=_on_llm_error,
+            on_stream_delta=_on_llm_stream_delta,
+            on_stream_completed=_on_llm_stream_complete,
+            on_stream_interrupted=_on_llm_stream_interrupted,
         )
         self.chat_page.chat_submitted.connect(self._on_chat_submitted)
 
@@ -617,6 +632,7 @@ class KioskWindow(QMainWindow):
             self.chat_page.stop_speaking()
             self._voice_controller.stop_speaking()
             self._voice_controller.capture.cancel()
+            self._llm_worker.cancel_current_request()
 
         if track_history and self._active_page not in {"", "idle"}:
             self._page_history.append(self._active_page)
@@ -732,6 +748,7 @@ class KioskWindow(QMainWindow):
 
     def _on_chat_submitted(self, message: str) -> None:
         """Nhận tin nhắn từ ChatPage và gửi cho LLM worker."""
+        self._voice_controller.notify_llm_processing()
         self.signals.llm_status_changed.emit("●  LLM: ĐANG XỬ LÝ...")
         sent = self._llm_worker.send(
             message, robot_status=self._robot_status,
@@ -754,10 +771,30 @@ class KioskWindow(QMainWindow):
         self._voice_controller.notify_llm_processing()
         self.chat_page.submit_voice_transcript(text)
 
+    def _on_llm_stream_delta(self, session_id: int, turn_id: int, delta: str) -> None:
+        if session_id != self._llm_worker.session_id:
+            return
+        self.chat_page.receive_stream_delta(session_id, turn_id, delta)
+        ctx = TurnContext(session_id, turn_id, 0)
+        self._voice_controller.handle_stream_delta(ctx, delta)
+
+    def _on_llm_stream_completed(self, session_id: int, turn_id: int, full_text: str) -> None:
+        if session_id != self._llm_worker.session_id:
+            return
+        self.chat_page.finalize_stream(session_id, turn_id, full_text, interrupted=False)
+        self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
+        ctx = TurnContext(session_id, turn_id, 0)
+        self._voice_controller.handle_stream_completed(ctx, full_text)
+
+    def _on_llm_stream_interrupted(self, session_id: int, turn_id: int) -> None:
+        self.chat_page.finalize_stream(session_id, turn_id, "", interrupted=True)
+        ctx = TurnContext(session_id, turn_id, 0)
+        self._voice_controller.handle_stream_interrupted(ctx)
+
     def _on_stop_requested(self) -> None:
-        """Hủy xử lý câu hỏi LLM và dừng phát âm thanh ngay lập tức."""
+        """Hủy xử lý câu hỏi LLM và dừng phát âm thanh ngay lập tức mà không làm mất lịch sử Chat."""
         if self._llm_worker.is_busy:
-            self._llm_worker.reset_session()
+            self._llm_worker.cancel_current_request()
             self.chat_page.set_busy(False)
             self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
             self.chat_page.set_status("Đã dừng câu hỏi")
