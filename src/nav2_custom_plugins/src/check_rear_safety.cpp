@@ -89,7 +89,7 @@ public:
       BT::InputPort<std::string>("topic", "/rear_scan_obstacle", "Rear LaserScan topic"),
       BT::InputPort<std::string>("health_topic", "", "Rear detector health DiagnosticArray topic"),
       BT::InputPort<std::string>("robot_base_frame", "base_footprint", "Robot base frame"),
-      BT::InputPort<double>("min_distance", 0.55, "Minimum safe rear distance"),
+      BT::InputPort<double>("min_distance", 0.50, "Minimum safe rear distance"),
       BT::InputPort<double>("timeout", 0.50, "Maximum age of scan/health data in seconds"),
       BT::InputPort<bool>("require_health", true, "Require rear observability health verification")
     };
@@ -109,7 +109,7 @@ public:
 
   BT::NodeStatus tick() override
   {
-    double min_distance = 0.55;
+    double min_distance = 0.50;
     double timeout = 0.50;
     std::string robot_base_frame = "base_footprint";
     bool require_health = true;

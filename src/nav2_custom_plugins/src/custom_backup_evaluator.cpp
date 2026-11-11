@@ -340,6 +340,171 @@ BackupFailureCode mapRearReason(RearSafetyReason reason)
   }
 }
 
+StopConfirmResult evaluateStopConfirmation(
+  const nav_msgs::msg::Odometry::ConstSharedPtr & odom,
+  const rclcpp::Time & now,
+  const Pose2D & tf_pose,
+  const StopConfirmConfig & config,
+  StopConfirmState & state)
+{
+  StopConfirmResult result;
+
+  if (!state.active) {
+    state.active = true;
+    state.trigger_time = now;
+    state.has_prev_sample = false;
+    state.consecutive_stationary_cycles = 0;
+    state.distinct_odom_samples = 0;
+  }
+
+  if (!std::isfinite(tf_pose.x) || !std::isfinite(tf_pose.y) || !std::isfinite(tf_pose.yaw)) {
+    result.failed = true;
+    result.failure_code = BackupFailureCode::TF_ERROR;
+    result.detail = "tf_pose_non_finite_during_stop_confirm";
+    return result;
+  }
+
+  if (!odom) {
+    const double since_trigger = (state.trigger_time.nanoseconds() != 0) ?
+      (now - state.trigger_time).seconds() : 0.0;
+    if (!std::isfinite(since_trigger) || since_trigger > config.odom_timeout) {
+      result.failed = true;
+      result.failure_code = BackupFailureCode::SENSOR_STALE;
+      result.detail = "odom_missing_during_partial_stop";
+      return result;
+    }
+    result.detail = "waiting_for_odom_msg";
+    return result;
+  }
+
+  if (odom->header.stamp.sec == 0 && odom->header.stamp.nanosec == 0) {
+    result.failed = true;
+    result.failure_code = BackupFailureCode::SENSOR_INVALID;
+    result.detail = "odom_zero_stamp";
+    return result;
+  }
+
+  const rclcpp::Time odom_time(odom->header.stamp, now.get_clock_type());
+  result.odom_age = (now - odom_time).seconds();
+  if (!std::isfinite(result.odom_age) ||
+    result.odom_age > config.odom_timeout ||
+    result.odom_age < -config.max_future_skew)
+  {
+    result.failed = true;
+    result.failure_code = BackupFailureCode::SENSOR_STALE;
+    result.detail = "odom_stale_or_future";
+    return result;
+  }
+
+  const auto & pos = odom->pose.pose.position;
+  const auto & oq = odom->pose.pose.orientation;
+  const auto & lin = odom->twist.twist.linear;
+  const auto & ang = odom->twist.twist.angular;
+  const double q_norm = std::sqrt(oq.x * oq.x + oq.y * oq.y + oq.z * oq.z + oq.w * oq.w);
+  if (!std::isfinite(pos.x) || !std::isfinite(pos.y) ||
+    !std::isfinite(oq.x) || !std::isfinite(oq.y) ||
+    !std::isfinite(oq.z) || !std::isfinite(oq.w) || q_norm < 1e-6 ||
+    !std::isfinite(lin.x) || !std::isfinite(lin.y) || !std::isfinite(ang.z))
+  {
+    result.failed = true;
+    result.failure_code = BackupFailureCode::SENSOR_INVALID;
+    result.detail = "odom_non_finite_or_invalid_quaternion";
+    return result;
+  }
+
+  double r_tmp = 0.0;
+  double p_tmp = 0.0;
+  double odom_yaw = 0.0;
+  tf2::Matrix3x3(tf2::Quaternion(oq.x / q_norm, oq.y / q_norm, oq.z / q_norm, oq.w / q_norm))
+  .getRPY(r_tmp, p_tmp, odom_yaw);
+  const Pose2D odom_pose{pos.x, pos.y, odom_yaw};
+
+  result.linear_speed = std::hypot(lin.x, lin.y);
+  result.angular_speed = std::abs(ang.z);
+
+  if (state.trigger_time.nanoseconds() != 0 && odom_time < state.trigger_time) {
+    state.has_prev_sample = false;
+    state.consecutive_stationary_cycles = 0;
+    state.distinct_odom_samples = 0;
+    result.detail = "waiting_for_post_stop_odom";
+    return result;
+  }
+
+  if (result.linear_speed > config.linear_vel_threshold ||
+    result.angular_speed > config.angular_vel_threshold)
+  {
+    state.has_prev_sample = false;
+    state.consecutive_stationary_cycles = 0;
+    state.distinct_odom_samples = 0;
+    result.detail = "odom_twist_still_moving";
+    return result;
+  }
+
+  if (!state.has_prev_sample) {
+    state.has_prev_sample = true;
+    state.anchor_odom_pose = odom_pose;
+    state.anchor_tf_pose = tf_pose;
+    state.first_stationary_time = now;
+    state.last_odom_stamp = odom_time;
+    state.consecutive_stationary_cycles = 1;
+    state.distinct_odom_samples = 1;
+    if (config.required_consecutive_cycles <= 1 &&
+      config.required_distinct_odom_samples <= 1 &&
+      config.required_dwell_duration <= 0.0)
+    {
+      result.stopped = true;
+      result.detail = "odom_stationary_confirmed";
+    } else {
+      result.detail = "waiting_stationary_dwell_confirmation";
+    }
+    return result;
+  }
+
+  const auto normalize_angle = [](double a) -> double {
+    return std::atan2(std::sin(a), std::cos(a));
+  };
+
+  result.odom_displacement = std::hypot(
+    odom_pose.x - state.anchor_odom_pose.x, odom_pose.y - state.anchor_odom_pose.y);
+  const double odom_yaw_disp = std::abs(normalize_angle(odom_pose.yaw - state.anchor_odom_pose.yaw));
+  result.tf_displacement = std::hypot(
+    tf_pose.x - state.anchor_tf_pose.x, tf_pose.y - state.anchor_tf_pose.y);
+  const double tf_yaw_disp = std::abs(normalize_angle(tf_pose.yaw - state.anchor_tf_pose.yaw));
+
+  if (result.odom_displacement > config.pose_delta_threshold ||
+    odom_yaw_disp > config.yaw_delta_threshold ||
+    result.tf_displacement > config.pose_delta_threshold ||
+    tf_yaw_disp > config.yaw_delta_threshold)
+  {
+    state.anchor_odom_pose = odom_pose;
+    state.anchor_tf_pose = tf_pose;
+    state.first_stationary_time = now;
+    state.last_odom_stamp = odom_time;
+    state.consecutive_stationary_cycles = 1;
+    state.distinct_odom_samples = 1;
+    result.detail = "odom_or_tf_pose_still_drifting";
+    return result;
+  }
+
+  ++state.consecutive_stationary_cycles;
+  if (odom_time > state.last_odom_stamp) {
+    ++state.distinct_odom_samples;
+    state.last_odom_stamp = odom_time;
+  }
+  result.stationary_dwell = (now - state.first_stationary_time).seconds();
+
+  if (state.consecutive_stationary_cycles >= config.required_consecutive_cycles &&
+    state.distinct_odom_samples >= config.required_distinct_odom_samples &&
+    result.stationary_dwell >= config.required_dwell_duration)
+  {
+    result.stopped = true;
+    result.detail = "odom_stationary_confirmed";
+  } else {
+    result.detail = "waiting_stationary_dwell_confirmation";
+  }
+  return result;
+}
+
 CustomBackUpEvaluator::CustomBackUpEvaluator(const CustomBackUpConfig & config)
 : config_(config),
   rear_evaluator_(config.rear)
@@ -351,20 +516,30 @@ BackupEvalResult CustomBackUpEvaluator::initializeAndEvaluateStart(
   BackupSessionState & session) const
 {
   session = BackupSessionState();
-  return evaluateCommon(input, session, true);
+  return evaluateCommon(input, session, true, false);
 }
 
 BackupEvalResult CustomBackUpEvaluator::evaluateCycle(
   const BackupEvalInput & input,
   BackupSessionState & session) const
 {
-  return evaluateCommon(input, session, false);
+  return evaluateCommon(input, session, false, false);
+}
+
+BackupEvalResult CustomBackUpEvaluator::evaluatePartialStopCycle(
+  const BackupEvalInput & input,
+  BackupSessionState & session) const
+{
+  BackupEvalInput stop_in = input;
+  stop_in.remaining_dist = 0.0;
+  return evaluateCommon(stop_in, session, false, true);
 }
 
 BackupEvalResult CustomBackUpEvaluator::evaluateCommon(
   const BackupEvalInput & input,
   BackupSessionState & session,
-  bool is_start) const
+  bool is_start,
+  bool allow_rear_obstacle) const
 {
   BackupEvalResult result;
 
@@ -392,9 +567,11 @@ BackupEvalResult CustomBackUpEvaluator::evaluateCommon(
   rear_in.current_speed = input.current_speed;
   result.rear_result = rear_evaluator_.evaluate(rear_in);
   if (!result.rear_result.safe) {
-    result.failure_code = mapRearReason(result.rear_result.reason);
-    result.detail = result.rear_result.detail;
-    return result;
+    if (!allow_rear_obstacle || result.rear_result.reason != RearSafetyReason::REAR_OBSTACLE) {
+      result.failure_code = mapRearReason(result.rear_result.reason);
+      result.detail = result.rear_result.detail;
+      return result;
+    }
   }
 
   // 3. Guard against forward physical push during backup

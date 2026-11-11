@@ -74,7 +74,7 @@ def evaluate_corridor_observability(current_roi, lut, min_range, max_range,
                                     corridor_half_width=0.35,
                                     fov_check_half_angle=0.45,
                                     num_sectors=18,
-                                    min_observed_x_max=0.55,
+                                    min_observed_x_max=0.50,
                                     z_min=-2.0, z_max=2.0):
     """Evaluate actual geometric observability of the rear safety corridor."""
     curr_flat = current_roi.reshape(-1)

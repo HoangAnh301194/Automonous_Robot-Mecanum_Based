@@ -14,6 +14,7 @@ find_package(nav2_behaviors REQUIRED)
 find_package(nav2_behavior_tree REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
 find_package(nav2_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(nav2_util REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(behaviortree_cpp_v3 REQUIRED)
@@ -39,6 +40,7 @@ ament_target_dependencies(nav2_custom_backup_evaluators
   diagnostic_msgs
   geometry_msgs
   nav2_msgs
+  nav_msgs
   tf2
 )
 
@@ -85,6 +87,7 @@ ament_target_dependencies(nav2_custom_backup_behavior
   nav2_behaviors
   nav2_costmap_2d
   nav2_msgs
+  nav_msgs
   nav2_util
   pluginlib
   sensor_msgs
@@ -131,6 +134,7 @@ if(BUILD_TESTING)
       nav2_behavior_tree
       behaviortree_cpp_v3
       nav2_msgs
+      nav_msgs
       nav2_util
       pluginlib
       sensor_msgs

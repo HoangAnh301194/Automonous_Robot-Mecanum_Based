@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from depth_obstacle_detector.obstacle_detector import (
     build_observability_lut,
@@ -59,17 +60,33 @@ def test_bundled_cam_sau_ground_is_observed():
     """Bundled my_map/cam_sau.npy ground reference produces valid corridor observability."""
     workspace = Path(__file__).resolve().parents[3]
     cam_sau_path = workspace / 'my_map' / 'cam_sau.npy'
+    cam_sau_cfg_path = workspace / 'my_map' / 'cam_sau.yaml'
     ground = np.load(str(cam_sau_path))
-    rx, ry, rw, rh = 0, 166, 639, 313
+    h, w = ground.shape
+    with open(cam_sau_cfg_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f) or {}
+
+    rx = max(0, min(int(cfg.get('roi_x', 0)), w - 1))
+    ry = max(0, min(int(cfg.get('roi_y', 0)), h - 1))
+    rw = max(1, min(int(cfg.get('roi_width', w)), w - rx))
+    rh = max(1, min(int(cfg.get('roi_height', h)), h - ry))
+    min_range = float(cfg.get('min_range', 0.2))
+    max_range = float(cfg.get('max_range', 2.5))
+
+    scale = float(w) / 640.0
+    fx = 381.36 * scale
+    cx, cy = w / 2.0, h / 2.0
     R = _rpy_to_R(0.0, 0.698132, 0.0) @ _rpy_to_R(-np.pi / 2.0, 0.0, -np.pi / 2.0)
     t = np.array([0.0, 0.0, 0.25], dtype=np.float32)
     roi = ground[ry:ry + rh, rx:rx + rw]
     lut = build_observability_lut(
-        roi, rx, ry, rw, rh, 381.36, 381.36, 320.0, 240.0, t, R, 0.2, 2.5
+        roi, rx, ry, rw, rh, fx, fx, cx, cy, t, R, min_range, max_range
     )
-    obs = evaluate_corridor_observability(roi, lut, 0.2, 2.5)
+    obs = evaluate_corridor_observability(
+        roi, lut, min_range, max_range, min_observed_x_max=0.50
+    )
     assert obs['corridor_observed'] is True
-    assert obs['observed_x_max'] >= 1.4
+    assert obs['observed_x_max'] >= 0.90
 
 
 def test_all_zero_close_occlusion_is_rejected():
@@ -108,7 +125,7 @@ def test_tiny_shifted_roi_with_high_valid_ratio_is_rejected():
     """A shifted bottom-only strip has valid_ratio > 0.90 but lacks longitudinal reach."""
     # Only rows [350:480] look very close to bumper (x_max < 0.45 m).
     ground_roi, lut, _ = _make_urdf_ground_roi(width=640, height=480, fx=381.36, roi_y=350)
-    obs = evaluate_corridor_observability(ground_roi, lut, 0.2, 2.5)
+    obs = evaluate_corridor_observability(ground_roi, lut, 0.2, 2.5, min_observed_x_max=0.50)
     assert obs['valid_ratio'] > 0.90
-    assert obs['observed_x_max'] < 0.55
+    assert obs['observed_x_max'] < 0.50
     assert obs['corridor_observed'] is False

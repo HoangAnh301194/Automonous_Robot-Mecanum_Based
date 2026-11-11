@@ -62,11 +62,15 @@ void CustomBackUp::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, p + "rear_health_topic", rclcpp::ParameterValue(std::string("")));
   nav2_util::declare_parameter_if_not_declared(
-    node, p + "min_distance", rclcpp::ParameterValue(0.55));
+    node, p + "odom_topic", rclcpp::ParameterValue(std::string("/odom")));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "min_distance", rclcpp::ParameterValue(0.50));
   nav2_util::declare_parameter_if_not_declared(
     node, p + "rear_scan_timeout", rclcpp::ParameterValue(0.50));
   nav2_util::declare_parameter_if_not_declared(
     node, p + "rear_health_timeout", rclcpp::ParameterValue(0.50));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "odom_timeout", rclcpp::ParameterValue(0.50));
   nav2_util::declare_parameter_if_not_declared(
     node, p + "costmap_timeout", rclcpp::ParameterValue(2.5));
   nav2_util::declare_parameter_if_not_declared(
@@ -83,6 +87,20 @@ void CustomBackUp::onConfigure()
     node, p + "max_backup_distance", rclcpp::ParameterValue(2.0));
   nav2_util::declare_parameter_if_not_declared(
     node, p + "max_backup_speed", rclcpp::ParameterValue(0.5));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "partial_success_min_distance", rclcpp::ParameterValue(0.08));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_linear_vel_threshold", rclcpp::ParameterValue(0.02));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_angular_vel_threshold", rclcpp::ParameterValue(0.05));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_pose_delta_threshold", rclcpp::ParameterValue(0.003));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_yaw_delta_threshold", rclcpp::ParameterValue(0.015));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_confirm_cycles", rclcpp::ParameterValue(static_cast<int64_t>(2)));
+  nav2_util::declare_parameter_if_not_declared(
+    node, p + "stop_confirm_duration", rclcpp::ParameterValue(0.08));
   nav2_util::declare_parameter_if_not_declared(
     node, p + "rear_stop_margin", rclcpp::ParameterValue(0.05));
   nav2_util::declare_parameter_if_not_declared(
@@ -104,17 +122,19 @@ void CustomBackUp::onConfigure()
   nav2_util::declare_parameter_if_not_declared(
     node, p + "min_sector_coverage_ratio", rclcpp::ParameterValue(0.70));
   nav2_util::declare_parameter_if_not_declared(
-    node, p + "min_required_x_max", rclcpp::ParameterValue(0.55));
+    node, p + "min_required_x_max", rclcpp::ParameterValue(0.50));
 
   node->get_parameter(p + "rear_scan_topic", rear_scan_topic_);
   node->get_parameter(p + "rear_health_topic", rear_health_topic_);
   if (rear_health_topic_.empty()) {
     rear_health_topic_ = rear_scan_topic_ + "/health";
   }
+  node->get_parameter(p + "odom_topic", odom_topic_);
 
   node->get_parameter(p + "min_distance", eval_config_.rear.min_distance);
   node->get_parameter(p + "rear_scan_timeout", eval_config_.rear.scan_timeout);
   node->get_parameter(p + "rear_health_timeout", eval_config_.rear.health_timeout);
+  node->get_parameter(p + "odom_timeout", eval_config_.stop_confirm.odom_timeout);
   node->get_parameter(p + "costmap_timeout", eval_config_.costmap_timeout);
   node->get_parameter(p + "footprint_timeout", eval_config_.footprint_timeout);
   node->get_parameter(p + "require_rear_health", eval_config_.rear.require_health);
@@ -123,6 +143,21 @@ void CustomBackUp::onConfigure()
   node->get_parameter(p + "minimum_speed", minimum_speed_);
   node->get_parameter(p + "max_backup_distance", max_backup_distance_);
   node->get_parameter(p + "max_backup_speed", max_backup_speed_);
+  node->get_parameter(p + "partial_success_min_distance", partial_success_min_distance_);
+  node->get_parameter(
+    p + "stop_linear_vel_threshold", eval_config_.stop_confirm.linear_vel_threshold);
+  node->get_parameter(
+    p + "stop_angular_vel_threshold", eval_config_.stop_confirm.angular_vel_threshold);
+  node->get_parameter(
+    p + "stop_pose_delta_threshold", eval_config_.stop_confirm.pose_delta_threshold);
+  node->get_parameter(
+    p + "stop_yaw_delta_threshold", eval_config_.stop_confirm.yaw_delta_threshold);
+  int64_t stop_cycles = 2;
+  node->get_parameter(p + "stop_confirm_cycles", stop_cycles);
+  eval_config_.stop_confirm.required_consecutive_cycles =
+    static_cast<int>(std::max<int64_t>(1, stop_cycles));
+  node->get_parameter(
+    p + "stop_confirm_duration", eval_config_.stop_confirm.required_dwell_duration);
   node->get_parameter(p + "rear_stop_margin", eval_config_.rear_stop_margin);
   node->get_parameter(p + "rear_corner_lateral_margin", eval_config_.rear_corner_lateral_margin);
   node->get_parameter(p + "front_overlap_min_x", eval_config_.front_overlap_min_x);
@@ -143,6 +178,7 @@ void CustomBackUp::onConfigure()
   eval_config_.expected_costmap_frame = local_frame_;
   acceleration_limit_ = std::abs(acceleration_limit_);
   deceleration_limit_ = -std::abs(deceleration_limit_);
+  partial_success_min_distance_ = std::max(0.0, partial_success_min_distance_);
 
   evaluator_ = std::make_unique<CustomBackUpEvaluator>(eval_config_);
 
@@ -166,11 +202,16 @@ void CustomBackUp::onConfigure()
     rclcpp::QoS(rclcpp::KeepLast(10)),
     std::bind(&CustomBackUp::rearHealthCallback, this, std::placeholders::_1));
 
+  odom_sub_ = node->create_subscription<nav_msgs::msg::Odometry>(
+    odom_topic_,
+    rclcpp::SensorDataQoS(),
+    std::bind(&CustomBackUp::odomCallback, this, std::placeholders::_1));
+
   RCLCPP_DEBUG(
     this->logger_,
-    "[CUSTOM_BACKUP] Configured frame=%s costmap=%s footprint=%s rear_scan=%s rear_health=%s",
+    "[CUSTOM_BACKUP] Configured frame=%s costmap=%s footprint=%s rear_scan=%s rear_health=%s odom=%s",
     local_frame_.c_str(), local_costmap_topic_.c_str(), local_footprint_topic_.c_str(),
-    rear_scan_topic_.c_str(), rear_health_topic_.c_str());
+    rear_scan_topic_.c_str(), rear_health_topic_.c_str(), odom_topic_.c_str());
 }
 
 void CustomBackUp::onCleanup()
@@ -179,17 +220,21 @@ void CustomBackUp::onCleanup()
   local_footprint_sub_.reset();
   rear_scan_sub_.reset();
   rear_health_sub_.reset();
+  odom_sub_.reset();
 
   std::lock_guard<std::mutex> lock(data_mutex_);
   latest_costmap_.reset();
   latest_footprint_.reset();
   latest_rear_scan_.reset();
   latest_rear_health_.reset();
+  latest_odom_.reset();
 
   last_vel_ = std::numeric_limits<double>::max();
   motion_started_ = false;
   completed_or_failed_ = false;
+  pending_partial_stop_ = false;
   session_ = BackupSessionState();
+  stop_state_ = StopConfirmState();
 }
 
 void CustomBackUp::costmapCallback(const nav2_msgs::msg::Costmap::SharedPtr msg)
@@ -214,6 +259,12 @@ void CustomBackUp::rearHealthCallback(const diagnostic_msgs::msg::DiagnosticArra
 {
   std::lock_guard<std::mutex> lock(data_mutex_);
   latest_rear_health_ = msg;
+}
+
+void CustomBackUp::odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
+{
+  std::lock_guard<std::mutex> lock(data_mutex_);
+  latest_odom_ = msg;
 }
 
 bool CustomBackUp::populateCurrentPose(Pose2D & pose_out)
@@ -388,9 +439,11 @@ nav2_behaviors::Status CustomBackUp::onRun(
 {
   completed_or_failed_ = false;
   motion_started_ = false;
+  pending_partial_stop_ = false;
   last_traveled_dist_ = 0.0;
   last_vel_ = std::numeric_limits<double>::max();
   session_ = BackupSessionState();
+  stop_state_ = StopConfirmState();
 
   if (!command) {
     logFailedOnce(BackupFailureCode::INVALID_GOAL, 0.0, "null_goal");
@@ -501,6 +554,77 @@ nav2_behaviors::Status CustomBackUp::onCycleUpdate()
   feedback_->distance_traveled = static_cast<float>(distance);
   this->action_server_->publish_feedback(feedback_);
 
+  if (pending_partial_stop_) {
+    this->stopRobot();
+    last_vel_ = 0.0;
+
+    nav_msgs::msg::Odometry::ConstSharedPtr odom_msg;
+    {
+      std::lock_guard<std::mutex> lock(data_mutex_);
+      odom_msg = latest_odom_;
+    }
+
+    double measured_speed = 0.0;
+    if (odom_msg &&
+      std::isfinite(odom_msg->twist.twist.linear.x) &&
+      std::isfinite(odom_msg->twist.twist.linear.y))
+    {
+      measured_speed = std::hypot(
+        odom_msg->twist.twist.linear.x, odom_msg->twist.twist.linear.y);
+    }
+
+    BackupEvalInput partial_in = buildEvalInput(
+      0.0, traveled_signed, measured_speed, now, pose_ok, current_pose);
+    const BackupEvalResult partial_res =
+      evaluator_->evaluatePartialStopCycle(partial_in, session_);
+    if (!partial_res.safe) {
+      RCLCPP_WARN(
+        this->logger_, "[CUSTOM_BACKUP] SAFETY_STOP reason=%s dist=%.3fm",
+        toString(partial_res.failure_code), distance);
+      logFailedOnce(partial_res.failure_code, distance, partial_res.detail);
+      return nav2_behaviors::Status::FAILED;
+    }
+
+    const StopConfirmResult stop_res = evaluateStopConfirmation(
+      odom_msg, now, current_pose, eval_config_.stop_confirm, stop_state_);
+
+    RCLCPP_DEBUG_THROTTLE(
+      this->logger_, *this->clock_, 500,
+      "[CUSTOM_BACKUP] PartialStop dist=%.3fm stopped=%s failed=%s detail=%s v=%.3fm/s",
+      distance, stop_res.stopped ? "true" : "false",
+      stop_res.failed ? "true" : "false", stop_res.detail.c_str(), stop_res.linear_speed);
+
+    if (stop_res.failed) {
+      RCLCPP_WARN(
+        this->logger_, "[CUSTOM_BACKUP] SAFETY_STOP reason=%s dist=%.3fm",
+        toString(stop_res.failure_code), distance);
+      logFailedOnce(stop_res.failure_code, distance, stop_res.detail);
+      return nav2_behaviors::Status::FAILED;
+    }
+
+    if (!stop_res.stopped) {
+      return nav2_behaviors::Status::RUNNING;
+    }
+
+    if (distance < partial_success_min_distance_) {
+      RCLCPP_WARN(
+        this->logger_, "[CUSTOM_BACKUP] SAFETY_STOP reason=%s dist=%.3fm",
+        toString(BackupFailureCode::REAR_OBSTACLE), distance);
+      logFailedOnce(
+        BackupFailureCode::REAR_OBSTACLE, distance,
+        "stopped_below_partial_success_min_distance");
+      return nav2_behaviors::Status::FAILED;
+    }
+
+    completed_or_failed_ = true;
+    pending_partial_stop_ = false;
+    RCLCPP_INFO(
+      this->logger_,
+      "[CUSTOM_BACKUP] PARTIAL_SUCCESS reason=REAR_OBSTACLE dist=%.3fm",
+      distance);
+    return nav2_behaviors::Status::SUCCEEDED;
+  }
+
   if (distance >= target_dist_) {
     this->stopRobot();
     const double elapsed = (now - start_time_).seconds();
@@ -548,6 +672,33 @@ nav2_behaviors::Status CustomBackUp::onCycleUpdate()
 
   if (!cycle_res.safe) {
     this->stopRobot();
+    if (cycle_res.failure_code == BackupFailureCode::REAR_OBSTACLE &&
+      distance >= partial_success_min_distance_)
+    {
+      BackupEvalInput partial_in = eval_in;
+      partial_in.remaining_dist = 0.0;
+      const BackupEvalResult partial_res =
+        evaluator_->evaluatePartialStopCycle(partial_in, session_);
+      if (!partial_res.safe) {
+        RCLCPP_WARN(
+          this->logger_, "[CUSTOM_BACKUP] SAFETY_STOP reason=%s dist=%.3fm",
+          toString(partial_res.failure_code), distance);
+        logFailedOnce(partial_res.failure_code, distance, partial_res.detail);
+        return nav2_behaviors::Status::FAILED;
+      }
+
+      last_vel_ = 0.0;
+      pending_partial_stop_ = true;
+      stop_state_ = StopConfirmState();
+      stop_state_.active = true;
+      stop_state_.trigger_time = now;
+      RCLCPP_DEBUG(
+        this->logger_,
+        "[CUSTOM_BACKUP] Rear obstacle at dist=%.3fm >= %.2fm; stopping and awaiting odometry confirmation",
+        distance, partial_success_min_distance_);
+      return nav2_behaviors::Status::RUNNING;
+    }
+
     RCLCPP_WARN(
       this->logger_, "[CUSTOM_BACKUP] SAFETY_STOP reason=%s dist=%.3fm",
       toString(cycle_res.failure_code), distance);
@@ -567,7 +718,9 @@ void CustomBackUp::onActionCompletion()
   }
   last_vel_ = std::numeric_limits<double>::max();
   motion_started_ = false;
+  pending_partial_stop_ = false;
   session_ = BackupSessionState();
+  stop_state_ = StopConfirmState();
 }
 
 }  // namespace nav2_custom_plugins

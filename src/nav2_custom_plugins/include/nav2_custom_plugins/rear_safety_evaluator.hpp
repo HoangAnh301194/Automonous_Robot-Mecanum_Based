@@ -25,7 +25,7 @@ const char * toString(RearSafetyReason reason);
 
 struct RearSafetyConfig
 {
-  double min_distance{0.55};
+  double min_distance{0.50};
   double scan_timeout{0.50};
   double health_timeout{0.50};
   double max_scan_health_skew{0.35};
@@ -52,7 +52,7 @@ struct RearSafetyConfig
   double max_observed_y_min{-0.24};
   double min_observed_y_max{0.24};
   double max_observed_x_min{0.50};
-  double min_required_x_max{0.55};
+  double min_required_x_max{0.50};
   double max_required_reach{1.20};
 };
 

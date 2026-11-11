@@ -46,24 +46,28 @@
               <!-- Nhánh thực hiện lùi -->
               <Sequence name="ExecuteBackUp">
                 <!-- Bước 4: Kiểm tra an toàn trước khi thông báo -->
-                <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.55" timeout="0.50"/>
+                <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.50" timeout="0.50"/>
                 
                 <OperatorAlert code="PRE_BACKUP" message="Robot chuẩn bị lùi. Vui lòng giữ khoảng cách."/>
                 <Speak message="Robot sẽ lùi lại một chút."/>
                 
-                <!-- Bước 5: Thực hiện lùi và giám sát liên tục -->
-                <ReactiveSequence name="SafeBackUp">
-                  <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.55" timeout="0.50"/>
-                  <!-- Không xóa local costmap ở đây để BackUp vẫn còn dữ liệu vật cản tổng thể -->
-                  <BackUp server_name="custom_backup" backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
-                </ReactiveSequence>
+                <!-- Bước 5: CustomBackUp tự giám sát an toàn phía sau liên tục và quyết định Partial Success -->
+                <!-- Không xóa local costmap ở đây để BackUp vẫn còn dữ liệu vật cản tổng thể -->
+                <BackUp server_name="custom_backup" backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
                 
-                <!-- Hoàn thành lùi an toàn, dọn dẹp để thử lập kế hoạch lại -->
+                <!-- Hoàn thành lùi (đủ 0.30m hoặc Partial Success >= 0.08m), chuyển sang Replanning -->
                 <OperatorAlert code="REPLANNING" message="Đang tính toán lại đường đi."/>
-                <Sequence name="ClearBothCostmaps">
-                  <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
-                  <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
-                </Sequence>
+                <Fallback name="ConditionalClearBeforeReplanning">
+                  <Sequence name="ClearBothCostmapsWhenRearSafe">
+                    <!-- Sau Partial Success khi vẫn còn vật cản phía sau, không xóa costmap để giữ thông tin vật cản -->
+                    <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.50" timeout="0.50"/>
+                    <Sequence name="ClearBothCostmaps">
+                      <ClearEntireCostmap name="ClearLocal" service_name="local_costmap/clear_entirely_local_costmap"/>
+                      <ClearEntireCostmap name="ClearGlobal" service_name="global_costmap/clear_entirely_global_costmap"/>
+                    </Sequence>
+                  </Sequence>
+                  <AlwaysSuccess/>
+                </Fallback>
               </Sequence>
               
               <!-- Nhánh thất bại (không đủ an toàn hoặc quá trình lùi gặp lỗi) -->

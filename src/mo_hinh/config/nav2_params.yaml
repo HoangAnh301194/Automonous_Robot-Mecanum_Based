@@ -380,7 +380,9 @@ behavior_server:
       plugin: "nav2_custom_plugins/CustomBackUp"
       rear_scan_topic: "/rear_scan_obstacle"
       rear_health_topic: "/rear_scan_obstacle/health"
-      min_distance: 0.55
+      odom_topic: "/odom"
+      min_distance: 0.50
+      partial_success_min_distance: 0.08
       rear_scan_timeout: 0.50
       rear_health_timeout: 0.50
       costmap_timeout: 2.5

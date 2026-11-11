@@ -293,18 +293,6 @@ RearSafetyResult RearSafetyEvaluator::evaluate(const RearSafetyInput & input) co
     }
   }
 
-  // Always block immediately on a detected obstacle inside the rear corridor clearance
-  if (result.finite_count > 0 &&
-    result.min_bumper_clearance <= result.required_bumper_clearance)
-  {
-    std::ostringstream oss;
-    oss << "obstacle_bumper_clearance=" << result.min_bumper_clearance
-        << "<=req=" << result.required_bumper_clearance;
-    result.reason = RearSafetyReason::REAR_OBSTACLE;
-    result.detail = oss.str();
-    return result;
-  }
-
   const int total_rays = static_cast<int>(scan.ranges.size());
   const double invalid_ratio = static_cast<double>(result.invalid_count) /
     static_cast<double>(std::max(1, total_rays));
@@ -314,6 +302,8 @@ RearSafetyResult RearSafetyEvaluator::evaluate(const RearSafetyInput & input) co
     return result;
   }
 
+  bool health_parsed_ok = false;
+  ParsedRearHealth health;
   if (config_.require_health) {
     if (!input.health) {
       result.reason = RearSafetyReason::SENSOR_STALE;
@@ -321,7 +311,7 @@ RearSafetyResult RearSafetyEvaluator::evaluate(const RearSafetyInput & input) co
       return result;
     }
 
-    const ParsedRearHealth health = parseHealth(*input.health);
+    health = parseHealth(*input.health);
     if (!health.has_status || !health.valid) {
       result.reason = RearSafetyReason::SENSOR_INVALID;
       result.detail = "rear_health_malformed_or_incomplete";
@@ -353,10 +343,31 @@ RearSafetyResult RearSafetyEvaluator::evaluate(const RearSafetyInput & input) co
     }
 
     result.corridor_observed = health.corridor_observed;
-    if (health.level != diagnostic_msgs::msg::DiagnosticStatus::OK ||
-      !health.camera_ok || !health.tf_ok || !health.ground_ok ||
-      !health.corridor_observed)
+    if (!health.camera_ok || !health.tf_ok || !health.ground_ok ||
+      (health.level != diagnostic_msgs::msg::DiagnosticStatus::OK &&
+      health.level != diagnostic_msgs::msg::DiagnosticStatus::WARN))
     {
+      result.reason = RearSafetyReason::SENSOR_INVALID;
+      result.detail = "rear_camera_tf_or_ground_unhealthy";
+      return result;
+    }
+    health_parsed_ok = true;
+  }
+
+  // Block on a detected obstacle inside the rear corridor clearance once sensor/TF health are verified
+  if (result.finite_count > 0 &&
+    result.min_bumper_clearance <= result.required_bumper_clearance)
+  {
+    std::ostringstream oss;
+    oss << "obstacle_bumper_clearance=" << result.min_bumper_clearance
+        << "<=req=" << result.required_bumper_clearance;
+    result.reason = RearSafetyReason::REAR_OBSTACLE;
+    result.detail = oss.str();
+    return result;
+  }
+
+  if (config_.require_health && health_parsed_ok) {
+    if (health.level != diagnostic_msgs::msg::DiagnosticStatus::OK || !health.corridor_observed) {
       result.reason = RearSafetyReason::SENSOR_INVALID;
       result.detail = "rear_camera_unhealthy_or_corridor_unobserved";
       return result;

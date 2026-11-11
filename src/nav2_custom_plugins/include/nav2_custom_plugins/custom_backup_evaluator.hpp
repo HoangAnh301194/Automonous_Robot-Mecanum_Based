@@ -9,6 +9,7 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "nav2_custom_plugins/rear_safety_evaluator.hpp"
 #include "nav2_msgs/msg/costmap.hpp"
+#include "nav_msgs/msg/odometry.hpp"
 #include "rclcpp/time.hpp"
 
 namespace nav2_custom_plugins
@@ -39,6 +40,53 @@ struct Pose2D
   double yaw{0.0};
 };
 
+struct StopConfirmConfig
+{
+  double odom_timeout{0.50};
+  double max_future_skew{0.25};
+  double linear_vel_threshold{0.02};
+  double angular_vel_threshold{0.05};
+  double pose_delta_threshold{0.003};
+  double yaw_delta_threshold{0.015};
+  int required_consecutive_cycles{2};
+  int required_distinct_odom_samples{2};
+  double required_dwell_duration{0.08};
+};
+
+struct StopConfirmState
+{
+  bool active{false};
+  rclcpp::Time trigger_time{0, 0, RCL_ROS_TIME};
+  bool has_prev_sample{false};
+  Pose2D anchor_odom_pose;
+  Pose2D anchor_tf_pose;
+  rclcpp::Time first_stationary_time{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_odom_stamp{0, 0, RCL_ROS_TIME};
+  int consecutive_stationary_cycles{0};
+  int distinct_odom_samples{0};
+};
+
+struct StopConfirmResult
+{
+  bool stopped{false};
+  bool failed{false};
+  BackupFailureCode failure_code{BackupFailureCode::NONE};
+  std::string detail;
+  double odom_age{0.0};
+  double linear_speed{0.0};
+  double angular_speed{0.0};
+  double odom_displacement{0.0};
+  double tf_displacement{0.0};
+  double stationary_dwell{0.0};
+};
+
+StopConfirmResult evaluateStopConfirmation(
+  const nav_msgs::msg::Odometry::ConstSharedPtr & odom,
+  const rclcpp::Time & now,
+  const Pose2D & tf_pose,
+  const StopConfirmConfig & config,
+  StopConfirmState & state);
+
 struct CustomBackUpConfig
 {
   double costmap_timeout{2.5};
@@ -59,6 +107,7 @@ struct CustomBackUpConfig
   double max_forward_push_m{0.04};
 
   RearSafetyConfig rear;
+  StopConfirmConfig stop_confirm;
 };
 
 struct BackupSessionState
@@ -117,13 +166,18 @@ public:
     const BackupEvalInput & input,
     BackupSessionState & session) const;
 
+  BackupEvalResult evaluatePartialStopCycle(
+    const BackupEvalInput & input,
+    BackupSessionState & session) const;
+
   const CustomBackUpConfig & config() const {return config_;}
 
 private:
   BackupEvalResult evaluateCommon(
     const BackupEvalInput & input,
     BackupSessionState & session,
-    bool is_start) const;
+    bool is_start,
+    bool allow_rear_obstacle = false) const;
 
   CustomBackUpConfig config_;
   RearSafetyEvaluator rear_evaluator_;
