@@ -10,6 +10,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.llm_client import LLMWorker
+from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, WelcomePage
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
 from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, NavigationPage
@@ -297,12 +298,21 @@ class KioskWindow(QMainWindow):
         self._robot_status: dict[str, Any] = {}
         self._navigation_status: dict[str, Any] = {}
         self._connected = False
-        self._active_page = "home"
+        self._active_page = "idle"
+        self._admin_authenticated = False
+        # Prototype PIN; override via KIOSK_ADMIN_PIN before deployment.
+        self._admin_pin = os.getenv("KIOSK_ADMIN_PIN", "1")
+        try:
+            self._admin_idle_timeout_seconds = max(
+                30, int(os.getenv("KIOSK_ADMIN_IDLE_SECONDS", "90"))
+            )
+        except ValueError:
+            self._admin_idle_timeout_seconds = 90
         self._robot_status_received_at: float | None = None
         try:
-            self._idle_timeout_seconds = max(30, int(os.getenv("KIOSK_IDLE_TIMEOUT_SECONDS", "180")))
+            self._idle_timeout_seconds = max(30, int(os.getenv("KIOSK_IDLE_TIMEOUT_SECONDS", "120")))
         except ValueError:
-            self._idle_timeout_seconds = 180
+            self._idle_timeout_seconds = 120
         self._last_activity_at = time.monotonic()
 
         self.setWindowTitle("Robot Assistant")
@@ -312,7 +322,19 @@ class KioskWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         self.stack = QStackedWidget(central)
-        self.home_page = HomePage()
+        self.idle_page = HomePage()
+        # Idle must show only the animated Mochi face, without telemetry/menu.
+        self.idle_page.battery_label.hide()
+        self.home_page = WelcomePage(
+            background=icon_path("background.jpg"),
+            ptit=icon_path("logoPtit.jpg"),
+            faculty=icon_path("fee1.jpeg"),
+            chat=icon_path("chatIcon.png"),
+        )
+        self.admin_page = AdminPage(
+            nav_icon=icon_path("navigationIcon.png"),
+            slam_icon=icon_path("SLAMicon.png"),
+        )
         self.navigation_page = NavigationPage(
             {
                 "home": icon_path("homeIcon.png"),
@@ -324,9 +346,11 @@ class KioskWindow(QMainWindow):
         )
         self.chat_page = ChatPage(icon_path("chatIcon.png"))
         self.pages = {
+            "idle": self.idle_page,
             "home": self.home_page,
-            "navigation": self.navigation_page,
             "chat": self.chat_page,
+            "admin": self.admin_page,
+            "navigation": self.navigation_page,
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
@@ -334,13 +358,16 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation = BottomNavigation(
             {
                 "home": icon_path("homeIcon.png"),
-                "navigation": icon_path("locolization.png"),
-                "chat": icon_path("chatIcon.png"),
+                "settings": icon_path("setting_icon.jpeg"),
             },
             central,
         )
-        self.bottom_navigation.page_requested.connect(self.show_page)
-        self.navigation_page.home_requested.connect(lambda: self.show_page("home"))
+        self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
+        self.home_page.chat_requested.connect(lambda: self.show_page("chat"))
+        self.chat_page.home_requested.connect(lambda: self.show_page("home"))
+        self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
+        self.admin_page.logout_requested.connect(self._logout_admin)
+        self.navigation_page.home_requested.connect(lambda: self.show_page("admin"))
         self.navigation_page.start_requested.connect(self.ros_node.navigate_to_pose)
         self.navigation_page.cancel_requested.connect(self.ros_node.cancel_navigation)
 
@@ -370,10 +397,10 @@ class KioskWindow(QMainWindow):
         )
         self.chat_page.chat_submitted.connect(self._on_chat_submitted)
 
-        self.home_page.video.set_display_scale(self.emotions.display_scale)
-        self.home_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        self.home_page.video.set_video(self.emotions.path("idle"))
-        self.show_page("home")
+        self.idle_page.video.set_display_scale(self.emotions.display_scale)
+        self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
+        self.idle_page.video.set_video(self.emotions.path("idle"))
+        self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)
         self._session_timer = QTimer(self)
@@ -396,38 +423,72 @@ class KioskWindow(QMainWindow):
         super().resizeEvent(event)
 
     def show_page(self, page_id: str) -> None:
+        """State-based route guard; protected pages are never guest-accessible."""
         page = self.pages.get(page_id)
         if page is None:
             return
+        if page_id in {"admin", "navigation"} and not self._admin_authenticated:
+            self.get_logger_or_warning("Blocked unauthorized admin navigation")
+            return
+        if page_id == "idle" or (
+            page_id == "home" and self._active_page in {"admin", "navigation"}
+        ):
+            self._admin_authenticated = False
         self._active_page = page_id
         self.stack.setCurrentWidget(page)
-        self.bottom_navigation.setVisible(page_id != "navigation")
-        self.bottom_navigation.set_dark_background(page_id in {"home", "chat"})
-        self.bottom_navigation.set_active(page_id)
+        self.bottom_navigation.setVisible(page_id == "home")
+        self.bottom_navigation.set_dark_background(True)
+        self.bottom_navigation.set_active("home")
         if self.bottom_navigation.isVisible():
             self.bottom_navigation.raise_()
-        if page_id == "home":
-            self.home_page.video.start()
+        if page_id == "idle":
+            self.idle_page.video.start()
             self._update_emotion()
         else:
-            self.home_page.video.pause()
+            self.idle_page.video.pause()
         if page_id == "navigation":
             self.ros_node.request_locations()
 
+    def get_logger_or_warning(self, message: str) -> None:
+        # The UI is a Qt window; log through the existing ROS adapter.
+        self.ros_node.get_logger().warn(message)
+
+    def _on_bottom_navigation(self, target: str) -> None:
+        if target == "settings":
+            self._request_admin_login()
+        elif target == "home":
+            self.show_page("home")
+
+    def _request_admin_login(self) -> None:
+        dialog = AdminPinDialog(self._admin_pin, self)
+        if dialog.exec_() == AdminPinDialog.Accepted:
+            self._admin_authenticated = True
+            self._last_activity_at = time.monotonic()
+            self.show_page("admin")
+        else:
+            self.bottom_navigation.set_active("home")
+
+    def _logout_admin(self) -> None:
+        self._admin_authenticated = False
+        self.show_page("home")
+
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
+        self.admin_page.set_connection(connected)
         self._update_emotion()
 
     def _on_robot_status(self, status: dict[str, Any]) -> None:
         self._robot_status = status
         self._robot_status_received_at = time.monotonic()
-        self.home_page.set_robot_status(status)
+        self.idle_page.set_robot_status(status)
+        self.admin_page.set_robot_status(status)
         self.navigation_page.set_robot_status(status)
         self._update_emotion()
 
     def _on_navigation_status(self, status: dict[str, Any]) -> None:
         self._navigation_status = status
         self.navigation_page.set_navigation_status(status)
+        self.admin_page.set_navigation_status(status)
         self._update_emotion()
 
     def _on_chat_submitted(self, message: str) -> None:
@@ -448,24 +509,43 @@ class KioskWindow(QMainWindow):
         self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
 
     def eventFilter(self, watched: Any, event: QEvent) -> bool:
-        if event.type() in (
+        input_events = (
             QEvent.MouseButtonPress, QEvent.KeyPress,
             QEvent.TouchBegin, QEvent.Wheel,
-        ):
+        )
+        if event.type() in input_events:
             self._last_activity_at = time.monotonic()
+            # Only consume taps within this kiosk (not other Qt windows).
+            if self._active_page == "idle" and event.type() in (
+                QEvent.MouseButtonPress, QEvent.TouchBegin,
+            ):
+                if isinstance(watched, QWidget) and (
+                    watched is self or self.isAncestorOf(watched)
+                ):
+                    self.show_page("home")
+                    return True
         return super().eventFilter(watched, event)
 
     def _expire_idle_session(self) -> None:
-        if time.monotonic() - self._last_activity_at < self._idle_timeout_seconds:
+        if self._active_page == "idle":
+            return
+        timeout = (
+            self._admin_idle_timeout_seconds
+            if self._active_page in {"admin", "navigation"}
+            else self._idle_timeout_seconds
+        )
+        if time.monotonic() - self._last_activity_at < timeout:
             return
         self._last_activity_at = time.monotonic()
+        self._admin_authenticated = False
         self._llm_worker.reset_session()
         self.chat_page.reset_conversation()
         self.signals.llm_status_changed.emit("LLM: ĐÃ LÀM MỚI PHIÊN")
-        self.show_page("home")
+        # UI timeout only: never cancel an ongoing robot mission/navigation.
+        self.show_page("idle")
 
     def _update_emotion(self) -> None:
-        if self._active_page != "home":
+        if self._active_page != "idle":
             return
         robot_state = str(self._robot_status.get("robot_state", "IDLE")).upper()
         nav_state = str(self._navigation_status.get("status", "IDLE")).upper()
@@ -483,7 +563,7 @@ class KioskWindow(QMainWindow):
             emotion = "navigating"
         else:
             emotion = "idle"
-        self.home_page.video.set_video(self.emotions.path(emotion))
+        self.idle_page.video.set_video(self.emotions.path(emotion))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key_Escape:
@@ -494,5 +574,5 @@ class KioskWindow(QMainWindow):
     def closeEvent(self, event: Any) -> None:
         QApplication.instance().removeEventFilter(self)
         self._llm_worker.reset_session()
-        self.home_page.video.stop()
+        self.idle_page.video.stop()
         super().closeEvent(event)
