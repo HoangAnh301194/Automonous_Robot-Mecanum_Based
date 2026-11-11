@@ -34,7 +34,10 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "llm_env_file",
                 default_value=os.environ.get(
-                    "KIOSK_LLM_ENV_FILE", "~/ros2_ws/config/llm.local.env"
+                    "KIOSK_LLM_ENV_FILE",
+                    "config/llm.local.env"
+                    if os.path.isfile("config/llm.local.env")
+                    else "~/ros2_ws/config/llm.local.env",
                 ),
                 description="Local 9router config file loaded by the kiosk process.",
             ),

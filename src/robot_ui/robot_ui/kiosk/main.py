@@ -48,7 +48,12 @@ def parse_args(arguments: list[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--llm-env-file",
-        default=os.environ.get("KIOSK_LLM_ENV_FILE", "~/ros2_ws/config/llm.local.env"),
+        default=os.environ.get(
+            "KIOSK_LLM_ENV_FILE",
+            "config/llm.local.env"
+            if os.path.isfile("config/llm.local.env")
+            else "~/ros2_ws/config/llm.local.env",
+        ),
         help="Local 9router settings file; read before importing the chatbot.",
     )
     parser.add_argument(

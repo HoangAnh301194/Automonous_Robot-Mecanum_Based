@@ -28,10 +28,11 @@ map widget, Nav2 action client and LLM worker remain unchanged.
 The SLAM icon is displayed as an **informational future module**, not an
 executable SLAM button.
 
-## Run on Jetson Orin
+## Run on Jetson Orin / Local Machine
 
 ```bash
-cd ~/ros2_ws
+# Di chuyển vào thư mục workspace (trên Jetson hoặc máy local)
+cd <đường_dẫn_workspace>  # ví dụ: cd ~/ros2_ws hoặc cd /path/to/repo
 git fetch origin
 git switch simulator_interface  # if absent: git switch --track origin/simulator_interface
 git pull --ff-only origin simulator_interface
@@ -93,6 +94,6 @@ use a strong PIN / secret storage and consider local OS access control.
 Offscreen GUI smoke tests:
 
 ```bash
-QT_QPA_PLATFORM=offscreen python3 -m pytest \
+PYTHONPATH=src/robot_ui QT_QPA_PLATFORM=offscreen python3 -m pytest \
   src/robot_ui/test/test_kiosk_interface.py -q
 ```

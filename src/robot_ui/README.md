@@ -7,7 +7,8 @@ Giao diện PyQt5 gồm **Home, Navigation, Chatbot (9router + RAG)**.
 ## 1. Chuẩn bị (sau khi cập nhật code)
 
 ```bash
-cd ~/ros2_ws
+# Mở terminal tại thư mục gốc workspace (trên Jetson hoặc máy local)
+cd <đường_dẫn_workspace>  # ví dụ: cd ~/ros2_ws hoặc cd /path/to/repo
 git switch simulator
 git pull --ff-only origin simulator
 source /opt/ros/humble/setup.bash
@@ -15,7 +16,7 @@ colcon build --symlink-install --packages-up-to robot_ui robot_bringup mo_hinh
 source install/setup.bash
 ```
 
-File cấu hình riêng trên Jetson: `~/ros2_ws/config/llm.local.env`
+File cấu hình riêng: `config/llm.local.env` (tại thư mục workspace hoặc `~/ros2_ws/config/llm.local.env`):
 
 ```dotenv
 LLM_BASE_URL=http://127.0.0.1:20128/v1
@@ -35,7 +36,7 @@ không thể khởi động server từ xa.
 **Terminal 1 — GUI v3 (mở trước):**
 
 ```bash
-cd ~/ros2_ws
+cd <đường_dẫn_workspace>
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 python3 src/gui_v3.py
@@ -47,8 +48,9 @@ Layer 1, Layer 2, Nav2 theo nhu cầu.
 **Terminal 2 — Backend:**
 
 ```bash
+cd <đường_dẫn_workspace>
 source /opt/ros/humble/setup.bash
-source ~/ros2_ws/install/setup.bash
+source install/setup.bash
 ros2 launch robot_bringup backend.launch.py
 ```
 
