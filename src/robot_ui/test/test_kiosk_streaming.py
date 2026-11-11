@@ -295,3 +295,35 @@ def test_llm_worker_does_not_duplicate_response_callback():
     assert completed_called[0] == "Chào bạn."
     assert len(response_called) == 0  # No duplicate callback when stream_completed is provided
 
+
+def test_voice_controller_handles_chat_text_input_stream():
+    """Verify that when a turn is submitted via text, streaming TTS is not blocked by turn_id/generation_id."""
+    started_turns = []
+    finished_turns = []
+
+    vc = VoiceController(
+        on_tts_started=lambda s, t: started_turns.append((s, t)),
+        on_tts_finished=lambda s, t: finished_turns.append((s, t)),
+    )
+
+    fake_wav = b"RIFF....WAVEfmt ...."
+    with patch("robot_ui.kiosk.audio_worker.synthesize_speech_9router", return_value=fake_wav):
+        with patch.object(vc.player, "play", return_value=True):
+            # User submits text query in ChatPage
+            vc.notify_llm_processing(session_id=0)
+
+            # LLM streaming arrives with turn_id=1 (higher than vc._turn_id=0) and generation_id
+            ctx = TurnContext(session_id=0, turn_id=1, generation_id=vc.generation_id)
+            vc.handle_stream_delta(ctx, "Xin chào bạn, ")
+            vc.handle_stream_completed(ctx, "Xin chào bạn, tôi là robot.")
+            time.sleep(0.1)
+
+            assert vc.state in (VoiceState.TTS_PROCESSING, VoiceState.SPEAKING)
+
+            vc.stop_speaking()
+            assert vc.state == VoiceState.READY
+            assert len(finished_turns) >= 1
+
+    vc.shutdown()
+
+

@@ -111,6 +111,11 @@ class VoiceController:
             return self._turn_id
 
     @property
+    def generation_id(self) -> int:
+        with self._lock:
+            return self._generation_id
+
+    @property
     def state(self) -> VoiceState:
         with self._lock:
             return self._state
@@ -216,9 +221,13 @@ class VoiceController:
         self._playback_done_event.set()
         self._emit_state("Sẵn sàng trò chuyện")
 
-    def notify_llm_processing(self) -> None:
+    def notify_llm_processing(self, session_id: int | None = None, turn_id: int | None = None) -> None:
         """Called when LLM begins thinking for a user query."""
         with self._lock:
+            if session_id is not None:
+                self._session_id = session_id
+            if turn_id is not None:
+                self._turn_id = turn_id
             self._generation_id += 1
             self._tts_generation_id += 1
             self._segment_index = 0
@@ -231,11 +240,13 @@ class VoiceController:
         with self._lock:
             if (
                 context.session_id != self._session_id
-                or context.generation_id != self._generation_id
                 or not self._speaker_enabled
                 or not self.tts_enabled
             ):
                 return
+            if context.generation_id > 0 and context.generation_id != self._generation_id:
+                return
+            self._turn_id = context.turn_id
             tts_gen_id = self._tts_generation_id
 
         ctx = TurnContext(
@@ -263,11 +274,13 @@ class VoiceController:
         with self._lock:
             if (
                 context.session_id != self._session_id
-                or context.generation_id != self._generation_id
                 or not self._speaker_enabled
                 or not self.tts_enabled
             ):
                 return
+            if context.generation_id > 0 and context.generation_id != self._generation_id:
+                return
+            self._turn_id = context.turn_id
             tts_gen_id = self._tts_generation_id
 
         ctx = TurnContext(
@@ -434,7 +447,6 @@ class VoiceController:
             with self._lock:
                 if (
                     ctx.session_id != self._session_id
-                    or ctx.turn_id != self._turn_id
                     or ctx.tts_generation_id != self._tts_generation_id
                     or not self._speaker_enabled
                 ):
@@ -456,7 +468,6 @@ class VoiceController:
             with self._lock:
                 if (
                     ctx.session_id != self._session_id
-                    or ctx.turn_id != self._turn_id
                     or ctx.tts_generation_id != self._tts_generation_id
                     or not self._speaker_enabled
                 ):
@@ -478,7 +489,6 @@ class VoiceController:
             with self._lock:
                 if (
                     ctx.session_id != self._session_id
-                    or ctx.turn_id != self._turn_id
                     or ctx.tts_generation_id != self._tts_generation_id
                     or not self._speaker_enabled
                 ):
@@ -496,7 +506,6 @@ class VoiceController:
                 with self._lock:
                     if (
                         seg_ctx.session_id != self._session_id
-                        or seg_ctx.turn_id != self._turn_id
                         or seg_ctx.tts_generation_id != self._tts_generation_id
                         or not self._speaker_enabled
                     ):
