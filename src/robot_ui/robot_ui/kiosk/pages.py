@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QImageReader, QLinearGradient, QPainter, QPixmap
+from PyQt5.QtGui import QBrush, QColor, QIcon, QImageReader, QLinearGradient, QPainter, QPixmap
 from PyQt5.QtWidgets import (
     QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QVBoxLayout, QWidget,
@@ -110,7 +110,7 @@ class WelcomePage(QWidget):
         gradient.setColorAt(0, QColor(3, 10, 17, 190))
         gradient.setColorAt(0.6, QColor(3, 10, 17, 100))
         gradient.setColorAt(1, QColor(3, 10, 17, 200))
-        p.fillRect(self.rect(), gradient)
+        p.fillRect(self.rect(), QBrush(gradient))
 
 
 class AdminPinDialog(QDialog):
