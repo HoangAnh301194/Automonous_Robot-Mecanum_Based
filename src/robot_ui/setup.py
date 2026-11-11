@@ -21,6 +21,13 @@ data_files = [
             "emotion_dasaimochi/location.png",
             "emotion_dasaimochi/startNavigation.png",
             "emotion_dasaimochi/stopNavigation.png",
+            # Branded Home, Settings and future admin navigation icons.
+            "emotion_dasaimochi/background.jpg",
+            "emotion_dasaimochi/logoPtit.jpg",
+            "emotion_dasaimochi/fee1.jpeg",
+            "emotion_dasaimochi/setting_icon.jpeg",
+            "emotion_dasaimochi/SLAMicon.png",
+            "emotion_dasaimochi/navigationIcon.png",
         ],
     ),
     (
