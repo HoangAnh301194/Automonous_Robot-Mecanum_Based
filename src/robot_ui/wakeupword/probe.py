@@ -21,15 +21,15 @@ DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "keywords.json"
 
 # Fallback definitions for backward-compatibility with tests & direct imports
 MODEL_DIRS = {
-    "vi_sota_oi": "vosk-model-small-vn-0.4",
-    "en_hey_souta": "vosk-model-small-en-us-0.15",
-    "ja_soutakun": "vosk-model-small-ja-0.22",
+    "vi_maica": "vosk-model-small-vn-0.4",
+    "en_maica": "vosk-model-small-en-us-0.15",
+    "ja_maica": "vosk-model-small-ja-0.22",
 }
 
 ALIASES = {
-    "vi_sota_oi": ["sota ơi", "souta ơi"],
-    "en_hey_souta": ["hey souta", "hey sota"],
-    "ja_soutakun": ["そうたくん", "そうた君", "ソウタクン"],
+    "vi_maica": ["maica"],
+    "en_maica": ["maica"],
+    "ja_maica": ["まいか", "マイカ"],
 }
 
 
@@ -283,7 +283,7 @@ def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: 
                         }, ensure_ascii=False), flush=True)
                     if time.monotonic() >= next_allowed and match_wake_phrase(transcript, name, aliases):
                         print(json.dumps({
-                            "event": "wake_detected", "keyword": name,
+                            "event": "wake_detected", "keyword": "maica", "detector": name,
                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         }), flush=True)
                         next_allowed = time.monotonic() + cooldown
