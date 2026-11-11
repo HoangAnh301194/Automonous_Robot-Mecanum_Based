@@ -743,7 +743,15 @@ class RosInterface(Node):
             elif self.cancel_through_poses_client.wait_for_service(timeout_sec=0.2):
                 self.cancel_through_poses_client.call_async(req)
 
-        self.log("✅ Đã phanh xe và gửi lệnh CancelGoal tới Nav2.")
+        # 4. Tạm dừng tuần tra Behavior Tree nếu Mission Controller đang chạy
+        if hasattr(self, 'cli_pause_patrol') and self.cli_pause_patrol is not None:
+            req_pause = Trigger.Request()
+            if self.cli_pause_patrol.service_is_ready():
+                self.cli_pause_patrol.call_async(req_pause)
+            elif self.cli_pause_patrol.wait_for_service(timeout_sec=0.2):
+                self.cli_pause_patrol.call_async(req_pause)
+
+        self.log("✅ Đã phanh xe, gửi lệnh CancelGoal tới Nav2 và Tạm dừng tuần tra.")
         return True
 
 

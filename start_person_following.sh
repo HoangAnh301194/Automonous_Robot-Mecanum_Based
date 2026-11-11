@@ -12,7 +12,12 @@ fi
 source /opt/ros/humble/setup.bash
 source "$WS/install/setup.bash"
 
-PERSON_MODEL="${PERSON_MODEL:-yolo11n.engine}"
+if [[ -f "$WS/yolo11n.engine" ]]; then
+  DEFAULT_PERSON_MODEL="$WS/yolo11n.engine"
+else
+  DEFAULT_PERSON_MODEL="yolo11n.engine"
+fi
+PERSON_MODEL="${PERSON_MODEL:-$DEFAULT_PERSON_MODEL}"
 YOLO_DEVICE="${YOLO_DEVICE:-cuda:0}"
 YOLO_THRESHOLD="${YOLO_THRESHOLD:-0.35}"
 YOLO_IMGSZ_HEIGHT="${YOLO_IMGSZ_HEIGHT:-384}"

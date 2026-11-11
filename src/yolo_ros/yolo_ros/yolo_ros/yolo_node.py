@@ -1,4 +1,6 @@
+import os
 import time
+from pathlib import Path
 from typing import List, Dict
 from cv_bridge import CvBridge
 
@@ -176,6 +178,34 @@ class YoloNode(LifecycleNode):
 
         return TransitionCallbackReturn.SUCCESS
 
+    def _resolve_model_path(self, model_name: str) -> str:
+        """Resolve model path dynamically if given as a relative path."""
+        p = Path(model_name)
+        if p.is_absolute() and p.exists():
+            return str(p)
+
+        # 1. Check relative to current working directory
+        if p.exists():
+            return str(p.resolve())
+
+        # 2. Check workspace root via package share directory (ament index)
+        try:
+            from ament_index_python.packages import get_package_share_directory
+            pkg_share = Path(get_package_share_directory("yolo_ros"))
+            ws_root = pkg_share.resolve().parents[3]
+            candidate = ws_root / model_name
+            if candidate.exists():
+                return str(candidate)
+        except Exception:
+            pass
+
+        # 3. Check ~/.ros or ~/ros2_ws
+        candidate_ws = Path.home() / "ros2_ws" / model_name
+        if candidate_ws.exists():
+            return str(candidate_ws)
+
+        return model_name
+
     def on_activate(self, state: LifecycleState) -> TransitionCallbackReturn:
         """
         Activate lifecycle callback.
@@ -187,18 +217,20 @@ class YoloNode(LifecycleNode):
         """
         self.get_logger().info(f"[{self.get_name()}] Activating...")
 
+        model_path = self._resolve_model_path(self.model)
+
         try:
-            self.get_logger().info(f"Loading model: {self.model}")
-            if 'pose' in self.model:
-                self.yolo = self.type_to_model[self.model_type](self.model, task='pose')
+            self.get_logger().info(f"Loading model: {model_path}")
+            if 'pose' in model_path:
+                self.yolo = self.type_to_model[self.model_type](model_path, task='pose')
             else:
-                self.yolo = self.type_to_model[self.model_type](self.model)
-            if self.model.endswith('.pt'):
+                self.yolo = self.type_to_model[self.model_type](model_path)
+            if model_path.endswith('.pt'):
                 self.get_logger().info("Moving model to device...")
                 self.yolo.to(self.device)
             self.get_logger().info("Model loaded successfully.")
         except FileNotFoundError:
-            self.get_logger().error(f"Model file '{self.model}' does not exists")
+            self.get_logger().error(f"Model file '{model_path}' does not exists")
             return TransitionCallbackReturn.ERROR
 
         # YOLOE does not support fusing

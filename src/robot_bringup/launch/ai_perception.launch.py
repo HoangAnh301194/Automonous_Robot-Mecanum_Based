@@ -20,6 +20,8 @@ def generate_launch_description():
     ws_root = Path(robot_bringup_dir).resolve().parents[3]
     default_front_cfg = str(ws_root / 'my_map' / 'cam_truoc.yaml')
     default_rear_cfg = str(ws_root / 'my_map' / 'cam_sau.yaml')
+    candidate_engine = ws_root / 'yolo11n.engine'
+    default_yolo_model = str(candidate_engine) if candidate_engine.exists() else 'yolo11n.engine'
 
     enable_cameras = LaunchConfiguration('enable_cameras')
     enable_obstacle_detectors = LaunchConfiguration('enable_obstacle_detectors')
@@ -143,7 +145,7 @@ def generate_launch_description():
         DeclareLaunchArgument('front_obstacle_config', default_value=default_front_cfg),
         DeclareLaunchArgument('rear_obstacle_config', default_value=default_rear_cfg),
         DeclareLaunchArgument('obstacle_debug', default_value='false'),
-        DeclareLaunchArgument('yolo_model', default_value='yolo11n.engine'),
+        DeclareLaunchArgument('yolo_model', default_value=default_yolo_model),
         DeclareLaunchArgument('yolo_device', default_value='cuda:0'),
         DeclareLaunchArgument('pose_backend', default_value='rtmpose'),
         DeclareLaunchArgument('pose_device', default_value='cpu'),
