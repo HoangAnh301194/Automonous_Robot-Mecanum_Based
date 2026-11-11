@@ -325,13 +325,28 @@ QPushButton#chatSendButton:disabled {
     background: #28241b;
 }
 QLabel#llmStatus {
+    color: #4ae1a1;
+    background: #111a14;
+    border: 1px solid #1e3827;
+    border-radius: 9px;
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 700;
+}
+QLabel#llmStatus[state="busy"] {
     color: #ffb32c;
     background: #1d1810;
-    border: 1px solid #4b3b20;
-    border-radius: 10px;
-    padding: 5px 9px;
-    font-size: 10px;
-    font-weight: 700;
+    border-color: #4b3b20;
+}
+QLabel#llmStatus[state="offline"] {
+    color: #888888;
+    background: #161616;
+    border-color: #2a2a2a;
+}
+QLabel#llmStatus[state="error"] {
+    color: #ff667d;
+    background: #261115;
+    border-color: #5a1d28;
 }
 QFrame#chatConversation {
     background: #080808;

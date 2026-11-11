@@ -681,6 +681,12 @@ class ChatPage(QWidget):
 
         header_layout.addStretch(1)
 
+        # LLM Status badge (compact & basic in top-right)
+        self._llm_status_label = QLabel("● LLM")
+        self._llm_status_label.setObjectName("llmStatus")
+        self._llm_status_label.setToolTip("Trạng thái AI LLM")
+        header_layout.addWidget(self._llm_status_label)
+
         # Stop speaking button (hidden unless speaking)
         self._stop_speaking_btn = QPushButton("Dừng nói")
         self._stop_speaking_btn.setObjectName("chatStopSpeakingButton")
@@ -858,7 +864,7 @@ class ChatPage(QWidget):
 
         sender_label = QLabel("Souta Robot")
         sender_label.setObjectName("robotBubbleSender")
-        self._typing_label = QLabel("Souta đang trả lời.")
+        self._typing_label = QLabel("Thinking.")
         self._typing_label.setObjectName("typingText")
         bubble_layout.addWidget(sender_label)
         bubble_layout.addWidget(self._typing_label)
@@ -875,7 +881,7 @@ class ChatPage(QWidget):
         if self._typing_bubble is not None and hasattr(self, "_typing_label"):
             self._typing_dots = (self._typing_dots % 3) + 1
             dots = "." * self._typing_dots
-            self._typing_label.setText(f"Souta đang trả lời{dots}")
+            self._typing_label.setText(f"Thinking{dots}")
 
     def _remove_typing_indicator(self) -> None:
         self._typing_timer.stop()
@@ -928,7 +934,7 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Đang xử lý câu hỏi...")
             self.mic_btn.setProperty("listening", "false")
-            self.set_status("Đang xử lý...")
+            self.set_status("Thinking...")
         elif state == MicState.ERROR:
             self.mic_btn.setIcon(self._get_icon("mic_off"))
             self.mic_btn.setEnabled(False)
@@ -997,22 +1003,38 @@ class ChatPage(QWidget):
         self.input.clear()
         self.set_mic_state(MicState.UNAVAILABLE)
         self.set_status("Sẵn sàng trò chuyện")
+        self._llm_status_label.setText("● LLM")
+        self._llm_status_label.setProperty("state", "ready")
         self._add_message("Souta Robot", "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
         self._add_suggestions()
 
     def set_llm_status(self, status: str) -> None:
         """Ghi log kỹ thuật và cập nhật UI thân thiện cho khách."""
         print(f"[robot_ui] LLM status: {status}", flush=True)
+        self._llm_status_label.setToolTip(f"Trạng thái: {status}")
         if "ĐANG XỬ LÝ" in status:
-            self.set_status("Đang xử lý...")
+            self._llm_status_label.setText("● LLM...")
+            self._llm_status_label.setProperty("state", "busy")
+            self.set_status("Thinking...")
             self.set_mic_state(MicState.LLM_PROCESSING)
         elif "LỖI" in status or "⚠️" in status:
+            self._llm_status_label.setText("⚠ LLM")
+            self._llm_status_label.setProperty("state", "error")
             self.set_status(status)
+        elif "CHƯA KẾT NỐI" in status or "OFFLINE" in status:
+            self._llm_status_label.setText("○ LLM")
+            self._llm_status_label.setProperty("state", "offline")
+            if not self._is_speaking and self._mic_state != MicState.LISTENING:
+                self.set_status("Chưa kết nối LLM")
         else:
+            self._llm_status_label.setText("● LLM")
+            self._llm_status_label.setProperty("state", "ready")
             if not self._is_speaking and self._mic_state != MicState.LISTENING:
                 self.set_status("Sẵn sàng trò chuyện")
             if self._mic_state == MicState.LLM_PROCESSING:
                 self.set_mic_state(MicState.UNAVAILABLE)
+        self._llm_status_label.style().unpolish(self._llm_status_label)
+        self._llm_status_label.style().polish(self._llm_status_label)
 
     def receive_response(self, response: str) -> None:
         """Hiển thị response từ LLM và mở khóa input."""
@@ -1031,7 +1053,7 @@ class ChatPage(QWidget):
         self._send_btn.setEnabled(not busy)
         if busy:
             self._send_btn.setText("...")
-            self.set_status("Đang xử lý...")
+            self.set_status("Thinking...")
             self._show_typing_indicator()
             if self._mic_state in (MicState.READY, MicState.UNAVAILABLE):
                 self.mic_btn.setEnabled(False)

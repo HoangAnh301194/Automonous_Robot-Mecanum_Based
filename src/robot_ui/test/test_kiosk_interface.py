@@ -179,6 +179,10 @@ def test_chat_page_widgets_and_object_names(app):
     assert subtitle is not None
     assert subtitle.text() == "Sẵn sàng trò chuyện"
 
+    llm_badge = page.findChild(QLabel, "llmStatus")
+    assert llm_badge is not None
+    assert "LLM" in llm_badge.text()
+
     speaker = page.findChild(QPushButton, "chatSpeakerButton")
     assert speaker is not None
     assert speaker.width() == 48
@@ -263,7 +267,7 @@ def test_chat_page_mic_states(app):
     # LLM_PROCESSING
     page.set_mic_state(MicState.LLM_PROCESSING)
     assert not page.mic_btn.isEnabled()
-    assert page._status_label.text() == "Đang xử lý..."
+    assert page._status_label.text() == "Thinking..."
 
     # ERROR
     page.set_mic_state(MicState.ERROR)
@@ -328,6 +332,7 @@ def test_chat_page_typing_indicator_and_busy_lock(app):
     assert not page._send_btn.isEnabled()
     assert page._send_btn.text() == "..."
     assert page._typing_bubble is not None
+    assert "Thinking" in page._typing_label.text()
     assert page._typing_timer.isActive()
 
     # Attempting to double-send does nothing
