@@ -157,3 +157,30 @@ def test_navigation_sequence_token_concurrency():
     if current_exec_seq == 2:
         callback_processed = True
     assert callback_processed is True
+
+
+def test_dynamic_target_tracking_displacement_logic():
+    """Verify displacement calculation and freeze distance gating for dynamic re-planning."""
+    from geometry_msgs.msg import PoseStamped
+    from robot_mission_control.bt_nodes import ActionApproachWavingPerson
+
+    action = ActionApproachWavingPerson("TestApproach", node=None)
+    action.min_displacement = 0.40
+    action.freeze_distance = 1.40
+
+    pose1 = PoseStamped()
+    pose1.pose.position.x = 2.0
+    pose1.pose.position.y = 1.0
+    action.last_goal_pose = pose1
+
+    # Small displacement (0.2m) -> should NOT trigger re-planning
+    pose_small = PoseStamped()
+    pose_small.pose.position.x = 2.1
+    pose_small.pose.position.y = 1.1
+    assert action._is_significant_displacement(pose_small) is False
+
+    # Significant displacement (0.5m) -> should trigger re-planning
+    pose_large = PoseStamped()
+    pose_large.pose.position.x = 2.4
+    pose_large.pose.position.y = 1.3
+    assert action._is_significant_displacement(pose_large) is True

@@ -43,6 +43,7 @@ class MissionControllerNode(Node):
         self.blackboard.set('HAND_WAVE_ACTIVE', False)
         self.blackboard.set('APPROACH_ACTIVE', False)
         self.blackboard.set('WAVING_PERSON', None)
+        self.blackboard.set('TARGET_TRACK_ID', None)
         self.blackboard.set('PERSON_IN_PATH', False)
         self.blackboard.set('ENCOUNTER_ACTIVE', False)
         self.blackboard.set('IS_SERVING', False)
@@ -141,6 +142,7 @@ class MissionControllerNode(Node):
         self.blackboard.set('ENCOUNTER_ACTIVE', False)
         self.blackboard.set('APPROACH_ACTIVE', False)
         self.blackboard.set('HAND_WAVE_ACTIVE', False)
+        self.blackboard.set('TARGET_TRACK_ID', None)
         self.blackboard.set('IS_SERVING', True)
 
     def cb_tracked_people(self, msg: TrackedPersonArray):
@@ -150,13 +152,25 @@ class MissionControllerNode(Node):
         has_blocking = False
         has_preview = self.blackboard.get('PERSON_PREVIEW_MAP_POSE', None) is not None
 
+        is_approaching = self.blackboard.get('APPROACH_ACTIVE', False)
+        target_track_id = self.blackboard.get('TARGET_TRACK_ID', None)
+        target_person_found = False
+
         for p in msg.people:
             pos_valid = (
                 bool(getattr(p, 'position_valid', True))
                 and math.isfinite(p.position.x)
                 and math.isfinite(p.position.y)
             )
-            if p.is_waving and p.wave_valid and (pos_valid or has_preview):
+
+            # 1. Khi đang tiếp cận: ưu tiên bám theo target_track_id (kể cả khi người đã hạ tay)
+            if is_approaching and target_track_id is not None and str(getattr(p, 'track_id', '')) == str(target_track_id) and pos_valid:
+                target_person_found = True
+                waving_person = p
+                has_waving = True
+
+            # 2. Khi chưa tiếp cận: phát hiện người vẫy tay mới
+            if not is_approaching and p.is_waving and p.wave_valid and (pos_valid or has_preview):
                 if waving_person is None or (pos_valid and not getattr(waving_person, 'position_valid', False)):
                     has_waving = True
                     waving_person = p
@@ -167,17 +181,27 @@ class MissionControllerNode(Node):
                     has_blocking = True
 
         now_mono = time.monotonic()
-        if has_waving:
-            self._last_wave_seen_at = now_mono
-            self.blackboard.set('HAND_WAVE_ACTIVE', True)
-            self.blackboard.set('WAVING_PERSON', waving_person)
-        elif (
-            self.blackboard.get('HAND_WAVE_ACTIVE', False)
-            and not self.blackboard.get('APPROACH_ACTIVE', False)
-            and (now_mono - self._last_wave_seen_at) >= self._wave_timeout_sec
-        ):
-            self.blackboard.set('HAND_WAVE_ACTIVE', False)
-            self.blackboard.set('WAVING_PERSON', None)
+        if is_approaching:
+            if target_person_found:
+                self._last_wave_seen_at = now_mono
+                self.blackboard.set('HAND_WAVE_ACTIVE', True)
+                self.blackboard.set('WAVING_PERSON', waving_person)
+            # Nếu người tạm thời khuất tầm nhìn, giữ nguyên WAVING_PERSON và HAND_WAVE_ACTIVE cũ
+            # để xe không bị hủy đột ngột mà tiếp tục chạy theo vị trí đã biết
+        else:
+            if has_waving:
+                self._last_wave_seen_at = now_mono
+                self.blackboard.set('HAND_WAVE_ACTIVE', True)
+                self.blackboard.set('WAVING_PERSON', waving_person)
+                if waving_person is not None and hasattr(waving_person, 'track_id'):
+                    self.blackboard.set('TARGET_TRACK_ID', str(waving_person.track_id))
+            elif (
+                self.blackboard.get('HAND_WAVE_ACTIVE', False)
+                and (now_mono - self._last_wave_seen_at) >= self._wave_timeout_sec
+            ):
+                self.blackboard.set('HAND_WAVE_ACTIVE', False)
+                self.blackboard.set('WAVING_PERSON', None)
+                self.blackboard.set('TARGET_TRACK_ID', None)
 
         now = time.time()
         if has_blocking:
@@ -338,6 +362,7 @@ class MissionControllerNode(Node):
         ):
             self.blackboard.set('HAND_WAVE_ACTIVE', False)
             self.blackboard.set('WAVING_PERSON', None)
+            self.blackboard.set('TARGET_TRACK_ID', None)
         self.tree.tick(self.blackboard)
 
 

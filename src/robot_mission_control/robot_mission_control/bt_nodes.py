@@ -198,7 +198,9 @@ class ActionApproachWavingPerson(Action):
     2. Lấy tọa độ 3D người vẫy tay từ AI (chỉ dùng khi position_valid hoặc có preview map).
     3. Tính điểm đỗ an toàn cách người 0.9m.
     4. Điều khiển Nav2 chạy lại trước mặt người đó.
-    5. Chỉ khi Nav2 báo STATUS_SUCCEEDED -> Chuyển sang CHẾ ĐỘ PHỤC VỤ (IS_SERVING = True).
+    5. Hỗ trợ Dynamic Target Re-planning: Nếu người di chuyển trong lúc robot đang chạy tới,
+       hệ thống sẽ tự động điều chỉnh và cập nhật lại đường đi (với bộ lọc chống rung lắc).
+    6. Chỉ khi Nav2 báo STATUS_SUCCEEDED -> Chuyển sang CHẾ ĐỘ PHỤC VỤ (IS_SERVING = True).
     """
     def __init__(self, name="ActionApproachWavingPerson", node=None):
         super().__init__(name)
@@ -206,7 +208,12 @@ class ActionApproachWavingPerson(Action):
         self.nav2_client = None
         self.goal_handle = None
         self.is_navigating = False
-        self.standoff_distance = 0.90  # Đỗ cách người 90cm an toàn
+        self.standoff_distance = 0.90      # Đỗ cách người 90cm an toàn
+        self.min_replan_interval = 1.2    # Tối thiểu 1.2s mới cho replan 1 lần
+        self.min_displacement = 0.40      # Người phải di chuyển > 40cm mới cập nhật
+        self.freeze_distance = 1.40       # Dưới 1.4m thì khóa goal, giảm tốc đỗ xe
+        self.last_replan_time = 0.0
+        self.last_goal_pose = None
         self._goal_seq = 0
 
         if self.node:
@@ -224,13 +231,23 @@ class ActionApproachWavingPerson(Action):
 
     def _abort_approach(self, blackboard: Blackboard, reason: str):
         self._cancel_active_goal()
+        self.last_goal_pose = None
+        self.last_replan_time = 0.0
         blackboard.set('HAND_WAVE_ACTIVE', False)
         blackboard.set('APPROACH_ACTIVE', False)
+        blackboard.set('TARGET_TRACK_ID', None)
         blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
         if self.node and reason:
             self.node.get_logger().warn(reason)
         self.status = NodeStatus.FAILURE
         return NodeStatus.FAILURE
+
+    def _is_significant_displacement(self, new_pose: PoseStamped) -> bool:
+        if self.last_goal_pose is None:
+            return True
+        dx = new_pose.pose.position.x - self.last_goal_pose.pose.position.x
+        dy = new_pose.pose.position.y - self.last_goal_pose.pose.position.y
+        return math.hypot(dx, dy) >= self.min_displacement
 
     def _resolve_target_pose_map(self, blackboard: Blackboard):
         waving_person = blackboard.get('WAVING_PERSON')
@@ -269,6 +286,7 @@ class ActionApproachWavingPerson(Action):
         return None, 0.0
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
+        now = time.time()
         if self.status != NodeStatus.RUNNING:
             pose_map, dist = self._resolve_target_pose_map(blackboard)
             if pose_map is None:
@@ -278,6 +296,8 @@ class ActionApproachWavingPerson(Action):
                 return self._abort_approach(blackboard, "Nav2 Action Server chưa sẵn sàng để tiếp cận người vẫy tay!")
 
             blackboard.set('APPROACH_ACTIVE', True)
+            self.last_replan_time = now
+            self.last_goal_pose = pose_map
             msg = f"👋 PHÁT HIỆN NGƯỜI VẪY TAY! Đang tiếp cận người (cách {dist:.2f}m)..."
             if self.node:
                 self.node.get_logger().info(msg)
@@ -288,7 +308,22 @@ class ActionApproachWavingPerson(Action):
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
+        # Dynamic Re-planning: Trong lúc đang di chuyển tiếp cận, cập nhật nếu người di chuyển
         if self.is_navigating:
+            if (now - self.last_replan_time) >= self.min_replan_interval:
+                new_pose_map, current_dist = self._resolve_target_pose_map(blackboard)
+                if new_pose_map is not None and current_dist > self.freeze_distance:
+                    if self._is_significant_displacement(new_pose_map):
+                        dx = new_pose_map.pose.position.x - self.last_goal_pose.pose.position.x
+                        dy = new_pose_map.pose.position.y - self.last_goal_pose.pose.position.y
+                        disp = math.hypot(dx, dy)
+                        msg = f"🏃 Người mục tiêu đã di chuyển ({disp:.2f}m)! Cập nhật lại đường đi tiếp cận..."
+                        if self.node:
+                            self.node.get_logger().info(msg)
+                            self.node.publish_log(msg)
+                        self.last_replan_time = now
+                        self.last_goal_pose = new_pose_map
+                        self.send_nav2_goal(new_pose_map)
             return NodeStatus.RUNNING
 
         return self.status
@@ -314,6 +349,7 @@ class ActionApproachWavingPerson(Action):
                 self.node.get_logger().error(f"Lỗi gửi goal tiếp cận người: {exc}")
                 self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
                 self.node.blackboard.set('APPROACH_ACTIVE', False)
+                self.node.blackboard.set('TARGET_TRACK_ID', None)
                 self.node.blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
             self.status = NodeStatus.FAILURE
             return
@@ -324,6 +360,7 @@ class ActionApproachWavingPerson(Action):
                 self.node.get_logger().error("Goal tiếp cận người bị Nav2 từ chối!")
                 self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
                 self.node.blackboard.set('APPROACH_ACTIVE', False)
+                self.node.blackboard.set('TARGET_TRACK_ID', None)
                 self.node.blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
             self.status = NodeStatus.FAILURE
             return
@@ -349,6 +386,9 @@ class ActionApproachWavingPerson(Action):
         if self.node and hasattr(self.node, 'blackboard'):
             self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
             self.node.blackboard.set('APPROACH_ACTIVE', False)
+            self.node.blackboard.set('TARGET_TRACK_ID', None)
+        self.last_goal_pose = None
+        self.last_replan_time = 0.0
 
         if status == GoalStatus.STATUS_SUCCEEDED:
             msg = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
@@ -367,9 +407,12 @@ class ActionApproachWavingPerson(Action):
 
     def halt(self, blackboard: Blackboard = None) -> None:
         self._cancel_active_goal()
+        self.last_goal_pose = None
+        self.last_replan_time = 0.0
         if blackboard is not None:
             blackboard.set('APPROACH_ACTIVE', False)
             blackboard.set('HAND_WAVE_ACTIVE', False)
+            blackboard.set('TARGET_TRACK_ID', None)
         self.status = NodeStatus.FAILURE
 
 
@@ -440,14 +483,14 @@ class ActionServeCustomer(Action):
     Chế độ Phục Vụ Nước (IS_SERVING == True):
     1. Hủy toàn bộ goal Nav2/Patrol đang chạy và khóa /cmd_vel = 0 đứng yên.
     2. Bật Popup phục vụ (SHOW_SERVING).
-    3. Đợi bấm "Đã hài lòng" HOẶC hết 25 giây Timeout.
+    3. Đợi bấm "Đã hài lòng" HOẶC hết 5 phút (300 giây) Timeout.
     4. Cảm ơn, tắt popup, mở khóa và chuyển sang điểm tuần tra tiếp theo.
     """
     def __init__(self, name="ActionServeCustomer", node=None):
         super().__init__(name)
         self.node = node
         self.start_time = None
-        self.timeout_sec = 25.0
+        self.timeout_sec = 300.0
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
@@ -476,7 +519,7 @@ class ActionServeCustomer(Action):
         finish_by_timeout = (time.time() - self.start_time >= self.timeout_sec)
 
         if finish_by_button or finish_by_timeout:
-            reason = "Thầy/Cô đã bấm hài lòng" if finish_by_button else "hết thời gian chờ 25s"
+            reason = "Thầy/Cô đã bấm hài lòng" if finish_by_button else "hết thời gian chờ 5 phút"
             msg = f"✅ HOÀN TẤT PHỤC VỤ ({reason})! Cảm ơn Thầy/Cô. Tiếp tục tuần tra."
             if self.node:
                 self.node.get_logger().info(msg)

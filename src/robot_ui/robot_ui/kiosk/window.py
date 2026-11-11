@@ -897,6 +897,8 @@ class KioskWindow(QMainWindow):
         timeout = (
             self._admin_idle_timeout_seconds
             if self._active_page in {"admin", "navigation"}
+            else 300
+            if self._active_page == "service"
             else self._idle_timeout_seconds
         )
         if time.monotonic() - self._last_activity_at < timeout:
