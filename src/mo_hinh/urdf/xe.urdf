@@ -56,13 +56,13 @@
 
   <!-- ========================= -->
   <!-- Base Link (SolidWorks CAD) -->
-  <!-- Normalized origin: Midpoint of drive wheels at X=0, Y=0 -->
+  <!-- Rotated 180 deg around Z so 2 casters = Front (+X), 1 caster = Rear (-X) -->
   <!-- Offset from SolidWorks origin: dX = 0.18805 m, dY = 0.21300 m -->
   <!-- ========================= -->
   <link name="base_link">
     <inertial>
-      <!-- Center of mass shifted by dX = 0.18805, dY = 0.2130 -->
-      <origin xyz="0.033360511 0.0000017 0.03538706" rpy="0 0 0"/>
+      <!-- Center of mass rotated 180 deg around Z after shifting dX = 0.18805, dY = 0.2130 -->
+      <origin xyz="-0.033360511 -0.0000017 0.03538706" rpy="0 0 3.14159265"/>
       <mass value="1.25495205"/>
       <inertia ixx="0.02042045" ixy="1.149356E-06" ixz="0.00131466"
                iyy="0.02975992" iyz="1.67329E-08"
@@ -70,7 +70,7 @@
     </inertial>
 
     <visual>
-      <origin xyz="-0.18805 -0.2130 0" rpy="0 0 0"/>
+      <origin xyz="0.18805 0.2130 0" rpy="0 0 3.14159265"/>
       <geometry>
         <mesh filename="package://mo_hinh/meshes/base_link.STL"/>
       </geometry>
@@ -79,7 +79,7 @@
 
     <!-- Simplified box collision to avoid heavy Gazebo collision computations -->
     <collision>
-      <origin xyz="0.02 0.0 0.06869" rpy="0 0 0"/>
+      <origin xyz="-0.02 0.0 0.06869" rpy="0 0 0"/>
       <geometry>
         <box size="0.62 0.54 0.085"/>
       </geometry>
@@ -161,12 +161,12 @@
 
   <!-- ========================= -->
   <!-- Caster Wheels (Bánh phụ)  -->
-  <!-- 1. Bánh phụ trước (Front) -->
+  <!-- 1. Bánh phụ sau (1 caster at -X) -->
   <!-- ========================= -->
   <joint name="caster_front_joint" type="fixed">
     <parent link="base_link"/>
     <child link="caster_front_link"/>
-    <origin xyz="0.27378 0.019 -0.0023223" rpy="0 0 0"/>
+    <origin xyz="-0.27378 -0.019 -0.0023223" rpy="0 0 3.14159265"/>
   </joint>
 
   <link name="caster_front_link">
@@ -196,12 +196,12 @@
   </link>
 
   <!-- ========================= -->
-  <!-- 2. Bánh phụ trái (Left)   -->
+  <!-- 2. Bánh phụ trước phải (+X, -Y) -->
   <!-- ========================= -->
   <joint name="caster_left_joint" type="fixed">
     <parent link="base_link"/>
     <child link="caster_left_link"/>
-    <origin xyz="-0.18805 0.20898 -3.3809E-05" rpy="0 0 0"/>
+    <origin xyz="0.18805 -0.20898 -3.3809E-05" rpy="0 0 3.14159265"/>
   </joint>
 
   <link name="caster_left_link">
@@ -231,13 +231,13 @@
   </link>
 
   <!-- ========================= -->
-  <!-- 3. Bánh phụ phải (Right)  -->
-  <!-- Correct assembly joint origin (candidate 1 from SolidWorks URDF) -->
+  <!-- 3. Bánh phụ trước trái (+X, +Y) -->
+  <!-- Correct assembly joint origin rotated 180 deg -->
   <!-- ========================= -->
   <joint name="caster_right_joint" type="fixed">
     <parent link="base_link"/>
     <child link="caster_right_link"/>
-    <origin xyz="-0.18805 -0.2130 0" rpy="0 0 0"/>
+    <origin xyz="0.18805 0.2130 0" rpy="0 0 3.14159265"/>
   </joint>
 
   <link name="caster_right_link">
@@ -331,7 +331,7 @@
   <!-- ========================= -->
   <link name="laser_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 3.14159265"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://mo_hinh/meshes/laser_Link.STL"/>
       </geometry>
@@ -339,7 +339,7 @@
     </visual>
 
     <inertial>
-      <origin xyz="-0.011792 0.00036789 -0.035501" rpy="0 0 3.14159265"/>
+      <origin xyz="0.011792 -0.00036789 -0.035501" rpy="0 0 0"/>
       <mass value="0.094104"/>
       <inertia ixx="2.7909E-05" ixy="-5.2518E-08" ixz="-3.3534E-07"
                iyy="4.4353E-05" iyz="2.4873E-08"
@@ -350,7 +350,7 @@
   <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser_link"/>
-    <origin xyz="-0.175 0.0 0.24949" rpy="3.14159265 0 0"/>
+    <origin xyz="0.175 0.0 0.24949" rpy="3.14159265 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -382,7 +382,7 @@
   <joint name="support_joint" type="fixed">
     <parent link="base_link"/>
     <child link="support_link"/>
-    <origin xyz="-0.22 0.0 0.25" rpy="0 0 0"/>
+    <origin xyz="0.22 0.0 0.25" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -414,7 +414,7 @@
   <joint name="camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="camera_link"/>
-    <origin xyz="-0.25 0.0 0.50" rpy="0 0.698132 3.14159265"/>
+    <origin xyz="0.25 0.0 0.50" rpy="0 0.698132 0"/>
   </joint>
 
   <!-- Optical frame -->
@@ -478,7 +478,7 @@
   <joint name="rear_camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="rear_camera_link"/>
-    <origin xyz="0.25 0.0 0.25" rpy="0 0.698132 0"/>
+    <origin xyz="-0.25 0.0 0.25" rpy="0 0.698132 3.14159265"/>
   </joint>
 
   <!-- Rear Depth Optical frame -->
@@ -504,7 +504,7 @@
   <joint name="rear_scan_joint" type="fixed">
     <parent link="base_link"/>
     <child link="rear_scan_frame"/>
-    <origin xyz="0.25 0.0 0.0" rpy="0 0 0"/>
+    <origin xyz="-0.25 0.0 0.0" rpy="0 0 3.14159265"/>
   </joint>
 
   <!-- ========================= -->
