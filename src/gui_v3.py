@@ -1,3 +1,4 @@
+from collections import deque
 import copy
 import glob
 import json
@@ -37,8 +38,8 @@ from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import Image, LaserScan
-from std_msgs.msg import Bool, Int32MultiArray, String
+from sensor_msgs.msg import BatteryState, Image, LaserScan
+from std_msgs.msg import Bool, Float64, Int32MultiArray, String
 from std_srvs.srv import Trigger
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
@@ -49,6 +50,12 @@ try:
     HAS_TRACKED_PERSON_MSG = True
 except ImportError:
     HAS_TRACKED_PERSON_MSG = False
+
+try:
+    from yolo_msgs.msg import DetectionArray
+    HAS_YOLO_MSG = True
+except ImportError:
+    HAS_YOLO_MSG = False
 
 try:
     from robot_interfaces.msg import RobotStatus
@@ -73,6 +80,28 @@ MAP_SUFFIX_LOCALIZATION = "_localization"
 MAP_MODE_GOAL = "goal"
 MAP_MODE_DRAW_OBSTACLE = "draw_obstacle"
 MAP_MODE_ERASE = "erase"
+
+# Đường cong xả 3 bình ắc quy chì Yamato 12V 30Ah ghép nối tiếp (36V)
+_BATTERY_36V_CURVE = (
+    (33.60, 0.0),    # 11.20V/bình (ngưỡng ngắt bảo vệ)
+    (34.80, 10.0),   # 11.60V/bình
+    (35.70, 25.0),   # 11.90V/bình
+    (36.45, 50.0),   # 12.15V/bình
+    (37.20, 75.0),   # 12.40V/bình
+    (37.80, 90.0),   # 12.60V/bình
+    (38.40, 100.0),  # 12.80V/bình (đầy)
+)
+
+def compute_battery_percent_36v(voltage_v: float) -> float:
+    """Interpolate State-of-Charge (%) for 3x12V lead-acid batteries in series."""
+    if voltage_v <= _BATTERY_36V_CURVE[0][0]:
+        return 0.0
+    if voltage_v >= _BATTERY_36V_CURVE[-1][0]:
+        return 100.0
+    for (v0, p0), (v1, p1) in zip(_BATTERY_36V_CURVE, _BATTERY_36V_CURVE[1:]):
+        if voltage_v <= v1:
+            return p0 + (voltage_v - v0) / (v1 - v0) * (p1 - p0)
+    return 100.0
 
 def _pick_first_existing(paths):
     for path in paths:
@@ -222,8 +251,11 @@ class RosInterface(Node):
             self.create_subscription(Image, topic_name, lambda _msg, k=dbg_key: self._mark_topic_rx(k), qos_profile_sensor_data)
         for side, topic_name in (("front", "/scan_obstacles"), ("rear", "/rear_scan_obstacle")):
             self.create_subscription(LaserScan, topic_name, lambda msg, s=side: self._on_obstacle_scan(s, msg), best_effort_qos)
+        self._battery_voltages = deque(maxlen=25)
         self.create_subscription(Odometry, "/odom", self._on_odom, 20)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, 10)
+        self.create_subscription(Float64, "/hoverboard/battery_voltage", self._on_hoverboard_voltage, 10)
+        self.create_subscription(BatteryState, "/battery", self._on_battery_state, 10)
         if HAS_ROBOT_STATUS_MSG:
             self.create_subscription(RobotStatus, "/robot_status", self._on_robot_status, 10)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
@@ -242,10 +274,15 @@ class RosInterface(Node):
         self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
         self.wave_detected_pub = self.create_publisher(Bool, "/pose/wave_detected", 10)
         self.wave_status_pub = self.create_publisher(String, "/pose/wave_status", 10)
+        self.create_subscription(Bool, "/pose/wave_detected", self._on_wave_detected, 10)
+        self.create_subscription(String, "/pose/wave_status", self._on_wave_status, 10)
         if HAS_TRACKED_PERSON_MSG:
             self.tracked_people_pub = self.create_publisher(TrackedPersonArray, "/perception/tracked_people", 10)
+            self.create_subscription(TrackedPersonArray, "/perception/tracked_people", self._on_tracked_people, 10)
         else:
             self.tracked_people_pub = None
+        if HAS_YOLO_MSG:
+            self.create_subscription(DetectionArray, "/yolo/tracking", self._on_yolo_tracking, 10)
 
         self.cli_start_patrol = self.create_client(Trigger, "/mission/start_patrol")
         self.cli_pause_patrol = self.create_client(Trigger, "/mission/pause_patrol")
@@ -479,12 +516,76 @@ class RosInterface(Node):
     def _on_cmd_vel(self, msg):
         self._mark_topic_rx("cmd_vel", (float(msg.linear.x), float(msg.angular.z)))
 
+    def _record_battery_voltage(self, voltage_v: float, source: str):
+        if not math.isfinite(voltage_v) or voltage_v <= 1.0:
+            return
+        with self._dbg_lock:
+            now = time.monotonic()
+            hb = self._topic_stats.get("bat_hoverboard")
+            if source == "/battery" and hb and (now - hb["last_ts"]) < 5.0:
+                return
+            if getattr(self, "_battery_source", None) != source:
+                self._battery_voltages.clear()
+                self._battery_source = source
+            self._battery_voltages.append(voltage_v)
+            smooth_v = sum(self._battery_voltages) / len(self._battery_voltages)
+        key = "bat_hoverboard" if source == "/hoverboard/battery_voltage" else "bat_state"
+        self._mark_topic_rx(key, {
+            "raw_v": voltage_v,
+            "smooth_v": smooth_v,
+            "percent": compute_battery_percent_36v(smooth_v),
+            "source": source,
+        })
+
+    def _on_hoverboard_voltage(self, msg):
+        self._record_battery_voltage(float(msg.data), "/hoverboard/battery_voltage")
+
+    def _on_battery_state(self, msg):
+        self._record_battery_voltage(float(msg.voltage), "/battery")
+
     def _on_robot_status(self, msg):
         self._mark_topic_rx("robot_status", {
             "battery_percent": float(msg.battery_percent),
             "water_liter": float(msg.water_liter),
             "lidar_ok": bool(msg.lidar_ok),
             "odom_ok": bool(msg.odom_ok),
+        })
+
+    def _on_wave_detected(self, msg):
+        self._mark_topic_rx("wave_detected", bool(msg.data))
+
+    def _on_wave_status(self, msg):
+        self._mark_topic_rx("wave_status", str(msg.data))
+
+    def _on_yolo_tracking(self, msg):
+        dets = getattr(msg, "detections", ()) or ()
+        persons = sum(
+            1 for d in dets
+            if str(getattr(d, "class_name", "")).lower() == "person" or getattr(d, "class_id", -1) == 0
+        )
+        self._mark_topic_rx("yolo_tracking", {"total": len(dets), "persons": persons})
+
+    def _on_tracked_people(self, msg):
+        people = [
+            {
+                "track_id": str(p.track_id or "?"),
+                "dist_xy": float(p.distance_xy_m),
+                "depth_m": float(p.depth_m),
+                "pos_valid": bool(p.position_valid),
+                "depth_valid": bool(p.depth_valid),
+                "is_waving": bool(p.is_waving),
+                "wave_valid": bool(p.wave_valid),
+                "conf": float(p.detection_confidence),
+                "x": float(p.position.x),
+                "y": float(p.position.y),
+            }
+            for p in (getattr(msg, "people", ()) or ())
+        ]
+        people.sort(key=lambda item: item["dist_xy"] if item["dist_xy"] > 0.0 else 999.0)
+        self._mark_topic_rx("tracked_people", {
+            "frame_id": str(msg.header.frame_id or "base"),
+            "calibrated": bool(msg.geometry_calibrated),
+            "people": people,
         })
 
     def get_debug_snapshot(self):
@@ -1103,6 +1204,8 @@ class MainWindow(QWidget):
         self.lbl_sensor_summary.setStyleSheet("font-size: 11px; color: #334155;")
         self.lbl_cam_summary = QLabel("Cam F/R/AI: -/-/- | Obs(m): F=- R=-")
         self.lbl_cam_summary.setStyleSheet("font-size: 11px; color: #334155;")
+        self.lbl_battery_summary = QLabel("Pin 36V (3×12V 30Ah): --% (-- V)")
+        self.lbl_battery_summary.setStyleSheet("font-size: 11px; font-weight: bold; color: #334155;")
         control_group = QGroupBox("Điều khiển"); control_layout = QGridLayout()
         control_layout.addWidget(self.btn_start_platform, 0, 0); control_layout.addWidget(self.btn_stop_platform, 0, 1)
         control_layout.addWidget(self.btn_start_mode, 1, 0); control_layout.addWidget(self.btn_stop_mode, 1, 1)
@@ -1120,11 +1223,12 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.lbl_ai_status, 15, 0, 1, 2); control_layout.addWidget(self.lbl_backend_status, 16, 0, 1, 2)
         control_layout.addWidget(self.lbl_odom_status, 17, 0, 1, 2); control_layout.addWidget(self.lbl_dataenc, 18, 0, 1, 2)
         control_layout.addWidget(self.lbl_sensor_summary, 19, 0, 1, 2); control_layout.addWidget(self.lbl_cam_summary, 20, 0, 1, 2)
+        control_layout.addWidget(self.lbl_battery_summary, 21, 0, 1, 2)
         self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
         self.chk_mock_human.setStyleSheet("color: #0f172a; font-weight: bold;")
         self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
         self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
-        control_layout.addWidget(self.chk_mock_human, 21, 0, 1, 2)
+        control_layout.addWidget(self.chk_mock_human, 22, 0, 1, 2)
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
@@ -1233,8 +1337,9 @@ class MainWindow(QWidget):
         self.lbl_dbg_lidar = QLabel("LiDAR (/scan): OFF")
         self.lbl_dbg_odom_cmd = QLabel("Odom (0.0Hz): vx=+0.00 wz=+0.00 | CmdVel: vx=+0.00 wz=+0.00")
         self.lbl_dbg_tf = QLabel("TF: map->odom [MISS] | odom->base_footprint [MISS]")
+        self.lbl_dbg_battery = QLabel("Ắc quy 36V (3×12V 30Ah): Chưa có điện áp")
         self.lbl_dbg_robot_status = QLabel("/robot_status: Chưa có dữ liệu (cần Start Backend)")
-        for lbl in (self.lbl_dbg_lidar, self.lbl_dbg_odom_cmd, self.lbl_dbg_tf, self.lbl_dbg_robot_status):
+        for lbl in (self.lbl_dbg_lidar, self.lbl_dbg_odom_cmd, self.lbl_dbg_tf, self.lbl_dbg_battery, self.lbl_dbg_robot_status):
             lbl.setWordWrap(True)
             lbl.setStyleSheet("font-size: 11px; color: #0f172a;")
             dbg_hw_layout.addWidget(lbl)
@@ -1261,8 +1366,22 @@ class MainWindow(QWidget):
         dbg_cam_layout.addWidget(self.btn_open_cam_debugger)
         dbg_cam_group.setLayout(dbg_cam_layout)
 
+        dbg_ai_group = QGroupBox("Debug AI (Người / Khoảng cách / Vẫy tay)")
+        dbg_ai_layout = QVBoxLayout()
+        dbg_ai_layout.setSpacing(3)
+        self.lbl_dbg_yolo = QLabel("YOLO (/yolo/tracking): OFF")
+        self.lbl_dbg_people_count = QLabel("Đã phát hiện người: Chưa có dữ liệu")
+        self.lbl_dbg_wave = QLabel("Vẫy tay (/pose/wave_detected): OFF")
+        self.lbl_dbg_people_detail = QLabel("Chi tiết: --")
+        for lbl in (self.lbl_dbg_yolo, self.lbl_dbg_people_count, self.lbl_dbg_wave, self.lbl_dbg_people_detail):
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("font-size: 11px; color: #0f172a;")
+            dbg_ai_layout.addWidget(lbl)
+        dbg_ai_group.setLayout(dbg_ai_layout)
+
         tab_debug_layout.addWidget(dbg_hw_group)
         tab_debug_layout.addWidget(dbg_cam_group)
+        tab_debug_layout.addWidget(dbg_ai_group)
         tab_debug_layout.addStretch()
         tab_debug.setLayout(tab_debug_layout)
         self.tabs_info.addTab(tab_debug, "📡 Debug Sensor")
@@ -2436,6 +2555,104 @@ class MainWindow(QWidget):
             self.lbl_dbg_cam_ai.setStyleSheet(f"color: {'#16a34a' if ai_on_flag else '#64748b'}; font-weight: bold;")
             self.lbl_dbg_obs_front.setText(f"/scan_obstacles: {'ON (' + f'{of_hz:.1f}Hz)' if of_ok else 'OFF'} | min={f_min}")
             self.lbl_dbg_obs_rear.setText(f"/rear_scan_obstacle: {'ON (' + f'{or_hz:.1f}Hz)' if or_ok else 'OFF'} | min={r_min}")
+            self._update_battery_debug_ui(stats, now)
+            self._update_ai_debug_ui(stats, now)
+
+    def _update_battery_debug_ui(self, stats, now):
+        hb_ok, hb_hz, hb_extra = self._stream_state(stats, "bat_hoverboard", now, timeout=5.0)
+        bs_ok, bs_hz, bs_extra = self._stream_state(stats, "bat_state", now, timeout=5.0)
+        bat_ok, bat_hz, bat_extra = (hb_ok, hb_hz, hb_extra) if hb_ok else (bs_ok, bs_hz, bs_extra)
+
+        if bat_ok and bat_extra:
+            pct = bat_extra["percent"]
+            smooth_v = bat_extra["smooth_v"]
+            raw_v = bat_extra["raw_v"]
+            src = bat_extra["source"]
+            color = "#16a34a" if pct >= 50.0 else ("#d97706" if pct >= 20.0 else "#dc2626")
+            low_tag = " ⚠️ YẾU" if pct < 20.0 else ""
+            self.lbl_battery_summary.setText(f"Pin 36V (3×12V 30Ah): {pct:.0f}% ({smooth_v:.2f}V){low_tag}")
+            self.lbl_battery_summary.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {color};")
+            self.lbl_dbg_battery.setText(
+                f"Ắc quy 36V ({bat_hz:.1f}Hz): {pct:.1f}% | {smooth_v:.2f}V (tức thời {raw_v:.2f}V | {src}){low_tag}"
+            )
+            self.lbl_dbg_battery.setStyleSheet(f"font-size: 11px; font-weight: bold; color: {color};")
+        else:
+            self.lbl_battery_summary.setText("Pin 36V (3×12V 30Ah): --% (-- V)")
+            self.lbl_battery_summary.setStyleSheet("font-size: 11px; font-weight: bold; color: #334155;")
+            self.lbl_dbg_battery.setText("Ắc quy 36V (3×12V 30Ah): Chưa có điện áp (/hoverboard/battery_voltage hoặc /battery)")
+            self.lbl_dbg_battery.setStyleSheet("font-size: 11px; color: #64748b;")
+
+    def _update_ai_debug_ui(self, stats, now):
+        yolo_ok, yolo_hz, yolo_extra = self._stream_state(stats, "yolo_tracking", now)
+        tp_ok, tp_hz, tp_extra = self._stream_state(stats, "tracked_people", now)
+        wave_ok, wave_hz, wave_extra = self._stream_state(stats, "wave_detected", now)
+        wstat_ok, _, wstat_extra = self._stream_state(stats, "wave_status", now, timeout=3.0)
+
+        if yolo_ok and yolo_extra is not None:
+            self.lbl_dbg_yolo.setText(
+                f"YOLO (/yolo/tracking): ON ({yolo_hz:.1f}Hz) | {yolo_extra['persons']} người ({yolo_extra['total']} obj)"
+            )
+            self.lbl_dbg_yolo.setStyleSheet(
+                f"color: {'#16a34a' if yolo_extra['persons'] > 0 else '#0f172a'}; font-weight: bold;"
+            )
+        else:
+            self.lbl_dbg_yolo.setText(
+                "YOLO (/yolo/tracking): OFF" if HAS_YOLO_MSG else "YOLO (/yolo/tracking): Thiếu yolo_msgs"
+            )
+            self.lbl_dbg_yolo.setStyleSheet("color: #64748b; font-weight: bold;")
+
+        is_waving = bool(wave_extra) if wave_ok else False
+        wstat_txt = f" ({wstat_extra})" if (wstat_ok and wstat_extra) else ""
+        if wave_ok:
+            self.lbl_dbg_wave.setText(
+                f"Vẫy tay (/pose/wave_detected): {'ĐANG VẪY' if is_waving else 'Không'} ({wave_hz:.1f}Hz){wstat_txt}"
+            )
+            self.lbl_dbg_wave.setStyleSheet(
+                f"color: {'#dc2626' if is_waving else '#16a34a'}; font-weight: bold;"
+            )
+        else:
+            self.lbl_dbg_wave.setText("Vẫy tay (/pose/wave_detected): OFF")
+            self.lbl_dbg_wave.setStyleSheet("color: #64748b; font-weight: bold;")
+
+        people = tp_extra.get("people", []) if (tp_ok and tp_extra) else []
+        if tp_ok and tp_extra is not None:
+            n_people = len(people)
+            cal_txt = "cal=OK" if tp_extra.get("calibrated") else "uncal"
+            self.lbl_dbg_people_count.setText(
+                f"Đã phát hiện người (/perception/tracked_people): {n_people} người ({tp_hz:.1f}Hz | {cal_txt})"
+            )
+            self.lbl_dbg_people_count.setStyleSheet(
+                f"color: {'#16a34a' if n_people > 0 else '#0f172a'}; font-weight: bold;"
+            )
+            if people:
+                frame_id = tp_extra.get("frame_id", "base")
+                lines = []
+                for p in people[:5]:
+                    dist = f"{p['dist_xy']:.2f}m" if p["dist_xy"] > 0.0 else "--"
+                    depth = f"{p['depth_m']:.2f}m" if p["depth_valid"] else "--"
+                    pos = f"({p['x']:+.2f},{p['y']:+.2f})" if p["pos_valid"] else "(invalid)"
+                    w_lbl = "VẪY" if p["is_waving"] else ("không" if p["wave_valid"] else "?")
+                    lines.append(
+                        f"• ID {p['track_id']}: cách {dist} (depth {depth}) | {frame_id}={pos} | conf={p['conf']:.2f} | vẫy={w_lbl}"
+                    )
+                if n_people > 5:
+                    lines.append(f"... (+{n_people - 5} người khác)")
+                self.lbl_dbg_people_detail.setText("\n".join(lines))
+            else:
+                self.lbl_dbg_people_detail.setText("Chi tiết: Không có người trong khung hình")
+
+            wave_tag = " | ĐANG VẪY!" if (is_waving or any(p["is_waving"] for p in people)) else ""
+            self.lbl_ai_status.setText(f"{self.lbl_ai_status.text()} | Người: {n_people}{wave_tag}")
+        else:
+            self.lbl_dbg_people_count.setText(
+                "Đã phát hiện người (/perception/tracked_people): OFF"
+                if HAS_TRACKED_PERSON_MSG
+                else "Đã phát hiện người: Thiếu robot_interfaces"
+            )
+            self.lbl_dbg_people_count.setStyleSheet("color: #64748b; font-weight: bold;")
+            self.lbl_dbg_people_detail.setText("Chi tiết: --")
+            if yolo_ok and yolo_extra is not None:
+                self.lbl_ai_status.setText(f"{self.lbl_ai_status.text()} | YOLO người: {yolo_extra['persons']}")
 
     def stop_one_shot_processes(self):
         with self.one_shot_lock:
