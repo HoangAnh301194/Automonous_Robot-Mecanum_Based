@@ -42,8 +42,18 @@ def chunk_document(text: str, source: str, size: int = 700, overlap: int = 100) 
     return chunks
 
 
+_TOKEN_PATTERN = re.compile(
+    r"[\u30a0-\u30ff]+"     # Katakana loanwords (e.g. ソータ, ロボット)
+    r"|[\u4e00-\u9fff]"     # Kanji / Hanzi individual semantic characters
+    r"|[\u3040-\u309f]"     # Hiragana characters
+    r"|[\uac00-\ud7af]+"    # Hangul syllables/words (e.g. 소타, 로봇)
+    r"|\w+",                # Latin, Vietnamese with diacritics, numbers
+    flags=re.UNICODE,
+)
+
+
 def tokenize(text: str) -> Counter[str]:
-    return Counter(re.findall(r"\w+", text.casefold(), flags=re.UNICODE))
+    return Counter(_TOKEN_PATTERN.findall(text.casefold()))
 
 
 class KnowledgeRetriever:

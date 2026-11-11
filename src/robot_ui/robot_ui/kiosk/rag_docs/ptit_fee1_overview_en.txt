@@ -1,0 +1,29 @@
+# Overview of PTIT and Faculty of Electronic Engineering 1 (FEE1)
+
+## Posts and Telecommunications Institute of Technology (PTIT)
+- **Institution Name**: Posts and Telecommunications Institute of Technology (Học viện Công nghệ Bưu chính Viễn thông - PTIT).
+- **Hanoi Main Campus**: 96A Tran Phu Street, Ha Dong District, Hanoi, Vietnam.
+- **Profile**: A premier national university in Vietnam specializing in Information and Communications Technology (ICT), Electronics, Robotics, IoT, and Semiconductor Engineering.
+
+## Faculty of Electronic Engineering 1 (FEE1)
+- **Faculty Name**: Faculty of Electronic Engineering 1 (Khoa Kỹ thuật Điện tử 1 - FEE1).
+- **Main Office**: Room 205-A2, 2nd Floor, Building A2, Ha Dong Campus, Hanoi.
+- **Website**: https://fee1.ptit.edu.vn/
+- **Official Email**: fee1@ptit.edu.vn
+
+## Academic Departments
+1. **Department of Control and Automation Engineering**: Leads education and research in robotics, industrial automation, autonomous mobile robots (AMR), and intelligent control. Dr. Hoang Son is a senior faculty member in this department.
+2. **Department of Electronic Engineering**: Specializes in embedded systems, electronic circuits, and IoT technologies.
+3. **Department of Semiconductor Technology**: Focuses on IC design, semiconductor physical layout, and microelectronics.
+4. **Department of Electronic and Computer Engineering**: Covers digital systems, computer architecture, and hardware acceleration.
+
+## Research Laboratories
+- **OpenWorkShop LAB**: Research and development center for autonomous mobile robots, including the Souta service robot project.
+- **Rang Dong Smart Lighting & IoT Lab**: Room 402, Building A3 (joint laboratory with Rang Dong).
+- **Panasonic Air Conditioning & Smart Systems Lab**: Room 303, Building A3.
+
+## Frequently Asked Questions (FAQ)
+- **Q: Where is the office of Faculty of Electronic Engineering 1?**
+  → A: The FEE1 faculty office is located at Room 205-A2, 2nd Floor, Building A2, PTIT Ha Dong Campus.
+- **Q: Who is Dr. Hoang Son?**
+  → A: Dr. Hoang Son (TS. Hoàng Sơn) is a senior lecturer in the Department of Control and Automation Engineering, FEE1, PTIT, leading robotics and AI automation research.

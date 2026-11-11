@@ -282,6 +282,21 @@ class TestKioskAI(unittest.TestCase):
         self.assertEqual(received, [])
         self.assertEqual(worker.session_id, 1)
 
+    def test_multilingual_rag_name_meaning(self):
+        """Verify RAG retrieves name meaning across 5 languages."""
+        docs = Path(__file__).resolve().parents[1] / "robot_ui" / "kiosk" / "rag_docs"
+        retriever = KnowledgeRetriever(docs, embedding_model="")
+        queries = [
+            ("ソータの名前の意味は何ですか？", "広大な空"),
+            ("What does the name Souta mean?", "vast sky"),
+            ("Ý nghĩa tên của robot Souta là gì?", "bầu trời rộng lớn"),
+            ("飒太的名字寓意是什么？", "辽阔的天空"),
+            ("소타 이름의 의미가 무엇인가요?", "드넓은 하늘"),
+        ]
+        for query, expected_phrase in queries:
+            ctx = retriever.context(query)
+            self.assertIn(expected_phrase, ctx, f"Failed to retrieve '{expected_phrase}' for query '{query}'")
+
 
 if __name__ == "__main__":
     unittest.main()

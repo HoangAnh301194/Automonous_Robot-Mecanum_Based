@@ -1,0 +1,29 @@
+# 郵政通信工科大学（PTIT）および電子工学第1学部（FEE1）の概要
+
+## 郵政通信工科大学（PTIT - Posts and Telecommunications Institute of Technology）
+- **名称**: 郵政通信工科大学（Học viện Công nghệ Bưu chính Viễn thông - PTIT）。
+- **所在地**: ベトナム ハノイ市 ハドン区 チャンフー通り 96A（96A Trần Phú, Hà Đông, Hà Nội）。
+- **概要**: ベトナムの情報通信技術（ICT）、電気電子、ロボット工学、半導体分野における主要な国立大学。
+
+## 電子工学第1学部（Faculty of Electronic Engineering 1 - FEE1）
+- **名称**: 電子工学第1学部（Khoa Kỹ thuật Điện tử 1 - FEE1）。
+- **オフィス**: ハノイ・ハドンキャンパス A2棟 2階 205-A2号室。
+- **ウェブサイト**: https://fee1.ptit.edu.vn/
+- **メールアドレス**: fee1@ptit.edu.vn
+
+## 学科構成
+1. **制御・自動化学科（Bộ môn Điều khiển và Tự động hóa）**: ロボット工学、自動制御、PLC、自律移動ロボットの研究教育を担当。ホアン・ソン博士（TS. Hoàng Sơn）が所属。
+2. **電子工学科（Bộ môn Kỹ thuật Điện tử）**: 電子回路設計、IoT、組み込みシステム。
+3. **半導体技術学科（Bộ môn Công nghệ Bán dẫn）**: 半導体チップ設計、集積回路（IC）。
+4. **電気・コンピュータ工学学科（Bộ môn Kỹ thuật Điện tử - Máy tính）**: コンピュータアーキテクチャ、エッジコンピューティング。
+
+## 主な研究室
+- **OpenWorkShop LAB**: 自律移動ロボット（AMR/AGV）、AI案内ロボット「ソータ（Souta）」の研究開発拠点。
+- **Rang Dong IoT Smart Lighting Lab**: A3棟 402号室（スマート照明・IoT共同研究）。
+- **Panasonic Air Conditioning Lab**: A3棟 303号室。
+
+## よくある質問（FAQ）
+- **質問: 電子工学第1学部のオフィスはどこですか？**
+  → 回答: ハノイ・ハドンキャンパスのA2棟2階、205-A2号室にあります。
+- **質問: ホアン・ソン先生（TS. Hoàng Sơn）はどの学部に所属していますか？**
+  → 回答: 電子工学第1学部の制御・自動化学科に所属し、ロボット工学やAI応用を専門としています。
