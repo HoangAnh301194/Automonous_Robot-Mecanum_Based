@@ -29,19 +29,28 @@ class WakeWordMatchingTests(unittest.TestCase):
     def test_vietnamese_trigger(self):
         self.assertTrue(match_wake_phrase("Maica, giới thiệu về PTIT", "vi_maica", self.aliases))
         self.assertTrue(match_wake_phrase("Maica!", "vi_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("mai ca ơi", "vi_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("chào maica", "vi_maica", self.aliases))
         self.assertFalse(match_wake_phrase("Mai là một cái tên", "vi_maica", self.aliases))
 
     def test_english_trigger_and_boundaries(self):
         self.assertTrue(match_wake_phrase("Maica! How are you?", "en_maica", self.aliases))
         self.assertTrue(match_wake_phrase("maica", "en_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("hey maica", "en_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("hey mica", "en_maica", self.aliases))
         self.assertFalse(match_wake_phrase("maicabee", "en_maica", self.aliases))
         self.assertFalse(match_wake_phrase("hey somebody", "en_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("my god", "en_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("my car", "en_maica", self.aliases))
 
     def test_japanese_variants_and_kana(self):
         self.assertTrue(match_wake_phrase("まいか、こんにちは", "ja_maica", self.aliases))
         self.assertTrue(match_wake_phrase("マイカ", "ja_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("マイカ", "ja_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("まいかちゃん", "ja_maica", self.aliases))
         self.assertFalse(match_wake_phrase("そうだね", "ja_maica", self.aliases))
+        # Anti-noise: ensure "my car" (マイカー / マイ カー) is rejected
+        self.assertFalse(match_wake_phrase("マイカー", "ja_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("マイ カー", "ja_maica", self.aliases))
 
     def test_unicode_normalization(self):
         self.assertEqual(normalize("  Ｍａｉｃａ！", "en_maica"), "maica")

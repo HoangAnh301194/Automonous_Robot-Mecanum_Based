@@ -5,7 +5,12 @@
       "display_name": "Maica",
       "model": "vosk-model-small-vn-0.4",
       "aliases": [
-        "maica"
+        "maica",
+        "maica ơi",
+        "mai ca",
+        "mai ca ơi",
+        "chào maica",
+        "chào mai ca"
       ],
       "enabled": true
     },
@@ -14,7 +19,12 @@
       "display_name": "Maica",
       "model": "vosk-model-small-en-us-0.15",
       "aliases": [
-        "maica"
+        "maica",
+        "hey maica",
+        "hi maica",
+        "hello maica",
+        "mica",
+        "hey mica"
       ],
       "enabled": true
     },
@@ -24,7 +34,11 @@
       "model": "vosk-model-small-ja-0.22",
       "aliases": [
         "まいか",
-        "マイカ"
+        "マイカ",
+        "まいかちゃん",
+        "マイカちゃん",
+        "まいかさん",
+        "マイカさん"
       ],
       "enabled": true
     }

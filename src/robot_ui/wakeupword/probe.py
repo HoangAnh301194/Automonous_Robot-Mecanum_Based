@@ -27,9 +27,9 @@ MODEL_DIRS = {
 }
 
 ALIASES = {
-    "vi_maica": ["maica"],
-    "en_maica": ["maica"],
-    "ja_maica": ["まいか", "マイカ"],
+    "vi_maica": ["maica", "maica ơi", "mai ca", "mai ca ơi", "chào maica", "chào mai ca"],
+    "en_maica": ["maica", "hey maica", "hi maica", "hello maica", "mica", "hey mica"],
+    "ja_maica": ["まいか", "マイカ", "まいかちゃん", "マイカちゃん", "まいかさん", "マイカさん"],
 }
 
 
@@ -83,7 +83,9 @@ def match_wake_phrase(text: str, label: str, aliases: dict | None = None) -> boo
         if not phrase:
             continue
         if label.startswith("ja_") or label == "ja":
-            if phrase in normalized:
+            # Match Japanese phrases while blocking false triggers with prolonged sound mark (e.g. マイカー)
+            pattern = re.escape(phrase) + r"(?!ー)"
+            if re.search(pattern, normalized):
                 return True
         elif re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", normalized):
             return True
@@ -254,7 +256,7 @@ def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: 
     """One parec capture feeding all recognizers concurrently."""
     recognizers = {name: vosk_module.KaldiRecognizer(model, 16000) for name, model in models.items()}
     process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
-                               stderr=subprocess.DEVNULL, bufsize=0)
+                               stderr=subprocess.PIPE, bufsize=0)
     next_allowed = 0.0
     audio_seconds = 0.0
     cpu_seconds = 0.0
@@ -270,7 +272,14 @@ def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: 
             pcm = process.stdout.read(3200)
             if not pcm:
                 if process.poll() is not None:
-                    raise RuntimeError(f"parec exited with code {process.returncode}")
+                    err = ""
+                    if process.stderr:
+                        try:
+                            err = process.stderr.read().decode("utf-8", errors="replace").strip()
+                        except Exception:
+                            pass
+                    err_msg = f": {err}" if err else ""
+                    raise RuntimeError(f"parec exited with code {process.returncode}{err_msg}")
                 continue
             audio_seconds += len(pcm) / 32000
             t0 = time.monotonic()
