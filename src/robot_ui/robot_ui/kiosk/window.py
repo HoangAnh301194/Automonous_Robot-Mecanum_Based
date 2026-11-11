@@ -298,7 +298,7 @@ class KioskWindow(QMainWindow):
         self._robot_status: dict[str, Any] = {}
         self._navigation_status: dict[str, Any] = {}
         self._connected = False
-        self._active_page = "idle"
+        self._active_page = ""
         self._page_history: list[str] = []
         self._admin_authenticated = False
         # Prototype PIN; override via KIOSK_ADMIN_PIN before deployment.
@@ -388,6 +388,7 @@ class KioskWindow(QMainWindow):
             },
             central,
         )
+        self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
         self.chat_page.home_requested.connect(self.go_back)
         self.admin_page.back_requested.connect(self.go_back)
@@ -450,7 +451,8 @@ class KioskWindow(QMainWindow):
             nav_width,
             nav_height,
         )
-        self.bottom_navigation.raise_()
+        if self.bottom_navigation.isVisible():
+            self.bottom_navigation.raise_()
         super().resizeEvent(event)
 
     def show_page(self, page_id: str, track_history: bool = True) -> None:
@@ -464,7 +466,7 @@ class KioskWindow(QMainWindow):
             self.get_logger_or_warning("Blocked unauthorized admin navigation")
             return
 
-        if track_history and self._active_page not in {"idle"}:
+        if track_history and self._active_page not in {"", "idle"}:
             self._page_history.append(self._active_page)
 
         if page_id == "idle" or (
