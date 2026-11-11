@@ -120,8 +120,8 @@ controller_server:
       movement_time_allowance: 10.0
     precise_goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.50
+      yaw_goal_tolerance: 0.55
       stateful: true
     FollowPath:
       plugin: nav2_mppi_controller::MPPIController

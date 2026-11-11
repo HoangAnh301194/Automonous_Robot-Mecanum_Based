@@ -211,6 +211,20 @@ NAV2_PARAMS_BASE = os.environ.get("NAV2_PARAMS", _pick_first_existing([os.path.j
 SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "mapper_params_online_async.yaml"), os.path.join(CONFIG_DIR, "mapper_params_online_async.yaml")]))
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
+def recompute_cyclic_waypoint_yaws(waypoints):
+    """Set each patrol waypoint's yaw (rad) to face toward the next waypoint in the cycle."""
+    n = len(waypoints)
+    if n < 2:
+        if n == 1:
+            waypoints[0]["yaw"] = 0.0
+        return waypoints
+    for i, wp in enumerate(waypoints):
+        nxt = waypoints[(i + 1) % n]
+        dx = float(nxt.get("x", 0.0)) - float(wp.get("x", 0.0))
+        dy = float(nxt.get("y", 0.0)) - float(wp.get("y", 0.0))
+        wp["yaw"] = math.atan2(dy, dx) if math.hypot(dx, dy) > 1e-6 else 0.0
+    return waypoints
+
 class RosInterface(Node):
     def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None, obstacle_scan_callback=None):
         super().__init__("desktop_nav_gui_v3")
@@ -371,6 +385,7 @@ class RosInterface(Node):
 
     def sync_patrol_config(self, waypoints, route_name="patrol_route"):
         synced = False
+        recompute_cyclic_waypoint_yaws(waypoints)
         if HAS_CONFIG_SRVS and self.cli_save_location is not None and self.cli_save_route is not None:
             if self.cli_save_location.wait_for_service(timeout_sec=0.2):
                 for wp in waypoints:
@@ -879,6 +894,8 @@ class MapViewer(QLabel):
                 painter.setPen(QPen(color, 2))
                 painter.setBrush(color)
                 painter.drawEllipse(QPoint(sx, sy), 5, 5)
+                wyaw = float(wp.get("yaw", 0.0))
+                painter.drawLine(sx, sy, sx + int(14 * math.cos(wyaw)), sy - int(14 * math.sin(wyaw)))
                 painter.drawText(sx + 8, sy - 8, wp["name"])
                 if i > 0:
                     px, py = self.world_to_widget(self.batch_waypoints[i - 1]["x"], self.batch_waypoints[i - 1]["y"])
@@ -1833,6 +1850,7 @@ class MainWindow(QWidget):
         return f"diem{idx}"
 
     def refresh_batch_waypoint_views(self):
+        recompute_cyclic_waypoint_yaws(self.batch_waypoints)
         self.btn_batch_mode.setText(f"Waypoint Mode: {'ON' if self.batch_waypoint_mode else 'OFF'}")
         self.lbl_batch_info.setText(f"Patrol Route: {len(self.batch_waypoints)} điểm")
         self.map_view.update_waypoint_batch(self.batch_waypoints)
@@ -1970,6 +1988,7 @@ class MainWindow(QWidget):
 
     def save_patrol_config_to_yaml(self, show_dialog=True):
         self._sync_waypoints_from_table()
+        recompute_cyclic_waypoint_yaws(self.batch_waypoints)
         if not self.batch_waypoints:
             if show_dialog:
                 QMessageBox.warning(self, "Chưa có điểm nào", "Hãy chấm ít nhất 1 điểm trên bản đồ trước khi lưu lộ trình.")
