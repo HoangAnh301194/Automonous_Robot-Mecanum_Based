@@ -23,8 +23,9 @@ Official pretrained model downloads:
 Use the system Python version that has a compatible vosk wheel. Do not
 override ROS 2's system dependencies. From the repo root:
 
-    python3 -m venv .venv-wakeword
-    source .venv-wakeword/bin/activate
+    mkdir -p ~/.venvs
+    python3 -m venv ~/.venvs/souta-wakeword
+    source ~/.venvs/souta-wakeword/bin/activate
     python -m pip install vosk
 
 Download three model ZIP files from the official URLs above, then extract them
