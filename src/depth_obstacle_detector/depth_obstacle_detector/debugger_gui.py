@@ -55,10 +55,14 @@ class DepthSubscriberNode(Node):
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer, self)
         
+        # Active camera topics (tracked for Save Config)
+        self.camera_info_topic = '/camera/depth/camera_info'
+        self.depth_topic = '/camera/depth/image_raw'
+
         # Subscribe to camera info
         self.info_sub = self.create_subscription(
             CameraInfo,
-            '/camera/depth/camera_info',
+            self.camera_info_topic,
             self.info_callback,
             custom_qos
         )
@@ -66,7 +70,7 @@ class DepthSubscriberNode(Node):
         # Subscribe to depth raw topic (typically 16-bit unsigned in millimeters)
         self.subscription = self.create_subscription(
             Image,
-            '/camera/depth/image_raw',
+            self.depth_topic,
             self.listener_callback,
             custom_qos
         )
@@ -90,6 +94,8 @@ class DepthSubscriberNode(Node):
             info_topic = f'/{prefix}camera/depth/camera_info'
             img_topic = f'/{prefix}camera/depth/image_raw'
         
+        self.camera_info_topic = info_topic
+        self.depth_topic = img_topic
         self.info_sub = self.create_subscription(CameraInfo, info_topic, self.info_callback, custom_qos)
         self.subscription = self.create_subscription(Image, img_topic, self.listener_callback, custom_qos)
         
@@ -176,6 +182,9 @@ class DebuggerGUI(QMainWindow):
         self.camera_intrinsics = None
         self.ground_file_path = "None"
         self.target_frame = "base_link"
+        self.output_scan_topic = None
+        self.min_range = 0.2
+        self.max_range = 2.5
         
         # Last known resolution
         self.raw_width = 0
@@ -412,6 +421,7 @@ class DebuggerGUI(QMainWindow):
             'camera_depth_optical_frame',
             'camera_link',
             'rear_camera_link',
+            'rear_scan_frame',
             'base_link',
             'base_footprint'
         ])
@@ -812,7 +822,20 @@ class DebuggerGUI(QMainWindow):
                 filename += '.yaml'
             try:
                 import yaml
+                depth_topic = self.ros_node.depth_topic
+                camera_info_topic = self.ros_node.camera_info_topic
+                is_rear = ('rear' in depth_topic.lower()) or ('rear' in str(self.target_frame).lower())
+                output_scan_topic = self.output_scan_topic or (
+                    '/rear_scan_obstacle' if is_rear else '/scan_obstacles'
+                )
                 config_data = {
+                    'depth_topic': str(depth_topic),
+                    'camera_info_topic': str(camera_info_topic),
+                    'output_scan_topic': str(output_scan_topic),
+                    'target_frame': str(self.target_frame),
+                    'ground_file_path': str(self.ground_file_path) if self.ground_file_path else "None",
+                    'min_range': float(self.min_range),
+                    'max_range': float(self.max_range),
                     'roi_x': int(self.sld_roi_x.value()),
                     'roi_y': int(self.sld_roi_y.value()),
                     'roi_width': int(self.sld_roi_w.value()),
@@ -822,13 +845,11 @@ class DebuggerGUI(QMainWindow):
                     'min_area': int(self.sld_min_area.value()),
                     'median_filter': int(self.sld_median.value()),
                     'morphology_size': int(self.sld_morph.value()),
-                    'ground_file_path': str(self.ground_file_path) if self.ground_file_path else "None",
-                    'target_frame': str(self.target_frame),
                     'camera_tilt': int(self.sld_tilt_angle.value()),
                     'distance_offset': float(self.sld_dist_offset.value() / 100.0)
                 }
                 with open(filename, 'w') as f:
-                    yaml.dump(config_data, f, default_flow_style=False)
+                    yaml.dump(config_data, f, default_flow_style=False, sort_keys=False)
                 QMessageBox.information(self, "Success", f"Configuration saved successfully to {os.path.basename(filename)}!")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to save configuration: {str(e)}")
@@ -843,6 +864,28 @@ class DebuggerGUI(QMainWindow):
                 with open(filename, 'r') as f:
                     config_data = yaml.safe_load(f)
                 
+                # Sync active camera topics and scan/range settings if specified
+                loaded_depth_topic = config_data.get('depth_topic', '')
+                if loaded_depth_topic:
+                    self.cmb_cam.blockSignals(True)
+                    if '/front_camera/' in loaded_depth_topic:
+                        self.cmb_cam.setCurrentText("Front (/front_camera)")
+                        self.ros_node.switch_camera('front_')
+                    elif '/rear_camera/' in loaded_depth_topic:
+                        self.cmb_cam.setCurrentText("Rear (/rear_camera)")
+                        self.ros_node.switch_camera('rear_')
+                    else:
+                        self.cmb_cam.setCurrentText("Astra (/camera)")
+                        self.ros_node.switch_camera('camera')
+                    self.cmb_cam.blockSignals(False)
+                    self.ros_node.depth_topic = loaded_depth_topic
+                loaded_info_topic = config_data.get('camera_info_topic', '')
+                if loaded_info_topic:
+                    self.ros_node.camera_info_topic = loaded_info_topic
+                self.output_scan_topic = config_data.get('output_scan_topic', None)
+                self.min_range = float(config_data.get('min_range', 0.2))
+                self.max_range = float(config_data.get('max_range', 2.5))
+
                 # Update GUI parameters (Block signals to update without multiple refreshes)
                 self.sld_roi_x.blockSignals(True)
                 self.sld_roi_y.blockSignals(True)
@@ -1439,10 +1482,17 @@ class DebuggerGUI(QMainWindow):
         text = self.cmb_cam.currentText()
         if "Astra" in text or text == "/camera":
             self.ros_node.switch_camera('camera')
+            if "rear" in str(self.target_frame).lower():
+                self.cmb_target_frame.setCurrentText("base_link")
         elif "Front" in text:
             self.ros_node.switch_camera('front_')
+            if "rear" in str(self.target_frame).lower():
+                self.cmb_target_frame.setCurrentText("base_footprint")
         else:
             self.ros_node.switch_camera('rear_')
+            if "rear" not in str(self.target_frame).lower():
+                self.cmb_target_frame.setCurrentText("rear_scan_frame")
+        self.output_scan_topic = None
         # Reset the ground reference to force user to capture a new one when switching cameras
         self.ground_frame = None
         self.lbl_ground_status.setText("None (Switch Camera)")
