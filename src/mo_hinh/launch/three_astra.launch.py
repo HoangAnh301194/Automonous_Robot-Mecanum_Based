@@ -166,22 +166,22 @@ def generate_launch_description():
             description='OpenNI serial used to resolve the physical AI RGB UVC camera.',
         ),
 
-        # Front Depth Camera parameters (640x480 @ 15 FPS)
+        # Front Depth Camera parameters (320x240 @ 30 FPS)
         DeclareLaunchArgument(
             'front_serial', default_value='17110310855',
             description='Serial of front depth camera.',
         ),
         DeclareLaunchArgument(
-            'front_depth_width', default_value='640',
-            description='Front depth width (default: 640).',
+            'front_depth_width', default_value='320',
+            description='Front depth width (default: 320).',
         ),
         DeclareLaunchArgument(
-            'front_depth_height', default_value='480',
-            description='Front depth height (default: 480).',
+            'front_depth_height', default_value='240',
+            description='Front depth height (default: 240).',
         ),
         DeclareLaunchArgument(
-            'front_depth_fps', default_value='15',
-            description='Front depth FPS (default: 15).',
+            'front_depth_fps', default_value='30',
+            description='Front depth FPS (default: 30).',
         ),
 
         # Rear Depth Camera parameters (320x240 @ 15 FPS - siêu nhẹ cho Jetson)
