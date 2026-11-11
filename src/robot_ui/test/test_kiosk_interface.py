@@ -408,6 +408,27 @@ def test_chat_page_strips_emojis_from_response(app):
     assert not any("🤖" in t for t in texts)
 
 
+def test_chat_page_streaming_and_response_no_duplicate(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    initial_bubble_count = len(page.findChildren(QLabel, "bubbleText"))
+
+    # 1. Stream response deltas
+    page.receive_stream_delta(1, 1, "Xin chào! ")
+    page.receive_stream_delta(1, 1, "Tôi là Souta.")
+    page.finalize_stream(1, 1, "Xin chào! Tôi là Souta.")
+
+    # There should now be exactly 1 new bubble
+    assert len(page.findChildren(QLabel, "bubbleText")) == initial_bubble_count + 1
+
+    # 2. Subsequent receive_response with the same text must NOT add a duplicate bubble
+    page.receive_response("Xin chào! Tôi là Souta.")
+    assert len(page.findChildren(QLabel, "bubbleText")) == initial_bubble_count + 1
+
+
+
 def test_service_page_elements_and_selection(app):
     missing = Path("/nonexistent-kiosk-test-asset")
     page = ServicePage(

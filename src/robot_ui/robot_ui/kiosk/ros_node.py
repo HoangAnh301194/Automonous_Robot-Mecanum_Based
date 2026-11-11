@@ -6,12 +6,14 @@ from functools import partial
 from typing import Any
 
 from action_msgs.msg import GoalStatus
-from geometry_msgs.msg import PoseWithCovarianceStamped
+from action_msgs.srv import CancelGoal
+from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_srvs.srv import Trigger
 
 from robot_interfaces.action import DirectGo
 from robot_interfaces.msg import NavigationStatus, RobotStatus
@@ -41,6 +43,13 @@ class KioskRosNode(Node):
             "/navigation/direct_go",
         )
         self._nav2_client = ActionClient(self, NavigateToPose, "/navigate_to_pose")
+        self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
+        self.cancel_nav2_client = self.create_client(
+            CancelGoal, "/navigate_to_pose/_action/cancel_goal"
+        )
+        self.pause_patrol_client = self.create_client(
+            Trigger, "/mission/pause_patrol"
+        )
         self._location_client = self.create_client(
             GetLocationList,
             "/config/get_location_list",
@@ -383,10 +392,45 @@ class KioskRosNode(Node):
             self.signals.command_status_changed.emit("error", "Không thể tới điểm đến")
 
     def cancel_navigation(self) -> None:
-        if self._goal_handle is None:
-            self.signals.command_status_changed.emit("warning", "Không có hành trình để hủy")
-            self.signals.navigation_active_changed.emit(False)
-            return
-        self._goal_handle.cancel_goal_async()
-        self.signals.command_status_changed.emit("progress", "Đang hủy hành trình")
+        """Hủy hành trình điều hướng hiện tại."""
+        if self._goal_handle is not None:
+            try:
+                self._goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+            self._goal_handle = None
+        self.trigger_emergency_stop()
+
+    def trigger_emergency_stop(self) -> None:
+        """Dừng khẩn cấp toàn diện: phanh tức thì, hủy Nav2 và dừng tuần tra Mission."""
+        self.get_logger().warn("🚨 EMERGENCY STOP TRIGGERED FROM UI!")
+
+        # 1. Phát liên tục vận tốc 0.0 vào /cmd_vel để phanh dừng bánh lập tức
+        stop_twist = Twist()
+        for _ in range(5):
+            self.cmd_vel_pub.publish(stop_twist)
+            time.sleep(0.01)
+
+        # 2. Hủy goal nội bộ Kiosk nếu đang có
+        if self._goal_handle is not None:
+            try:
+                self._goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+            self._goal_handle = None
+
+        # 3. Hủy toàn bộ goal trên Nav2 server
+        req = CancelGoal.Request()
+        if self.cancel_nav2_client.service_is_ready():
+            self.cancel_nav2_client.call_async(req)
+        elif self.cancel_nav2_client.wait_for_service(timeout_sec=0.2):
+            self.cancel_nav2_client.call_async(req)
+
+        # 4. Gửi yêu cầu tạm dừng tuần tra tới Behavior Tree / Mission Controller
+        if self.pause_patrol_client.service_is_ready():
+            self.pause_patrol_client.call_async(Trigger.Request())
+        elif self.pause_patrol_client.wait_for_service(timeout_sec=0.2):
+            self.pause_patrol_client.call_async(Trigger.Request())
+
+        self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
         self.signals.navigation_active_changed.emit(False)

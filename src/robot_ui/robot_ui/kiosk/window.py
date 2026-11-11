@@ -707,8 +707,8 @@ class KioskWindow(QMainWindow):
 
     def _on_emergency_stop(self) -> None:
         print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)
-        self.ros_node.cancel_navigation()
-        self.signals.command_status_changed.emit("DỪNG KHẨN CẤP ĐÃ KÍCH HOẠT", "error")
+        self.ros_node.trigger_emergency_stop()
+        self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
         self.bottom_navigation.set_active("home" if self._active_page == "home" else self._active_page)
 
     def _on_admin_start_nav(self) -> None:

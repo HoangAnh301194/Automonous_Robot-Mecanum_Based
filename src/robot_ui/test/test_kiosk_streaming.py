@@ -274,3 +274,24 @@ def test_voice_controller_speaker_off_clears_queue():
     assert vc.state == VoiceState.READY
 
     vc.shutdown()
+
+
+def test_llm_worker_does_not_duplicate_response_callback():
+    response_called = []
+    completed_called = []
+
+    worker = LLMWorker(
+        on_response=lambda s, t: response_called.append(t),
+        on_error=lambda s, e: None,
+        on_stream_completed=lambda ctx, t: completed_called.append(t),
+        api_key="test-key",
+    )
+
+    with patch("robot_ui.kiosk.llm_client.stream_llm", return_value=iter(["Chào bạn."])):
+        assert worker.send("Chào")
+        time.sleep(0.1)
+
+    assert len(completed_called) == 1
+    assert completed_called[0] == "Chào bạn."
+    assert len(response_called) == 0  # No duplicate callback when stream_completed is provided
+

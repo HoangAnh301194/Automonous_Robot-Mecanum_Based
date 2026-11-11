@@ -1276,6 +1276,7 @@ class ChatPage(QWidget):
         self._current_streaming_text = ""
         self._stream_pending_text = ""
         self._streaming_turn_id = None
+        self._last_finalized_text = None
         while self._messages_layout.count() > 1:
             item = self._messages_layout.takeAt(0)
             if item.widget() is not None:
@@ -1393,6 +1394,7 @@ class ChatPage(QWidget):
             display = strip_emojis(final_content) or final_content
             self._add_message("Souta Robot", display)
 
+        self._last_finalized_text = final_content.strip()
         self._current_streaming_row = None
         self._current_streaming_body = None
         self._current_streaming_text = ""
@@ -1404,6 +1406,11 @@ class ChatPage(QWidget):
         if self._current_streaming_body is not None:
             self.finalize_stream(0, 0, response, interrupted=False)
             return
+        last_finalized = getattr(self, "_last_finalized_text", None)
+        if last_finalized and last_finalized == response.strip():
+            self._last_finalized_text = None
+            self.set_busy(False)
+            return
         self.set_busy(False)
         clean_text = strip_emojis(response)
         self._add_message("Souta Robot", clean_text or response)
@@ -1414,6 +1421,7 @@ class ChatPage(QWidget):
         self._current_streaming_row = None
         self._current_streaming_body = None
         self._streaming_turn_id = None
+        self._last_finalized_text = None
         self.set_busy(False)
         clean_msg = strip_emojis(error_msg) or error_msg
         self._add_message("Souta Robot", f"Lỗi: {clean_msg}")

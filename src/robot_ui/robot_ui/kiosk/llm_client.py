@@ -409,7 +409,8 @@ class LLMWorker:
 
             if self._on_stream_completed:
                 self._on_stream_completed(ctx, full_text)
-            self._on_response(ctx.session_id, full_text)
+            else:
+                self._on_response(ctx.session_id, full_text)
         except Exception:
             LOG.exception("LLM streaming request error")
             with self._lock:
