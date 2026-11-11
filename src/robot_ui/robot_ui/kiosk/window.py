@@ -504,6 +504,7 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
         self.home_page.service_requested.connect(self._on_service_requested)
         self.service_page.back_requested.connect(self.go_back)
+        self.service_page.mode_selected.connect(self._on_service_mode_selected)
         self.chat_page.home_requested.connect(self.go_back)
         self.admin_page.back_requested.connect(self.go_back)
         self.admin_page.logout_requested.connect(self.go_back)
@@ -526,6 +527,7 @@ class KioskWindow(QMainWindow):
         signals.locations_changed.connect(self.navigation_page.set_locations)
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
+        signals.service_popup_cmd.connect(self._on_service_popup_cmd)
         # LLM signals
         signals.llm_response_ready.connect(self._receive_llm_response)
         signals.llm_stream_delta.connect(self._on_llm_stream_delta)
@@ -605,8 +607,8 @@ class KioskWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
         self.stack.setGeometry(central.rect())
-        nav_width = min(460, max(390, central.width() - 32))
-        nav_height = 64
+        nav_width = min(560, max(492, central.width() - 32))
+        nav_height = 80
         self.bottom_navigation.setGeometry(
             (central.width() - nav_width) // 2,
             central.height() - nav_height - 12,
@@ -704,6 +706,28 @@ class KioskWindow(QMainWindow):
 
     def _on_service_requested(self) -> None:
         self.show_page("service")
+
+    def _on_service_mode_selected(self, mode: str) -> None:
+        if mode == "wait":
+            print("[robot_ui] SERVICE: Kích hoạt chế độ CHỜ PHỤC VỤ (IS_SERVING = True)", flush=True)
+            self.ros_node.request_serve()
+            self.signals.command_status_changed.emit("success", "☕ Đang trong chế độ phục vụ. Robot đang đứng yên.")
+        elif mode == "continue":
+            print("[robot_ui] SERVICE: Kích hoạt PHỤC VỤ HOÀN TẤT & TIẾP TỤC", flush=True)
+            self.ros_node.finish_serving()
+            self.signals.command_status_changed.emit("success", "✅ Đã hoàn tất phục vụ. Cảm ơn quý khách!")
+            QTimer.singleShot(1500, lambda: self.show_page("home"))
+
+    def _on_service_popup_cmd(self, cmd: str) -> None:
+        if cmd in ("SHOW_SERVING", "SHOW_5S_INVITE"):
+            if hasattr(self, "service_page"):
+                self.service_page.select_mode_programmatically("wait")
+            self.show_page("service")
+        elif cmd == "HIDE":
+            if hasattr(self, "service_page"):
+                self.service_page.reset_selection()
+            if self._active_page == "service":
+                self.show_page("home")
 
     def _on_emergency_stop(self) -> None:
         print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)

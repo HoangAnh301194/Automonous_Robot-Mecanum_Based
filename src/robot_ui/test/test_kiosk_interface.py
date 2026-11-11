@@ -428,6 +428,17 @@ def test_chat_page_streaming_and_response_no_duplicate(app):
     assert len(page.findChildren(QLabel, "bubbleText")) == initial_bubble_count + 1
 
 
+def test_nav_button_1_25x_dimensions(app):
+    from robot_ui.kiosk.widgets import NavButton
+    missing = Path("/nonexistent-kiosk-test-asset")
+    btn = NavButton("Trang chủ", missing, "home")
+    assert btn.iconSize().width() == 31
+    assert btn.iconSize().height() == 31
+    assert btn.width() == 88
+    assert btn.height() == 65
+
+
+
 
 def test_service_page_elements_and_selection(app):
     missing = Path("/nonexistent-kiosk-test-asset")
@@ -472,7 +483,11 @@ def test_service_page_elements_and_selection(app):
     # 4. Footer
     footer = page.findChild(QLabel, "serviceFooter")
     assert footer is not None
-    assert "Giao diện thử nghiệm — chưa kết nối điều khiển robot" in footer.text()
+    assert "Đã kết nối điều khiển robot" in footer.text()
+
+    # Programmatic selection
+    page.select_mode_programmatically("wait")
+    assert page.get_selected_mode() == "wait"
 
     # 5. Back button emits back_requested
     seen_back = []

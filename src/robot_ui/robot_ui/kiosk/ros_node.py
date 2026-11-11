@@ -13,6 +13,7 @@ from nav2_msgs.action import NavigateToPose
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from robot_interfaces.action import DirectGo
@@ -50,6 +51,14 @@ class KioskRosNode(Node):
         self.pause_patrol_client = self.create_client(
             Trigger, "/mission/pause_patrol"
         )
+        self.trigger_serve_client = self.create_client(
+            Trigger, "/mission/trigger_serve"
+        )
+        self.trigger_finish_client = self.create_client(
+            Trigger, "/mission/trigger_finish"
+        )
+        self.serve_trigger_pub = self.create_publisher(Bool, "/mission/serve_trigger", 10)
+        self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
         self._location_client = self.create_client(
             GetLocationList,
             "/config/get_location_list",
@@ -88,6 +97,7 @@ class KioskRosNode(Node):
         )
         self.create_subscription(Odometry, "/odom", self._on_odom, 20)
         self.create_subscription(Path, "/plan", self._on_path, 10)
+        self.create_subscription(String, "/mission/service_popup_cmd", self._on_service_popup_cmd, 10)
         self.create_timer(1.0, self._check_backend_connection)
 
         self.get_logger().info("Native touchscreen UI ROS adapter started.")
@@ -434,3 +444,26 @@ class KioskRosNode(Node):
 
         self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
         self.signals.navigation_active_changed.emit(False)
+
+    def _on_service_popup_cmd(self, msg: String) -> None:
+        cmd = str(msg.data).strip()
+        self.get_logger().info(f"Received service popup command: {cmd}")
+        self.signals.service_popup_cmd.emit(cmd)
+
+    def request_serve(self) -> None:
+        """Kích hoạt trạng thái phục vụ nước (khóa bánh đứng yên)."""
+        self.get_logger().info("Kích hoạt chế độ phục vụ nước...")
+        self.serve_trigger_pub.publish(Bool(data=True))
+        if self.trigger_serve_client.service_is_ready():
+            self.trigger_serve_client.call_async(Trigger.Request())
+        elif self.trigger_serve_client.wait_for_service(timeout_sec=0.2):
+            self.trigger_serve_client.call_async(Trigger.Request())
+
+    def finish_serving(self) -> None:
+        """Xác nhận hoàn tất phục vụ để robot tiếp tục rời đi."""
+        self.get_logger().info("Xác nhận hoàn tất phục vụ nước, tiếp tục di chuyển...")
+        self.finish_serving_pub.publish(Bool(data=True))
+        if self.trigger_finish_client.service_is_ready():
+            self.trigger_finish_client.call_async(Trigger.Request())
+        elif self.trigger_finish_client.wait_for_service(timeout_sec=0.2):
+            self.trigger_finish_client.call_async(Trigger.Request())

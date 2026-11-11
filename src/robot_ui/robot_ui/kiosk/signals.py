@@ -11,6 +11,7 @@ class KioskSignals(QObject):
     locations_changed = pyqtSignal(list)
     command_status_changed = pyqtSignal(str, str)
     navigation_active_changed = pyqtSignal(bool)
+    service_popup_cmd = pyqtSignal(str)   # Lệnh popup từ Behavior Tree: SHOW_5S_INVITE, SHOW_SERVING, HIDE
     # LLM chatbot signals
     llm_response_ready = pyqtSignal(int, str)   # phát khi LLM trả về response (backward compatible)
     llm_stream_delta = pyqtSignal(int, int, str)       # (session_id, turn_id, delta_text)

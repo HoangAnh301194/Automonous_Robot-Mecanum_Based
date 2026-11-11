@@ -732,7 +732,7 @@ class ServicePage(QWidget):
         root.addStretch(2)
 
         # 3. Footer
-        footer = QLabel("Giao diện thử nghiệm — chưa kết nối điều khiển robot")
+        footer = QLabel("Đã kết nối điều khiển robot · Nhấn nút để kích hoạt")
         footer.setObjectName("serviceFooter")
         footer.setAlignment(Qt.AlignCenter)
         root.addWidget(footer)
@@ -816,6 +816,9 @@ class ServicePage(QWidget):
 
     def get_selected_mode(self) -> str | None:
         return self._selected_mode
+
+    def select_mode_programmatically(self, mode: str) -> None:
+        self._select_mode(mode)
 
     def reset_selection(self) -> None:
         self._selected_mode = None

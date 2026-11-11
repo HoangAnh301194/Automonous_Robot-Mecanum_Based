@@ -1457,8 +1457,8 @@ class NavButton(QPushButton):
         self.setToolTip(text)
         self.setAccessibleName(text)
         self.setCheckable(True)
-        self.setIconSize(QSize(25, 25))
-        self.setFixedSize(70, 52)
+        self.setIconSize(QSize(31, 31))
+        self.setFixedSize(88, 65)
 
     def refresh_appearance(self, dark_background: bool, active: bool) -> None:
         self.setProperty("dark", dark_background)
