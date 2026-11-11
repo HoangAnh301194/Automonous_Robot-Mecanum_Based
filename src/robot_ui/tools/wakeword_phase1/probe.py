@@ -200,7 +200,8 @@ def record_sample(path: Path, duration: float, source: str):
     print(f"Recorded {len(pcm) / 32000:.2f}s to {path}")
 
 
-def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float):
+def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float,
+               debug_transcripts: bool = False, debug_partials: bool = False):
     # ONE microphone capture. All recognizers consume the same PCM frames.
     recognizers = {name: vosk.KaldiRecognizer(model, 16000) for name, model in models.items()}
     process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
@@ -209,7 +210,12 @@ def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float):
     audio_seconds = 0.0
     cpu_seconds = 0.0
     last_stat = time.monotonic()
+    last_partial_log = {name: 0.0 for name in models}
+    last_partial_text = {name: "" for name in models}
     print("Listening; detection is based on final ASR segments. Ctrl+C to exit.", flush=True)
+    if debug_transcripts or debug_partials:
+        print("DEBUG: ASR transcripts may contain private speech. Do not share raw logs without consent.",
+              file=sys.stderr, flush=True)
     try:
         while True:
             pcm = process.stdout.read(3200)
@@ -222,12 +228,26 @@ def live_probe(vosk, models: dict, aliases: dict, source: str, cooldown: float):
             for name, recognizer in recognizers.items():
                 if recognizer.AcceptWaveform(pcm):
                     transcript = json.loads(recognizer.Result()).get("text", "")
+                    if debug_transcripts and transcript.strip():
+                        print(json.dumps({
+                            "event": "asr_final", "model": name, "text": transcript
+                        }, ensure_ascii=False), flush=True)
                     if time.monotonic() >= next_allowed and match_wake_phrase(transcript, name, aliases):
                         print(json.dumps({
                             "event": "wake_detected", "keyword": name,
                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         }), flush=True)
                         next_allowed = time.monotonic() + cooldown
+                elif debug_partials:
+                    now = time.monotonic()
+                    if now - last_partial_log[name] >= 1.0:
+                        partial = json.loads(recognizer.PartialResult()).get("partial", "").strip()
+                        if partial and partial != last_partial_text[name]:
+                            print(json.dumps({
+                                "event": "asr_partial", "model": name, "text": partial
+                            }, ensure_ascii=False), flush=True)
+                            last_partial_text[name] = partial
+                        last_partial_log[name] = now
             cpu_seconds += time.monotonic() - t0
             if time.monotonic() - last_stat > 10:
                 print(f"[perf] decode wall/audio ratio={cpu_seconds / audio_seconds:.2f}; "
@@ -256,6 +276,10 @@ def main(argv=None) -> int:
     parser.add_argument("--aliases", help="Optional JSON alias overrides")
     parser.add_argument("--report", type=Path, help="JSON output containing transcripts")
     parser.add_argument("--cooldown", type=float, default=2.0, help="Cooldown seconds in live mode")
+    parser.add_argument("--debug-transcripts", action="store_true",
+                        help="Print finalized Vosk transcripts (privacy-sensitive; live mode only)")
+    parser.add_argument("--debug-partials", action="store_true",
+                        help="Print throttled partial Vosk transcripts (privacy-sensitive; live mode only)")
     args = parser.parse_args(argv)
     if args.command == "record":
         if not args.output or not 0.5 <= args.duration <= 60:
@@ -269,7 +293,9 @@ def main(argv=None) -> int:
             parser.error("evaluate requires --manifest")
         evaluate(args.manifest, vosk, models, aliases, args.report)
     else:
-        live_probe(vosk, models, aliases, args.source, max(0, args.cooldown))
+        live_probe(vosk, models, aliases, args.source, max(0, args.cooldown),
+                   debug_transcripts=args.debug_transcripts,
+                   debug_partials=args.debug_partials)
     return 0
 
 
