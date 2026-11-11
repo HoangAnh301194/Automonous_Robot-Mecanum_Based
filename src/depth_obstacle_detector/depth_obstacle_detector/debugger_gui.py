@@ -1012,20 +1012,10 @@ class DebuggerGUI(QMainWindow):
                 self.lbl_inspect_3dy.setText(f"{y_m:.3f} m")
                 self.lbl_inspect_3dz.setText(f"{z_m:.3f} m")
             else:
-                is_blind = False
-                if self.ground_frame is not None and 0 <= raw_y < self.ground_frame.shape[0] and 0 <= raw_x < self.ground_frame.shape[1]:
-                    if self.ground_frame[raw_y, raw_x] > 0:
-                        is_blind = True
-                if is_blind:
-                    self.lbl_inspect_depth_mm.setText("0 (Sát cam <0.35m)")
-                    self.lbl_inspect_3dx.setText("~0.0 m")
-                    self.lbl_inspect_3dy.setText("~0.0 m")
-                    self.lbl_inspect_3dz.setText("0.350 m")
-                else:
-                    self.lbl_inspect_depth_mm.setText("0 (Invalid)")
-                    self.lbl_inspect_3dx.setText("N/A")
-                    self.lbl_inspect_3dy.setText("N/A")
-                    self.lbl_inspect_3dz.setText("N/A")
+                self.lbl_inspect_depth_mm.setText("0 (Invalid)")
+                self.lbl_inspect_3dx.setText("N/A")
+                self.lbl_inspect_3dy.setText("N/A")
+                self.lbl_inspect_3dz.setText("N/A")
 
     def on_mouse_pressed(self, x, y):
         raw_x, raw_y = self.map_to_raw(x, y)
@@ -1125,10 +1115,6 @@ class DebuggerGUI(QMainWindow):
                 
                 # Mask representing pixels that are non-zero in both current and ground frame
                 valid_mask = (current_roi > 0) & (ground_roi > 0)
-                
-                # Blind-zone occlusion: mặt sàn nền hợp lệ (<=2.5m) nhưng hiện tại bị che khuất thành 0/N/A
-                # Do người hoặc vật cản tiến sát camera (<0.35m) gây mất độ sâu
-                blind_zone_mask = (current_roi == 0) & (ground_roi > 0) & (ground_roi <= 2500)
 
                 # Subtract (Ground - Current). If current is smaller, object is closer.
                 # Convert to int32 to prevent overflow wrapping in uint16 math
@@ -1150,9 +1136,6 @@ class DebuggerGUI(QMainWindow):
                 else:
                     obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
                     obstacle_mask[valid_mask & (diff > thresh_val)] = 255
-
-                # Thêm vùng điểm mù cận cảnh (vật cản áp sát <0.35m) vào mask vật cản
-                obstacle_mask[blind_zone_mask] = 255
 
                 # 6. Apply Morphology Filters (Noise Reduction)
                 # A. Median filter (must be odd size)
@@ -1195,8 +1178,7 @@ class DebuggerGUI(QMainWindow):
                             min_depth_mm = np.min(valid_depths)
                             dist_m = min_depth_mm / 1000.0
                         else:
-                            # Toàn bộ vật cản là vùng điểm mù N/A áp sát camera (< 0.35m)
-                            dist_m = 0.35
+                            dist_m = 0.0
 
                         if dist_m > 0 and dist_m < min_dist_overall:
                             min_dist_overall = dist_m
@@ -1228,7 +1210,7 @@ class DebuggerGUI(QMainWindow):
                     cv2.rectangle(overlay_color, (ox, oy), (ox+ow, oy+oh), color, thickness)
                     
                     # Draw distance text
-                    txt = f"{d_val:.2f}m (Sát)" if d_val <= 0.35 else f"{d_val:.2f}m"
+                    txt = f"{d_val:.2f}m"
                     cv2.putText(overlay_color, txt, (ox, max(oy - 5, 15)),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2, cv2.LINE_AA)
 
@@ -1340,8 +1322,6 @@ class DebuggerGUI(QMainWindow):
 
         # Process obstacle coordinates if Ground Reference is loaded and active
         if self.ground_frame is not None and obstacle_mask is not None:
-            rh, rw = current_roi.shape
-            ground_roi = self.ground_frame[ry:ry+rh, rx:rx+rw]
             # Find row (y) and column (x) indices of all obstacle pixels
             y_idx, x_idx = np.where(obstacle_mask == 255)
             
@@ -1352,10 +1332,6 @@ class DebuggerGUI(QMainWindow):
                 
                 # Fetch depth values and convert to meters
                 depths_m = current_roi[y_idx, x_idx].astype(np.float32) / 1000.0
-                
-                # Gán khoảng cách 0.35m cho các điểm N/A (điểm mù cự ly gần) có nền sàn hợp lệ
-                is_blind_zone = (current_roi[y_idx, x_idx] == 0) & (ground_roi[y_idx, x_idx] > 0)
-                depths_m[is_blind_zone] = 0.35
 
                 # Filter out invalid depth pixels
                 valid = depths_m > 0
