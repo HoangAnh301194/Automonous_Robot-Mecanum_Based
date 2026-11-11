@@ -237,12 +237,92 @@ QLabel#chatHeaderIcon {
 }
 QLabel#chatTitle {
     color: #f4f4f4;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 700;
 }
 QLabel#chatSubtitle {
     color: #8d8d8d;
-    font-size: 9px;
+    font-size: 11px;
+}
+QPushButton#chatSpeakerButton {
+    background: #171717;
+    border: 1px solid #3a3a3a;
+    border-radius: 11px;
+}
+QPushButton#chatSpeakerButton:pressed {
+    background: #2b2b2b;
+}
+QPushButton#chatStopSpeakingButton {
+    color: #ff667d;
+    background: #241014;
+    border: 1px solid #5a1d28;
+    border-radius: 11px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 700;
+}
+QPushButton#chatStopSpeakingButton:pressed {
+    background: #38151c;
+}
+QFrame#suggestionContainer {
+    background: transparent;
+    border: none;
+}
+QPushButton#suggestionChip {
+    color: #e2e8f0;
+    background: #141414;
+    border: 1px solid #2e2e2e;
+    border-radius: 12px;
+    padding: 9px 12px;
+    font-size: 13px;
+    font-weight: 600;
+    text-align: left;
+}
+QPushButton#suggestionChip:pressed {
+    color: #111111;
+    background: #ffb32c;
+    border-color: #ffb32c;
+}
+QFrame#typingBubble {
+    background: #181818;
+    border: 1px solid #282828;
+    border-radius: 12px;
+}
+QLabel#typingText {
+    color: #999999;
+    font-size: 14px;
+    font-style: italic;
+}
+QPushButton#chatMicButton {
+    background: #171717;
+    border: 1px solid #3a3a3a;
+    border-radius: 12px;
+}
+QPushButton#chatMicButton:pressed {
+    background: #2b2b2b;
+}
+QPushButton#chatMicButton[listening="true"] {
+    background: #2b1c09;
+    border: 1px solid #ffb32c;
+}
+QPushButton#chatMicButton:disabled {
+    background: #101010;
+    border-color: #222222;
+}
+QPushButton#chatSendButton {
+    color: #151515;
+    background: #ffb32c;
+    border: none;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QPushButton#chatSendButton:pressed {
+    background: #d98b00;
+}
+QPushButton#chatSendButton:disabled {
+    color: #666666;
+    background: #28241b;
 }
 QLabel#llmStatus {
     color: #ffb32c;
@@ -264,12 +344,12 @@ QScrollArea#chatScroll, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {
 }
 QFrame#robotBubble {
     background: #181818;
-    border: 1px solid #353535;
+    border: 1px solid #282828;
     border-radius: 12px;
 }
 QFrame#userBubble {
     background: #2a1d08;
-    border: 1px solid #8b5b08;
+    border: 1px solid #6b4606;
     border-radius: 12px;
 }
 QLabel#robotBubbleSender {
@@ -284,7 +364,7 @@ QLabel#userBubbleSender {
 }
 QLabel#bubbleText {
     color: #ededed;
-    font-size: 13px;
+    font-size: 16px;
 }
 """
 
@@ -364,9 +444,18 @@ class KioskWindow(QMainWindow):
                 "stop": icon_path("stopNavigation.png"),
             }
         )
+        voice_icons = {
+            "mic": icon_path("mic.png"),
+            "mic_listening": icon_path("mic_listening.png"),
+            "mic_off": icon_path("mic_off.png"),
+            "speaker_on": icon_path("speaker_on.png"),
+            "speaker_off": icon_path("speaker_off.png"),
+            "stop_speaking": icon_path("stop_speaking.png"),
+        }
         self.chat_page = ChatPage(
             chat_icon=icon_path("chatIcon.png"),
             back_icon=icon_path("back.png"),
+            voice_icons=voice_icons,
         )
         self.pages = {
             "idle": self.idle_page,
@@ -465,6 +554,9 @@ class KioskWindow(QMainWindow):
         if page_id in {"admin", "navigation"} and not self._admin_authenticated:
             self.get_logger_or_warning("Blocked unauthorized admin navigation")
             return
+
+        if self._active_page == "chat" and page_id != "chat":
+            self.chat_page.stop_speaking()
 
         if track_history and self._active_page not in {"", "idle"}:
             self._page_history.append(self._active_page)
@@ -662,6 +754,7 @@ class KioskWindow(QMainWindow):
 
     def closeEvent(self, event: Any) -> None:
         QApplication.instance().removeEventFilter(self)
+        self.chat_page.stop_speaking()
         self._llm_worker.reset_session()
         self.idle_page.video.stop()
         super().closeEvent(event)

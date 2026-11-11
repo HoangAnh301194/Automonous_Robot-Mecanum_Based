@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
-from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QPushButton
+from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton
 
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, WelcomePage
 from robot_ui.kiosk.widgets import BottomNavigation
@@ -157,5 +157,223 @@ def test_kiosk_window_dock_hidden_on_idle_and_shown_on_home(app):
         assert win.bottom_navigation.isHidden()
     finally:
         win.close()
+
+
+def test_chat_page_widgets_and_object_names(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+    page.resize(800, 480)
+
+    # Required buttons and objects
+    back = page.findChild(QPushButton, "navHomeButton")
+    assert back is not None
+    assert back.width() == 46
+    assert back.height() == 46
+
+    title = page.findChild(QLabel, "chatTitle")
+    assert title is not None
+    assert title.text() == "Souta Assistant"
+
+    subtitle = page.findChild(QLabel, "chatSubtitle")
+    assert subtitle is not None
+    assert subtitle.text() == "Sẵn sàng trò chuyện"
+
+    speaker = page.findChild(QPushButton, "chatSpeakerButton")
+    assert speaker is not None
+    assert speaker.width() == 48
+    assert speaker.height() == 48
+
+    stop_speaking = page.findChild(QPushButton, "chatStopSpeakingButton")
+    assert stop_speaking is not None
+    assert stop_speaking.isHidden()
+
+    input_field = page.findChild(QLineEdit, "chatInput")
+    assert input_field is not None
+    assert input_field.placeholderText() == "Nhập câu hỏi của bạn..."
+
+    mic = page.findChild(QPushButton, "chatMicButton")
+    assert mic is not None
+    assert mic.width() >= 52
+    assert mic.height() >= 52
+
+    send = page.findChild(QPushButton, "chatSendButton")
+    assert send is not None
+    assert send.width() >= 52
+    assert send.height() >= 52
+    assert send.text() == "Gửi"
+
+
+def test_chat_page_suggestions_and_flow(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    chips = [btn for btn in page.findChildren(QPushButton) if btn.objectName() == "suggestionChip"]
+    assert len(chips) == 4
+    chip_texts = [btn.text() for btn in chips]
+    assert "Giới thiệu về PTIT" in chip_texts
+    assert "Giới thiệu về Robot" in chip_texts
+    assert "Giới thiệu về Khoa Kỹ thuật Điện tử 1" in chip_texts
+    assert "Giới thiệu về nhóm nghiên cứu OpenWorkShop" in chip_texts
+
+    submitted = []
+    page.chat_submitted.connect(submitted.append)
+
+    # Click first chip
+    chips[0].click()
+    assert len(submitted) == 1
+    assert submitted[0] == chips[0].text()
+    assert page._suggestions_widget.isHidden()
+
+
+def test_chat_page_mic_states(app):
+    from robot_ui.kiosk.widgets import ChatPage, MicState
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    # Initial state is UNAVAILABLE
+    assert page._mic_state == MicState.UNAVAILABLE
+    assert "chưa khả dụng" in page.mic_btn.toolTip()
+
+    # Click mic when unavailable emits mic_clicked and shows friendly status
+    clicked = []
+    page.mic_clicked.connect(lambda: clicked.append(True))
+    page.mic_btn.click()
+    assert len(clicked) == 1
+    assert "chưa khả dụng" in page._status_label.text()
+
+    # READY
+    page.set_mic_state(MicState.READY)
+    assert page.mic_btn.isEnabled()
+    assert "Bắt đầu nói" in page.mic_btn.toolTip()
+    assert page._status_label.text() == "Sẵn sàng trò chuyện"
+
+    # LISTENING
+    page.set_mic_state(MicState.LISTENING)
+    assert page.mic_btn.isEnabled()
+    assert page.mic_btn.property("listening") == "true"
+    assert page._status_label.text() == "Đang nghe..."
+
+    # STT_PROCESSING
+    page.set_mic_state(MicState.STT_PROCESSING)
+    assert not page.mic_btn.isEnabled()
+    assert page._status_label.text() == "Đang nhận dạng giọng nói..."
+
+    # LLM_PROCESSING
+    page.set_mic_state(MicState.LLM_PROCESSING)
+    assert not page.mic_btn.isEnabled()
+    assert page._status_label.text() == "Đang xử lý..."
+
+    # ERROR
+    page.set_mic_state(MicState.ERROR)
+    assert not page.mic_btn.isEnabled()
+    assert page._status_label.text() == "Lỗi microphone"
+
+
+def test_chat_page_speaker_and_stop_speaking(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    # Initial speaker enabled
+    assert page._speaker_enabled is True
+    speaker_signals = []
+    page.speaker_toggled.connect(speaker_signals.append)
+
+    # Toggle speaker off
+    page._speaker_btn.click()
+    assert page._speaker_enabled is False
+    assert speaker_signals == [False]
+
+    # Toggle speaker on
+    page._speaker_btn.click()
+    assert page._speaker_enabled is True
+    assert speaker_signals == [False, True]
+
+    # Test stop speaking button
+    stop_btn = page.findChild(QPushButton, "chatStopSpeakingButton")
+    assert stop_btn.isHidden()
+    assert page._is_speaking is False
+
+    page.set_speaker_speaking(True)
+    assert page._is_speaking is True
+    assert not stop_btn.isHidden()
+    assert page._status_label.text() == "Đang nói..."
+
+    # Click stop speaking button
+    stop_signals = []
+    page.stop_speaking_requested.connect(lambda: stop_signals.append(True))
+    stop_btn.click()
+    assert len(stop_signals) == 1
+    assert page._is_speaking is False
+    assert stop_btn.isHidden()
+    assert page._status_label.text() == "Sẵn sàng trò chuyện"
+
+
+def test_chat_page_typing_indicator_and_busy_lock(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    submitted = []
+    page.chat_submitted.connect(submitted.append)
+
+    page.input.setText("Câu hỏi kiểm tra")
+    page._send_btn.click()
+    assert submitted == ["Câu hỏi kiểm tra"]
+
+    # Input is locked (busy)
+    assert not page.input.isEnabled()
+    assert not page._send_btn.isEnabled()
+    assert page._send_btn.text() == "..."
+    assert page._typing_bubble is not None
+    assert page._typing_timer.isActive()
+
+    # Attempting to double-send does nothing
+    page.input.setText("Gửi lần 2")
+    page._on_send()
+    assert len(submitted) == 1
+
+    # Receive response unlocks and removes typing indicator
+    page.receive_response("Câu trả lời từ Souta")
+    assert page.input.isEnabled()
+    assert page._send_btn.isEnabled()
+    assert page._send_btn.text() == "Gửi"
+    assert page._typing_bubble is None
+    assert not page._typing_timer.isActive()
+
+    # Check messages contain response
+    texts = [lbl.text() for lbl in page.findChildren(QLabel, "bubbleText")]
+    assert "Câu hỏi kiểm tra" in texts
+    assert "Câu trả lời từ Souta" in texts
+
+
+def test_chat_page_reset_conversation(app):
+    from robot_ui.kiosk.widgets import ChatPage
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    page.input.setText("Tin nhắn trước reset")
+    page._on_send()
+    page.receive_response("Phản hồi trước reset")
+
+    page.reset_conversation()
+
+    # Check input and state clean
+    assert page.input.text() == ""
+    assert page.input.isEnabled()
+    assert page._status_label.text() == "Sẵn sàng trò chuyện"
+
+    # Suggestions are restored
+    chips = [btn for btn in page.findChildren(QPushButton) if btn.objectName() == "suggestionChip"]
+    assert len(chips) == 4
+    assert not page._suggestions_widget.isHidden()
+
+    # Only initial greeting message
+    texts = [lbl.text() for lbl in page.findChildren(QLabel, "bubbleText")]
+    assert len(texts) == 1
+    assert "Xin chào! Tôi là Souta Robot" in texts[0]
+
 
 

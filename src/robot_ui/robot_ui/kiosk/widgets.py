@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 import math
 from datetime import datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from PyQt5.QtCore import QPointF, QRectF, QSize
 from PyQt5.QtWidgets import (
     QFrame,
     QGraphicsOpacityEffect,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -588,26 +590,60 @@ class NavigationPage(QWidget):
             self.set_navigation_active(False)
 
 
+class MicState(Enum):
+    READY = "ready"
+    LISTENING = "listening"
+    UNAVAILABLE = "unavailable"
+    STT_PROCESSING = "stt_processing"
+    LLM_PROCESSING = "llm_processing"
+    ERROR = "error"
+
+
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     home_requested = pyqtSignal()
+    mic_clicked = pyqtSignal()
+    speaker_toggled = pyqtSignal(bool)
+    stop_speaking_requested = pyqtSignal()
+
+    DEFAULT_SUGGESTIONS = (
+        "Giới thiệu về PTIT",
+        "Giới thiệu về Robot",
+        "Giới thiệu về Khoa Kỹ thuật Điện tử 1",
+        "Giới thiệu về nhóm nghiên cứu OpenWorkShop",
+    )
+
     def __init__(
         self,
         chat_icon: Path,
         parent: QWidget | None = None,
         back_icon: Path | None = None,
+        voice_icons: dict[str, Path] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("chatPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self._voice_icons = voice_icons or {}
+        self._speaker_enabled = True
+        self._is_speaking = False
+        self._mic_state = MicState.UNAVAILABLE
+        self._typing_bubble: QWidget | None = None
+        self._typing_dots = 1
+        self._typing_timer = QTimer(self)
+        self._typing_timer.timeout.connect(self._update_typing_dots)
+        self._suggestions_widget: QWidget | None = None
+
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 14, 20, 18)
+        root.setContentsMargins(18, 12, 18, 14)
         root.setSpacing(10)
 
+        # A. Header (64-72px)
         header = QFrame()
         header.setObjectName("chatHeader")
+        header.setMinimumHeight(64)
+        header.setMaximumHeight(72)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 7, 12, 7)
+        header_layout.setContentsMargins(12, 8, 12, 8)
         header_layout.setSpacing(10)
 
         back = QPushButton()
@@ -617,7 +653,7 @@ class ChatPage(QWidget):
         back.setFixedSize(46, 46)
         if back_icon and Path(back_icon).is_file():
             back.setIcon(QIcon(str(back_icon)))
-            back.setIconSize(QSize(30, 30))
+            back.setIconSize(QSize(28, 28))
         else:
             back.setText("‹")
             back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
@@ -629,26 +665,46 @@ class ChatPage(QWidget):
         icon_label.setPixmap(
             monochrome_icon(chat_icon, QColor("#ffb32c")).pixmap(QSize(26, 26))
         )
-        icon_label.setFixedSize(32, 32)
+        icon_label.setFixedSize(36, 36)
         icon_label.setAlignment(Qt.AlignCenter)
         header_layout.addWidget(icon_label)
 
         heading = QVBoxLayout()
-        heading.setSpacing(0)
-        title = QLabel("TRÒ CHUYỆN")
+        heading.setSpacing(2)
+        title = QLabel("Souta Assistant")
         title.setObjectName("chatTitle")
-        subtitle = QLabel("Trợ lý Souta Robot")
-        subtitle.setObjectName("chatSubtitle")
+        self._status_label = QLabel("Sẵn sàng trò chuyện")
+        self._status_label.setObjectName("chatSubtitle")
         heading.addWidget(title)
-        heading.addWidget(subtitle)
+        heading.addWidget(self._status_label)
         header_layout.addLayout(heading)
+
         header_layout.addStretch(1)
 
-        llm_status = QLabel("●  LLM: CHƯA KẾT NỐI")
-        llm_status.setObjectName("llmStatus")
-        header_layout.addWidget(llm_status)
+        # Stop speaking button (hidden unless speaking)
+        self._stop_speaking_btn = QPushButton("Dừng nói")
+        self._stop_speaking_btn.setObjectName("chatStopSpeakingButton")
+        self._stop_speaking_btn.setMinimumHeight(44)
+        self._stop_speaking_btn.setIcon(self._get_icon("stop_speaking"))
+        self._stop_speaking_btn.setIconSize(QSize(22, 22))
+        self._stop_speaking_btn.setCursor(Qt.PointingHandCursor)
+        self._stop_speaking_btn.hide()
+        self._stop_speaking_btn.clicked.connect(self._on_stop_speaking_clicked)
+        header_layout.addWidget(self._stop_speaking_btn)
+
+        # Speaker toggle button (min 48x48)
+        self._speaker_btn = QPushButton()
+        self._speaker_btn.setObjectName("chatSpeakerButton")
+        self._speaker_btn.setFixedSize(48, 48)
+        self._speaker_btn.setIconSize(QSize(26, 26))
+        self._speaker_btn.setCursor(Qt.PointingHandCursor)
+        self._speaker_btn.clicked.connect(self._toggle_speaker)
+        header_layout.addWidget(self._speaker_btn)
+        self._update_speaker_ui()
+
         root.addWidget(header)
 
+        # B. Conversation Area
         conversation = QFrame()
         conversation.setObjectName("chatConversation")
         conversation_layout = QVBoxLayout(conversation)
@@ -663,37 +719,67 @@ class ChatPage(QWidget):
         self._message_container = QWidget()
         self._message_container.setObjectName("chatMessageContainer")
         self._messages_layout = QVBoxLayout(self._message_container)
-        self._messages_layout.setContentsMargins(8, 8, 8, 8)
-        self._messages_layout.setSpacing(8)
+        self._messages_layout.setContentsMargins(10, 10, 10, 10)
+        self._messages_layout.setSpacing(10)
         self._messages_layout.addStretch(1)
         self.messages.setWidget(self._message_container)
-        # Auto-scroll: khi content mới thêm vào làm range thay đổi → cuộn xuống cuối
+
         self.messages.verticalScrollBar().rangeChanged.connect(
             lambda _min, _max: self.messages.verticalScrollBar().setValue(_max)
         )
         conversation_layout.addWidget(self.messages)
         root.addWidget(conversation, 1)
 
+        # C. Input Bar (72-84px)
         input_bar = QFrame()
         input_bar.setObjectName("chatInputBar")
+        input_bar.setMinimumHeight(72)
+        input_bar.setMaximumHeight(84)
         input_row = QHBoxLayout(input_bar)
-        input_row.setContentsMargins(8, 7, 7, 7)
-        input_row.setSpacing(8)
+        input_row.setContentsMargins(10, 10, 10, 10)
+        input_row.setSpacing(10)
+
         self.input = QLineEdit()
         self.input.setObjectName("chatInput")
-        self.input.setPlaceholderText("Nhập nội dung...")
-        self.input.setMinimumHeight(48)
-        self._send_btn = QPushButton("Gửi")
-        self._send_btn.setObjectName("primaryButton")
-        self._send_btn.setMinimumSize(90, 48)
-        self._send_btn.clicked.connect(self._on_send)
+        self.input.setPlaceholderText("Nhập câu hỏi của bạn...")
+        self.input.setMinimumHeight(52)
         self.input.returnPressed.connect(self._on_send)
         input_row.addWidget(self.input, 1)
+
+        self.mic_btn = QPushButton()
+        self.mic_btn.setObjectName("chatMicButton")
+        self.mic_btn.setFixedSize(54, 52)
+        self.mic_btn.setIconSize(QSize(28, 28))
+        self.mic_btn.setCursor(Qt.PointingHandCursor)
+        self.mic_btn.clicked.connect(self._on_mic_clicked)
+        input_row.addWidget(self.mic_btn)
+
+        self._send_btn = QPushButton("Gửi")
+        self._send_btn.setObjectName("chatSendButton")
+        self._send_btn.setFixedSize(76, 52)
+        self._send_btn.setCursor(Qt.PointingHandCursor)
+        self._send_btn.clicked.connect(self._on_send)
         input_row.addWidget(self._send_btn)
+
         root.addWidget(input_bar)
 
-        self._llm_status_label = llm_status  # giữ tham chiếu để cập nhật
+        # Initial state setup
+        self.set_mic_state(MicState.UNAVAILABLE)
         self._add_message("Souta Robot", "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
+        self._add_suggestions()
+
+    def _get_icon(self, name: str) -> QIcon:
+        path = self._voice_icons.get(name)
+        if path is not None and Path(path).is_file():
+            return QIcon(str(path))
+        try:
+            from robot_ui.kiosk.assets import icon_path
+            p = icon_path(f"{name}.png")
+            if p.is_file():
+                return QIcon(str(p))
+        except Exception:
+            pass
+        return QIcon()
 
     def _add_message(self, sender: str, message: str, from_user: bool = False) -> None:
         row = QWidget()
@@ -704,10 +790,10 @@ class ChatPage(QWidget):
 
         bubble = QFrame()
         bubble.setObjectName("userBubble" if from_user else "robotBubble")
-        bubble.setMaximumWidth(560)
+        bubble.setMaximumWidth(580)
         bubble_layout = QVBoxLayout(bubble)
-        bubble_layout.setContentsMargins(13, 8, 13, 9)
-        bubble_layout.setSpacing(3)
+        bubble_layout.setContentsMargins(14, 10, 14, 10)
+        bubble_layout.setSpacing(4)
 
         sender_label = QLabel(sender)
         sender_label.setObjectName("userBubbleSender" if from_user else "robotBubbleSender")
@@ -727,32 +813,206 @@ class ChatPage(QWidget):
 
         self._messages_layout.insertWidget(self._messages_layout.count() - 1, row)
 
+    def _add_suggestions(self) -> None:
+        self._hide_suggestions()
+        container = QFrame()
+        container.setObjectName("suggestionContainer")
+        grid = QGridLayout(container)
+        grid.setContentsMargins(4, 4, 4, 4)
+        grid.setSpacing(8)
+        self._suggestion_buttons: list[QPushButton] = []
+        for i, text in enumerate(self.DEFAULT_SUGGESTIONS):
+            btn = QPushButton(text)
+            btn.setObjectName("suggestionChip")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.clicked.connect(lambda checked=False, query=text: self._on_suggestion_clicked(query))
+            grid.addWidget(btn, i // 2, i % 2)
+            self._suggestion_buttons.append(btn)
+        self._suggestions_widget = container
+        self._messages_layout.insertWidget(self._messages_layout.count() - 1, container)
+
+    def _hide_suggestions(self) -> None:
+        if self._suggestions_widget is not None:
+            self._suggestions_widget.hide()
+
+    def _on_suggestion_clicked(self, prompt: str) -> None:
+        self._hide_suggestions()
+        self.input.setText(prompt)
+        self._on_send()
+
+    def _show_typing_indicator(self) -> None:
+        if self._typing_bubble is not None:
+            return
+        row = QWidget()
+        row.setObjectName("chatMessageRow")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(0)
+
+        bubble = QFrame()
+        bubble.setObjectName("typingBubble")
+        bubble.setMaximumWidth(580)
+        bubble_layout = QVBoxLayout(bubble)
+        bubble_layout.setContentsMargins(14, 10, 14, 10)
+        bubble_layout.setSpacing(4)
+
+        sender_label = QLabel("Souta Robot")
+        sender_label.setObjectName("robotBubbleSender")
+        self._typing_label = QLabel("Souta đang trả lời.")
+        self._typing_label.setObjectName("typingText")
+        bubble_layout.addWidget(sender_label)
+        bubble_layout.addWidget(self._typing_label)
+
+        row_layout.addWidget(bubble)
+        row_layout.addStretch(1)
+
+        self._typing_bubble = row
+        self._messages_layout.insertWidget(self._messages_layout.count() - 1, row)
+        self._typing_dots = 1
+        self._typing_timer.start(450)
+
+    def _update_typing_dots(self) -> None:
+        if self._typing_bubble is not None and hasattr(self, "_typing_label"):
+            self._typing_dots = (self._typing_dots % 3) + 1
+            dots = "." * self._typing_dots
+            self._typing_label.setText(f"Souta đang trả lời{dots}")
+
+    def _remove_typing_indicator(self) -> None:
+        self._typing_timer.stop()
+        if self._typing_bubble is not None:
+            self._messages_layout.removeWidget(self._typing_bubble)
+            self._typing_bubble.deleteLater()
+            self._typing_bubble = None
+
     def _on_send(self) -> None:
         text = self.input.text().strip()
-        if not text:
+        if not text or not self.input.isEnabled():
             return
+        self._hide_suggestions()
         self.input.clear()
         self._add_message("Bạn", text, from_user=True)
         self.set_busy(True)
         self.chat_submitted.emit(text)
 
     # ------------------------------------------------------------------
+    # Voice Chat & Speaker State Management
+    # ------------------------------------------------------------------
+
+    def set_mic_state(self, state: MicState) -> None:
+        self._mic_state = state
+        if state == MicState.READY:
+            self.mic_btn.setIcon(self._get_icon("mic"))
+            self.mic_btn.setEnabled(True)
+            self.mic_btn.setToolTip("Bắt đầu nói")
+            self.mic_btn.setProperty("listening", "false")
+            self.set_status("Sẵn sàng trò chuyện")
+        elif state == MicState.LISTENING:
+            self.mic_btn.setIcon(self._get_icon("mic_listening"))
+            self.mic_btn.setEnabled(True)
+            self.mic_btn.setToolTip("Đang ghi âm (chạm để dừng)")
+            self.mic_btn.setProperty("listening", "true")
+            self.set_status("Đang nghe...")
+        elif state == MicState.UNAVAILABLE:
+            self.mic_btn.setIcon(self._get_icon("mic_off"))
+            self.mic_btn.setEnabled(True)  # click shows friendly message
+            self.mic_btn.setToolTip("Trò chuyện bằng giọng nói chưa khả dụng")
+            self.mic_btn.setProperty("listening", "false")
+        elif state == MicState.STT_PROCESSING:
+            self.mic_btn.setIcon(self._get_icon("mic"))
+            self.mic_btn.setEnabled(False)
+            self.mic_btn.setToolTip("Đang nhận dạng giọng nói...")
+            self.mic_btn.setProperty("listening", "false")
+            self.set_status("Đang nhận dạng giọng nói...")
+        elif state == MicState.LLM_PROCESSING:
+            self.mic_btn.setIcon(self._get_icon("mic"))
+            self.mic_btn.setEnabled(False)
+            self.mic_btn.setToolTip("Đang xử lý câu hỏi...")
+            self.mic_btn.setProperty("listening", "false")
+            self.set_status("Đang xử lý...")
+        elif state == MicState.ERROR:
+            self.mic_btn.setIcon(self._get_icon("mic_off"))
+            self.mic_btn.setEnabled(False)
+            self.mic_btn.setToolTip("Lỗi microphone")
+            self.mic_btn.setProperty("listening", "false")
+            self.set_status("Lỗi microphone")
+        self.mic_btn.style().unpolish(self.mic_btn)
+        self.mic_btn.style().polish(self.mic_btn)
+
+    def _on_mic_clicked(self) -> None:
+        self.mic_clicked.emit()
+        if self._mic_state == MicState.UNAVAILABLE:
+            self.set_status("Trò chuyện bằng giọng nói chưa khả dụng")
+            QTimer.singleShot(
+                2500,
+                lambda: self.set_status("Sẵn sàng trò chuyện")
+                if self._mic_state == MicState.UNAVAILABLE and not self._is_speaking
+                else None,
+            )
+
+    def _toggle_speaker(self) -> None:
+        self._speaker_enabled = not self._speaker_enabled
+        self._update_speaker_ui()
+        if not self._speaker_enabled and self._is_speaking:
+            self.stop_speaking()
+        self.speaker_toggled.emit(self._speaker_enabled)
+
+    def _update_speaker_ui(self) -> None:
+        icon_name = "speaker_on" if self._speaker_enabled else "speaker_off"
+        self._speaker_btn.setIcon(self._get_icon(icon_name))
+        self._speaker_btn.setToolTip("Bật âm thanh" if not self._speaker_enabled else "Tắt âm thanh")
+
+    def set_speaker_speaking(self, is_speaking: bool) -> None:
+        self._is_speaking = is_speaking
+        if is_speaking:
+            self._stop_speaking_btn.show()
+            self.set_status("Đang nói...")
+        else:
+            self._stop_speaking_btn.hide()
+            if self._mic_state != MicState.LISTENING and self.input.isEnabled():
+                self.set_status("Sẵn sàng trò chuyện")
+
+    def _on_stop_speaking_clicked(self) -> None:
+        self.stop_speaking()
+
+    def stop_speaking(self) -> None:
+        self.set_speaker_speaking(False)
+        self.stop_speaking_requested.emit()
+
+    def set_status(self, status: str) -> None:
+        self._status_label.setText(status)
+
+    # ------------------------------------------------------------------
     # Public API – được gọi từ KioskWindow để wire LLM
     # ------------------------------------------------------------------
 
     def reset_conversation(self) -> None:
-        # Keep the trailing stretch and remove all visible message widgets.
+        self.stop_speaking()
+        self._remove_typing_indicator()
         while self._messages_layout.count() > 1:
             item = self._messages_layout.takeAt(0)
             if item.widget() is not None:
                 item.widget().deleteLater()
+        self._suggestions_widget = None
         self.set_busy(False)
         self.input.clear()
+        self.set_mic_state(MicState.UNAVAILABLE)
+        self.set_status("Sẵn sàng trò chuyện")
         self._add_message("Souta Robot", "Xin chào! Tôi là Souta Robot. Tôi có thể giúp gì cho bạn?")
+        self._add_suggestions()
 
     def set_llm_status(self, status: str) -> None:
-        """Cập nhật label trạng thái LLM ở header."""
-        self._llm_status_label.setText(status)
+        """Ghi log kỹ thuật và cập nhật UI thân thiện cho khách."""
+        print(f"[robot_ui] LLM status: {status}", flush=True)
+        if "ĐANG XỬ LÝ" in status:
+            self.set_status("Đang xử lý...")
+            self.set_mic_state(MicState.LLM_PROCESSING)
+        elif "LỖI" in status or "⚠️" in status:
+            self.set_status(status)
+        else:
+            if not self._is_speaking and self._mic_state != MicState.LISTENING:
+                self.set_status("Sẵn sàng trò chuyện")
+            if self._mic_state == MicState.LLM_PROCESSING:
+                self.set_mic_state(MicState.UNAVAILABLE)
 
     def receive_response(self, response: str) -> None:
         """Hiển thị response từ LLM và mở khóa input."""
@@ -763,6 +1023,7 @@ class ChatPage(QWidget):
         """Hiển thị lỗi và mở khóa input."""
         self.set_busy(False)
         self._add_message("Souta Robot", f"⚠️ Lỗi: {error_msg}")
+        self.set_status(f"⚠️ {error_msg}")
 
     def set_busy(self, busy: bool) -> None:
         """Khoá/mở input trong khi đang chờ LLM."""
@@ -770,8 +1031,16 @@ class ChatPage(QWidget):
         self._send_btn.setEnabled(not busy)
         if busy:
             self._send_btn.setText("...")
+            self.set_status("Đang xử lý...")
+            self._show_typing_indicator()
+            if self._mic_state in (MicState.READY, MicState.UNAVAILABLE):
+                self.mic_btn.setEnabled(False)
         else:
             self._send_btn.setText("Gửi")
+            self._remove_typing_indicator()
+            self.set_status("Sẵn sàng trò chuyện")
+            if self._mic_state in (MicState.READY, MicState.UNAVAILABLE):
+                self.mic_btn.setEnabled(True)
 
 
 class NavButton(QPushButton):
