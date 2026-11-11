@@ -225,7 +225,7 @@ local_costmap:
       width: 4
       height: 4
       resolution: 0.1
-      footprint: '[[0.35, 0.28], [0.35, -0.28], [-0.31, -0.28], [-0.31, 0.28]]'
+      footprint: '[[0.31, 0.28], [0.31, -0.28], [-0.35, -0.28], [-0.35, 0.28]]'
       plugins:
       - voxel_layer
       - inflation_layer
@@ -274,7 +274,7 @@ global_costmap:
       publish_frequency: 1.0
       global_frame: map
       robot_base_frame: base_footprint
-      footprint: '[[0.35, 0.28], [0.35, -0.28], [-0.31, -0.28], [-0.31, 0.28]]'
+      footprint: '[[0.31, 0.28], [0.31, -0.28], [-0.35, -0.28], [-0.35, 0.28]]'
       resolution: 0.1
       track_unknown_space: true
       plugins:

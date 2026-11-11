@@ -817,9 +817,11 @@ class MainWindow(QWidget):
     human_signal = pyqtSignal(bool)
     mission_log_signal = pyqtSignal(str)
     mission_popup_signal = pyqtSignal(str)
-    LAYER1_SIM, LAYER1_REAL = "layer1_sim", "layer1_real"
+    LAYER1_REAL = "layer1_real"
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
+    CAMERAS = "cameras"
+    AI_PERCEPTION, BACKEND = "ai_perception", "backend"
 
     def __init__(self):
         super().__init__()
@@ -838,7 +840,7 @@ class MainWindow(QWidget):
         self.proc_mgr = ProcessManager(self.append_log)
         self.last_thought_title = ""
         self.last_thought_time = 0.0
-        # Tự động dọn dẹp các tiến trình ROS2 & Gazebo chạy ngầm từ trước
+        # Tự động dọn dẹp các tiến trình ROS2 chạy ngầm từ trước
         self.force_kill_known_ros_processes()
         self.ros_node = None
         self.ros_spin_thread = None
@@ -855,7 +857,7 @@ class MainWindow(QWidget):
         self.mission_popup_signal.connect(self._on_mission_popup_ui)
         self.init_ui()
         self.load_patrol_config_from_yaml(silent=True)
-        self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 & Gazebo cũ trước khi khởi động.")
+        self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 cũ trước khi khởi động.")
         self.init_ros()
         self.refresh_map_list()
         self.status_timer = QTimer(self)
@@ -866,15 +868,8 @@ class MainWindow(QWidget):
         self.mock_timer.start(400)
 
     def init_ui(self):
-        self.rb_sim = QRadioButton("Simulation (Gazebo)")
-        self.rb_real = QRadioButton("Robot thật")
-        self.rb_real.setChecked(True)
-        self.robot_mode_group = QButtonGroup(self)
-        self.robot_mode_group.setExclusive(True)
-        self.robot_mode_group.addButton(self.rb_sim)
-        self.robot_mode_group.addButton(self.rb_real)
-        self.rb_sim.toggled.connect(self.on_robot_mode_changed)
-        self.rb_real.toggled.connect(self.on_robot_mode_changed)
+        self.lbl_robot_mode_val = QLabel("Robot thật (Jetson Orin Nano)")
+        self.lbl_robot_mode_val.setStyleSheet("font-weight: bold; color: #1d4ed8;")
         self.cmb_odom_source = QComboBox()
         self.cmb_odom_source.addItem("Hoverboard ros2_control", "hoverboard")
         self.cmb_odom_source.addItem("ESP encoder odom", "esp")
@@ -889,7 +884,7 @@ class MainWindow(QWidget):
         self.chk_auto_nav2.setChecked(True)
         system_group = QGroupBox("Cấu hình hệ thống")
         system_layout = QGridLayout()
-        system_layout.addWidget(QLabel("Robot mode:"), 0, 0); system_layout.addWidget(self.rb_sim, 0, 1); system_layout.addWidget(self.rb_real, 0, 2)
+        system_layout.addWidget(QLabel("Robot mode:"), 0, 0); system_layout.addWidget(self.lbl_robot_mode_val, 0, 1, 1, 2)
         system_layout.addWidget(QLabel("Odom source:"), 1, 0); system_layout.addWidget(self.cmb_odom_source, 1, 1, 1, 2)
         system_layout.addWidget(QLabel("Operation mode:"), 2, 0); system_layout.addWidget(self.cmb_operation_mode, 2, 1, 1, 2)
         system_layout.addWidget(QLabel("Localization backend:"), 3, 0); system_layout.addWidget(self.cmb_localization_backend, 3, 1, 1, 2)
@@ -906,6 +901,23 @@ class MainWindow(QWidget):
         system_layout.addWidget(QLabel("Cổng LiDAR:"), 6, 0); system_layout.addWidget(self.cmb_lidar_port, 6, 1, 1, 2)
         port_btns = QHBoxLayout(); port_btns.addWidget(self.btn_refresh_ports); port_btns.addWidget(self.btn_swap_ports)
         system_layout.addLayout(port_btns, 7, 0, 1, 3)
+
+        self.cmb_yolo_device = QComboBox()
+        self.cmb_yolo_device.addItems(["cuda:0", "cpu"])
+        self.cmb_yolo_device.setToolTip("Thiết bị chạy YOLO tracking (mặc định cuda:0 trên Jetson Orin Nano)")
+        self.cmb_pose_device = QComboBox()
+        self.cmb_pose_device.addItems(["cpu", "cuda:0"])
+        self.cmb_pose_device.setToolTip("Thiết bị chạy HandWave RTMPose (mặc định cpu để tránh nghẽn VRAM với YOLO)")
+        self.chk_ai_cameras = QCheckBox("Bật 3 camera Astra cùng AI (three_astra)")
+        self.chk_ai_cameras.setChecked(True)
+        self.chk_obstacle_detectors = QCheckBox("Bật detect vật cản 2 cam (/scan_obstacles)")
+        self.chk_obstacle_detectors.setChecked(True)
+        self.chk_obstacle_detectors.setToolTip("Chạy depth_obstacle_detector cho cam trước và cam sau khi bật Cam hoặc AI")
+        system_layout.addWidget(QLabel("AI YOLO / Pose:"), 8, 0)
+        system_layout.addWidget(self.cmb_yolo_device, 8, 1)
+        system_layout.addWidget(self.cmb_pose_device, 8, 2)
+        system_layout.addWidget(self.chk_ai_cameras, 9, 0, 1, 3)
+        system_layout.addWidget(self.chk_obstacle_detectors, 10, 0, 1, 3)
         system_group.setLayout(system_layout)
         self.lbl_map_folder = QLabel("Map folder: "); self.lbl_map_folder.setWordWrap(True)
         self.cmb_map_files = QComboBox(); self.cmb_map_files.currentIndexChanged.connect(self.on_selected_map_changed)
@@ -933,40 +945,52 @@ class MainWindow(QWidget):
         self.btn_start_mode = QPushButton("Start Layer 2 (Mode)"); self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
         self.btn_switch_mode = QPushButton("Switch Layer 2 Mode")
         self.btn_start_nav2 = QPushButton("Start Nav2"); self.btn_stop_nav2 = QPushButton("Stop Nav2")
+        self.btn_start_cameras = QPushButton("Start Cam (3 Cam + Vật cản)"); self.btn_stop_cameras = QPushButton("Stop Cam")
+        self.btn_start_ai = QPushButton("Start AI (Cam + YOLO)"); self.btn_stop_ai = QPushButton("Stop AI")
+        self.btn_start_backend = QPushButton("Start Backend (Mission)"); self.btn_stop_backend = QPushButton("Stop Backend")
         self.btn_cancel_nav2 = QPushButton("⛔ DỪNG KHẨN CẤP / HỦY GOAL")
         self.btn_cancel_nav2.setStyleSheet("background-color: #dc2626; color: white; font-weight: bold; padding: 7px; border-radius: 4px;")
         self.btn_cancel_nav2.setToolTip("Hủy mục tiêu Nav2 lập tức và phanh robot đứng im tại chỗ (không tắt Nav2)")
         self.btn_start_all = QPushButton("Start All"); self.btn_stop_all = QPushButton("Stop All")
         self.edt_kill_node = QLineEdit("rviz2"); self.btn_kill_node = QPushButton("Kill Node")
-        self.btn_cleanup_all = QPushButton("Dọn sạch ROS2 / Gazebo")
+        self.btn_cleanup_all = QPushButton("Dọn sạch ROS2")
         self.btn_cleanup_all.setStyleSheet("background-color: #fee2e2; color: #b91c1c; font-weight: bold;")
-        self.btn_cleanup_all.setToolTip("Quét và đóng sạch tất cả tiến trình ROS 2, Gazebo và reset daemon")
+        self.btn_cleanup_all.setToolTip("Quét và đóng sạch tất cả tiến trình ROS 2 và reset daemon")
         self.btn_start_platform.clicked.connect(self.start_platform); self.btn_stop_platform.clicked.connect(self.stop_platform)
         self.btn_start_mode.clicked.connect(self.start_operation_mode); self.btn_stop_mode.clicked.connect(self.stop_operation_mode)
         self.btn_switch_mode.clicked.connect(self.switch_operation_mode)
         self.btn_start_nav2.clicked.connect(self.start_nav2); self.btn_stop_nav2.clicked.connect(self.stop_nav2)
+        self.btn_start_cameras.clicked.connect(self.start_cameras); self.btn_stop_cameras.clicked.connect(self.stop_cameras)
+        self.btn_start_ai.clicked.connect(self.start_ai_perception); self.btn_stop_ai.clicked.connect(self.stop_ai_perception)
+        self.btn_start_backend.clicked.connect(self.start_backend); self.btn_stop_backend.clicked.connect(self.stop_backend)
         self.btn_cancel_nav2.clicked.connect(self.cancel_nav2_goal)
         self.btn_start_all.clicked.connect(self.start_all); self.btn_stop_all.clicked.connect(self.stop_all)
         self.btn_kill_node.clicked.connect(self.kill_node); self.btn_cleanup_all.clicked.connect(self.manual_cleanup)
         self.lbl_platform_status = QLabel("Layer1 Odom: OFF"); self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
-        self.lbl_nav2_status = QLabel("Nav2: OFF"); self.lbl_odom_status = QLabel("Odom source: esp -> /odom"); self.lbl_dataenc = QLabel("Encoder /dataenc: -")
+        self.lbl_nav2_status = QLabel("Nav2: OFF"); self.lbl_cameras_status = QLabel("Cam + Vật cản: OFF")
+        self.lbl_ai_status = QLabel("AI Perception: OFF"); self.lbl_backend_status = QLabel("Backend: OFF")
+        self.lbl_odom_status = QLabel("Odom source: esp -> /odom"); self.lbl_dataenc = QLabel("Encoder /dataenc: -")
         control_group = QGroupBox("Điều khiển"); control_layout = QGridLayout()
         control_layout.addWidget(self.btn_start_platform, 0, 0); control_layout.addWidget(self.btn_stop_platform, 0, 1)
         control_layout.addWidget(self.btn_start_mode, 1, 0); control_layout.addWidget(self.btn_stop_mode, 1, 1)
         control_layout.addWidget(self.btn_switch_mode, 2, 0, 1, 2)
         control_layout.addWidget(self.btn_start_nav2, 3, 0); control_layout.addWidget(self.btn_stop_nav2, 3, 1)
-        control_layout.addWidget(self.btn_cancel_nav2, 4, 0, 1, 2)
-        control_layout.addWidget(self.btn_start_all, 5, 0); control_layout.addWidget(self.btn_stop_all, 5, 1)
-        control_layout.addWidget(QLabel("Node/pattern to kill:"), 6, 0); control_layout.addWidget(self.edt_kill_node, 6, 1)
-        control_layout.addWidget(self.btn_kill_node, 7, 0); control_layout.addWidget(self.btn_cleanup_all, 7, 1)
-        control_layout.addWidget(self.lbl_platform_status, 8, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 9, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nav2_status, 10, 0, 1, 2); control_layout.addWidget(self.lbl_odom_status, 11, 0, 1, 2)
-        control_layout.addWidget(self.lbl_dataenc, 12, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_cameras, 4, 0); control_layout.addWidget(self.btn_stop_cameras, 4, 1)
+        control_layout.addWidget(self.btn_start_ai, 5, 0); control_layout.addWidget(self.btn_stop_ai, 5, 1)
+        control_layout.addWidget(self.btn_start_backend, 6, 0); control_layout.addWidget(self.btn_stop_backend, 6, 1)
+        control_layout.addWidget(self.btn_cancel_nav2, 7, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_all, 8, 0); control_layout.addWidget(self.btn_stop_all, 8, 1)
+        control_layout.addWidget(QLabel("Node/pattern to kill:"), 9, 0); control_layout.addWidget(self.edt_kill_node, 9, 1)
+        control_layout.addWidget(self.btn_kill_node, 10, 0); control_layout.addWidget(self.btn_cleanup_all, 10, 1)
+        control_layout.addWidget(self.lbl_platform_status, 11, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 12, 0, 1, 2)
+        control_layout.addWidget(self.lbl_nav2_status, 13, 0, 1, 2); control_layout.addWidget(self.lbl_cameras_status, 14, 0, 1, 2)
+        control_layout.addWidget(self.lbl_ai_status, 15, 0, 1, 2); control_layout.addWidget(self.lbl_backend_status, 16, 0, 1, 2)
+        control_layout.addWidget(self.lbl_odom_status, 17, 0, 1, 2); control_layout.addWidget(self.lbl_dataenc, 18, 0, 1, 2)
         self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
         self.chk_mock_human.setStyleSheet("color: #0f172a; font-weight: bold;")
         self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
         self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
-        control_layout.addWidget(self.chk_mock_human, 13, 0, 1, 2)
+        control_layout.addWidget(self.chk_mock_human, 19, 0, 1, 2)
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
@@ -1246,7 +1270,7 @@ class MainWindow(QWidget):
         root_layout.setContentsMargins(4, 4, 4, 4)
         root_layout.addWidget(self.main_tabs)
         self.setLayout(root_layout)
-        self.on_robot_mode_changed(); self.refresh_batch_waypoint_views(); self.refresh_serial_ports()
+        self.on_operation_mode_changed(); self.on_odom_source_changed(); self.refresh_batch_waypoint_views(); self.refresh_serial_ports()
 
     def init_ros(self):
         if not rclpy.ok():
@@ -1778,33 +1802,17 @@ class MainWindow(QWidget):
         fpath = self.cmb_map_files.currentData()
         if fpath: self.selected_map_file = fpath; self.lbl_selected_map.setText(f"Map đang dùng: {fpath}")
 
-    def is_sim_mode(self): return self.rb_sim.isChecked()
     def ros_prefix(self):
         return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
     def get_selected_odom_source(self): return self.cmb_odom_source.currentData() or "esp"
     def get_selected_odom_topic(self): return "/odom"
     def on_odom_source_changed(self):
-        if self.is_sim_mode(): self.lbl_odom_status.setText("Odom source: gazebo -> /odom"); return
         self.lbl_odom_status.setText(f"Odom source: {self.get_selected_odom_source()} -> /odom")
     def on_operation_mode_changed(self):
         is_loc = self.cmb_operation_mode.currentText() == "Localization"
         self.cmb_localization_backend.setEnabled(is_loc)
-        if (not self.is_sim_mode()) and is_loc: self.chk_auto_nav2.setChecked(False); self.chk_auto_nav2.setEnabled(False)
+        if is_loc: self.chk_auto_nav2.setChecked(False); self.chk_auto_nav2.setEnabled(False)
         else: self.chk_auto_nav2.setEnabled(True)
-    def on_robot_mode_changed(self):
-        if self.ros_node:
-            sim_active = self.is_sim_mode()
-            param = rclpy.parameter.Parameter('use_sim_time', rclpy.Parameter.Type.BOOL, sim_active)
-            self.ros_node.set_parameters([param])
-        is_real = not self.is_sim_mode()
-        self.cmb_odom_source.setEnabled(is_real)
-        if hasattr(self, "cmb_esp_port"):
-            self.cmb_esp_port.setEnabled(is_real)
-            self.cmb_lidar_port.setEnabled(is_real)
-            self.btn_refresh_ports.setEnabled(is_real)
-            self.btn_swap_ports.setEnabled(is_real)
-        self.on_operation_mode_changed()
-        self.on_odom_source_changed()
 
     def refresh_serial_ports(self):
         detected_esp, detected_lidar, method = _detect_esp_lidar_ports()
@@ -1883,7 +1891,7 @@ class MainWindow(QWidget):
         if not (os.path.exists(slam_graph + ".posegraph") or os.path.exists(slam_graph + ".data")):
             QMessageBox.warning(self, "Thiếu map localization", "Không tìm thấy file posegraph/data cho SLAM localization.\nHãy Save map trước để tạo bản localization."); return False
         return True
-    def is_layer1_running(self): return self.proc_mgr.is_running(self.LAYER1_SIM) or self.proc_mgr.is_running(self.LAYER1_REAL)
+    def is_layer1_running(self): return self.proc_mgr.is_running(self.LAYER1_REAL)
     def _write_temp_yaml(self, data, prefix):
         fd, path = tempfile.mkstemp(prefix=prefix, suffix=".yaml"); os.close(fd)
         with open(path, "w", encoding="utf-8") as f: yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
@@ -1992,37 +2000,28 @@ class MainWindow(QWidget):
         self.append_log(f"Tạo params SLAM localization tạm: {temp_path}"); return temp_path
 
     def start_platform(self):
-        sim_time = _bool_to_ros(self.is_sim_mode())
-        if self.is_sim_mode():
-            self.proc_mgr.stop(self.LAYER1_REAL)
-            self.proc_mgr.start(self.LAYER1_SIM, self.ros_prefix() + f"ros2 launch mo_hinh virtual_robot_gazebo.launch.py use_sim_time:={sim_time}")
-            QTimer.singleShot(3500, self.unpause_gazebo_physics)
+        esp_port = self.cmb_esp_port.currentText().strip() if hasattr(self, "cmb_esp_port") else ""
+        lidar_port = self.cmb_lidar_port.currentText().strip() if hasattr(self, "cmb_lidar_port") else ""
+        if not esp_port or not lidar_port:
+            detected_esp, detected_lidar, detect_method = _detect_esp_lidar_ports()
+            esp_port = esp_port or detected_esp
+            lidar_port = lidar_port or detected_lidar
         else:
-            self.proc_mgr.stop(self.LAYER1_SIM)
-            esp_port = self.cmb_esp_port.currentText().strip() if hasattr(self, "cmb_esp_port") else ""
-            lidar_port = self.cmb_lidar_port.currentText().strip() if hasattr(self, "cmb_lidar_port") else ""
-            if not esp_port or not lidar_port:
-                detected_esp, detected_lidar, detect_method = _detect_esp_lidar_ports()
-                esp_port = esp_port or detected_esp
-                lidar_port = lidar_port or detected_lidar
-            else:
-                detect_method = "user_selection"
-            self.append_log(f"Khởi động Serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}")
-            self.proc_mgr.start(self.LAYER1_REAL, self.ros_prefix() + f"ros2 launch mo_hinh real_odom.launch.py odom_source:={self.get_selected_odom_source()} use_sim_time:={sim_time} hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}")
-    def stop_platform(self): self.proc_mgr.stop(self.LAYER1_SIM); self.proc_mgr.stop(self.LAYER1_REAL)
+            detect_method = "user_selection"
+        self.append_log(f"Khởi động Serial ({detect_method}): ESP={esp_port}, LiDAR={lidar_port}")
+        self.proc_mgr.start(
+            self.LAYER1_REAL,
+            self.ros_prefix()
+            + f"ros2 launch mo_hinh real_odom.launch.py odom_source:={self.get_selected_odom_source()} use_sim_time:=false hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}",
+        )
+    def stop_platform(self): self.proc_mgr.stop(self.LAYER1_REAL)
     def start_slam_mapping(self):
         self.append_log("Layer2 mode: SLAM Mapping")
-        sim_time = _bool_to_ros(self.is_sim_mode())
         self.proc_mgr.stop(self.AMCL); self.proc_mgr.stop(self.SLAM_LOCALIZATION)
         slam_params = self.build_slam_mapping_params()
-        if self.is_sim_mode():
-            self.proc_mgr.start(self.SLAM_MAPPING, self.ros_prefix() + f"ros2 launch slam_toolbox online_async_launch.py use_sim_time:={sim_time} slam_params_file:='{slam_params}'")
-            self.append_log("SLAM mô phỏng: cần robot di chuyển thì map mới mở rộng.")
-        else:
-            self.proc_mgr.start(self.SLAM_MAPPING, self.ros_prefix() + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:={sim_time} slam_params_file:='{slam_params}' use_rviz:=true")
+        self.proc_mgr.start(self.SLAM_MAPPING, self.ros_prefix() + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false slam_params_file:='{slam_params}' use_rviz:=true")
     def start_localization_backend(self):
         self.append_log(f"Layer2 mode: Localization ({self.cmb_localization_backend.currentText()})")
-        sim_time = _bool_to_ros(self.is_sim_mode())
         backend = self.cmb_localization_backend.currentText()
         if not self.ensure_map_selected(backend): return
         amcl_yaml, slam_graph = self.get_localization_map_targets()
@@ -2030,18 +2029,12 @@ class MainWindow(QWidget):
         if backend == "SLAM Toolbox":
             self.proc_mgr.stop(self.AMCL)
             slam_loc_params = self.build_slam_localization_params(slam_graph)
-            if self.is_sim_mode():
-                self.proc_mgr.start(self.SLAM_LOCALIZATION, self.ros_prefix() + f"ros2 launch slam_toolbox localization_launch.py use_sim_time:={sim_time} slam_params_file:='{slam_loc_params}'")
-            else:
-                self.proc_mgr.start(self.SLAM_LOCALIZATION, self.ros_prefix() + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=slam_toolbox use_sim_time:={sim_time} map_graph:='{slam_graph}' slam_params_file:='{slam_loc_params}' use_rviz:=true")
+            self.proc_mgr.start(self.SLAM_LOCALIZATION, self.ros_prefix() + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=slam_toolbox use_sim_time:=false map_graph:='{slam_graph}' slam_params_file:='{slam_loc_params}' use_rviz:=true")
             self.append_log(f"Localization backend=SLAM Toolbox -> map_graph: {slam_graph}")
         else:
             self.proc_mgr.stop(self.SLAM_LOCALIZATION)
             nav2_params = self.build_nav2_params_for_selected_odom()
-            if self.is_sim_mode():
-                self.proc_mgr.start(self.AMCL, self.ros_prefix() + f"ros2 launch nav2_bringup localization_launch.py use_sim_time:={sim_time} map:='{amcl_yaml}' params_file:='{nav2_params}'")
-            else:
-                self.proc_mgr.start(self.AMCL, self.ros_prefix() + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:={sim_time} map_yaml:='{amcl_yaml}' nav2_params_file:='{nav2_params}' use_rviz:=true")
+            self.proc_mgr.start(self.AMCL, self.ros_prefix() + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false map_yaml:='{amcl_yaml}' nav2_params_file:='{nav2_params}' use_rviz:=true")
             self.append_log(f"Localization backend=AMCL -> map_yaml: {amcl_yaml}")
     def start_operation_mode(self):
         if self.cmb_operation_mode.currentText() == "SLAM Mapping": self.start_slam_mapping()
@@ -2050,12 +2043,49 @@ class MainWindow(QWidget):
         self.append_log("Switch Layer 2 mode..."); self.stop_operation_mode(); QTimer.singleShot(600, self.start_operation_mode)
     def stop_operation_mode(self): self.proc_mgr.stop(self.SLAM_MAPPING); self.proc_mgr.stop(self.SLAM_LOCALIZATION); self.proc_mgr.stop(self.AMCL)
     def start_nav2(self):
-        sim_time = _bool_to_ros(self.is_sim_mode())
-        if (not self.is_sim_mode()) and self.cmb_operation_mode.currentText() == "Localization":
+        if self.cmb_operation_mode.currentText() == "Localization":
             self.append_log("Localization mode (real) đã bao gồm Nav2, bỏ qua Start Nav2 riêng."); return
         nav2_params = self.build_nav2_params_for_selected_odom()
-        self.proc_mgr.start(self.NAV2, self.ros_prefix() + f"ros2 launch nav2_bringup navigation_launch.py use_sim_time:={sim_time} params_file:='{nav2_params}'")
+        self.proc_mgr.start(self.NAV2, self.ros_prefix() + f"ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false params_file:='{nav2_params}'")
     def stop_nav2(self): self.proc_mgr.stop(self.NAV2)
+    def _build_ai_launch_cmd(self, enable_cameras: bool, enable_obstacles: bool, enable_ai_nodes: bool) -> str:
+        yolo_dev = self.cmb_yolo_device.currentText().strip() or "cuda:0"
+        pose_dev = self.cmb_pose_device.currentText().strip() or "cpu"
+        front_cfg = os.path.join(DEFAULT_MAP_DIR, "cam_truoc.yaml")
+        rear_cfg = os.path.join(DEFAULT_MAP_DIR, "cam_sau.yaml")
+        return (
+            self.ros_prefix()
+            + "ros2 launch robot_bringup ai_perception.launch.py"
+            + f" enable_cameras:={_bool_to_ros(enable_cameras)}"
+            + f" enable_obstacle_detectors:={_bool_to_ros(enable_obstacles)}"
+            + f" enable_ai_nodes:={_bool_to_ros(enable_ai_nodes)}"
+            + f" front_obstacle_config:={shlex.quote(front_cfg)}"
+            + f" rear_obstacle_config:={shlex.quote(rear_cfg)}"
+            + f" yolo_device:={shlex.quote(yolo_dev)}"
+            + f" pose_device:={shlex.quote(pose_dev)}"
+        )
+    def start_cameras(self):
+        if self.proc_mgr.is_running(self.AI_PERCEPTION):
+            self.append_log("AI Perception đang chạy cùng camera/vật cản; bỏ qua Start Cam riêng để tránh trùng thiết bị.")
+            return
+        enable_obs = self.chk_obstacle_detectors.isChecked()
+        cmd = self._build_ai_launch_cmd(enable_cameras=True, enable_obstacles=enable_obs, enable_ai_nodes=False)
+        self.proc_mgr.start(self.CAMERAS, cmd)
+    def stop_cameras(self): self.proc_mgr.stop(self.CAMERAS)
+    def start_ai_perception(self):
+        if self.proc_mgr.is_running(self.CAMERAS):
+            enable_cams = False
+            enable_obs = False
+            self.append_log("Cam + Vật cản đang chạy riêng; Start AI chỉ bật node AI (YOLO / HandWave / RoughLocalizer).")
+        else:
+            enable_cams = self.chk_ai_cameras.isChecked()
+            enable_obs = self.chk_obstacle_detectors.isChecked()
+        cmd = self._build_ai_launch_cmd(enable_cameras=enable_cams, enable_obstacles=enable_obs, enable_ai_nodes=True)
+        self.proc_mgr.start(self.AI_PERCEPTION, cmd)
+    def stop_ai_perception(self): self.proc_mgr.stop(self.AI_PERCEPTION)
+    def start_backend(self):
+        self.proc_mgr.start(self.BACKEND, self.ros_prefix() + "ros2 launch robot_bringup backend.launch.py")
+    def stop_backend(self): self.proc_mgr.stop(self.BACKEND)
     def cancel_nav2_goal(self):
         ros_node = self.get_ros_node()
         if ros_node is not None:
@@ -2063,9 +2093,6 @@ class MainWindow(QWidget):
             self.append_log("⛔ Đã kích hoạt DỪNG KHẨN CẤP / HỦY GOAL Nav2!")
         else:
             self.append_log("ROS Interface chưa sẵn sàng.")
-    def unpause_gazebo_physics(self):
-        if self.proc_mgr.is_running(self.LAYER1_SIM):
-            self.run_one_shot_command("unpause_physics", self.ros_prefix() + 'ros2 service call /unpause_physics std_srvs/srv/Empty "{}"')
     def kill_node(self):
         pattern = self.edt_kill_node.text().strip()
         if not pattern: QMessageBox.warning(self, "Thiếu tên node", "Bạn cần nhập tên node/pattern."); return
@@ -2116,17 +2143,23 @@ class MainWindow(QWidget):
         threading.Thread(target=_worker, daemon=True).start()
 
     def _set_status_label(self, label, name, is_on):
-        label.setText(f"{name}: {'ON' if is_on else 'OFF'}"); label.setStyleSheet(f"color: {'lime' if is_on else 'red'}; font-weight: bold;")
+        label.setText(f"{name}: {'ON' if is_on else 'OFF'}"); label.setStyleSheet(f"color: {'#16a34a' if is_on else '#dc2626'}; font-weight: bold;")
     def refresh_status(self):
-        platform_on = self.proc_mgr.is_running(self.LAYER1_SIM) or self.proc_mgr.is_running(self.LAYER1_REAL)
+        platform_on = self.proc_mgr.is_running(self.LAYER1_REAL)
         mode_on = self.proc_mgr.is_running(self.SLAM_MAPPING) or self.proc_mgr.is_running(self.SLAM_LOCALIZATION) or self.proc_mgr.is_running(self.AMCL)
         nav2_on = self.proc_mgr.is_running(self.NAV2)
-        if (not self.is_sim_mode()) and self.cmb_operation_mode.currentText() == "Localization":
+        if self.cmb_operation_mode.currentText() == "Localization":
             nav2_on = nav2_on or self.proc_mgr.is_running(self.SLAM_LOCALIZATION) or self.proc_mgr.is_running(self.AMCL)
+        ai_on = self.proc_mgr.is_running(self.AI_PERCEPTION)
+        cam_on = self.proc_mgr.is_running(self.CAMERAS)
+        backend_on = self.proc_mgr.is_running(self.BACKEND)
         self._set_status_label(self.lbl_platform_status, "Layer1 Odom", platform_on)
         self._set_status_label(self.lbl_mode_status, "Layer2 Mode", mode_on)
         self._set_status_label(self.lbl_nav2_status, "Nav2", nav2_on)
-        self.lbl_odom_status.setText(f"Odom source: {'gazebo' if self.is_sim_mode() else self.get_selected_odom_source()} -> /odom")
+        self._set_status_label(self.lbl_cameras_status, "Cam + Vật cản", cam_on)
+        self._set_status_label(self.lbl_ai_status, "AI Perception", ai_on)
+        self._set_status_label(self.lbl_backend_status, "Backend", backend_on)
+        self.lbl_odom_status.setText(f"Odom source: {self.get_selected_odom_source()} -> /odom")
 
     def stop_one_shot_processes(self):
         with self.one_shot_lock:
@@ -2154,13 +2187,7 @@ class MainWindow(QWidget):
     def force_kill_known_ros_processes(self):
         # Direct pkill without login bash subshells to avoid freezing the GUI event loop
         patterns = [
-            "gz sim",
-            "gz_sim",
-            "parameter_bridge",
-            "ros_gz_bridge",
-            "virtual_robot_gazebo",
             "robot_state_publisher",
-            "dummy_unpause",
             "scan_to_scan_filter_chain",
             "real_odom",
             "real_slam",
@@ -2178,13 +2205,23 @@ class MainWindow(QWidget):
             "hoverboard_driver",
             "sllidar_node",
             "esp_bridge_node",
+            "ai_perception",
+            "three_astra",
+            "dual_camera_obstacles",
+            "obstacle_detector",
+            "astra_camera_node",
+            "usb_cam_node_exe",
+            "yolo_node",
+            "tracking_node",
+            "hand_wave_detector",
+            "rough_localizer",
+            "backend.launch.py",
+            "config_manager_node",
+            "system_monitor_node",
+            "navigation_manager_node",
+            "mission_controller_node",
             "rviz2",
-            "unpause_physics",
         ]
-        try:
-            subprocess.run(["pkill", "-TERM", "-x", "gz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
-        except Exception:
-            pass
         combined = "|".join(patterns)
         try:
             subprocess.run(
@@ -2199,7 +2236,6 @@ class MainWindow(QWidget):
         time.sleep(0.15)
 
         try:
-            subprocess.run(["pkill", "-KILL", "-x", "gz"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5)
             subprocess.run(
                 ["pkill", "-KILL", "-f", combined],
                 stdout=subprocess.DEVNULL,
@@ -2218,7 +2254,7 @@ class MainWindow(QWidget):
     def manual_cleanup(self):
         self.stop_all()
         self.force_kill_known_ros_processes()
-        self.append_log("Đã hoàn tất dọn dẹp sạch sẽ toàn bộ các tiến trình ROS2 & Gazebo.")
+        self.append_log("Đã hoàn tất dọn dẹp sạch sẽ toàn bộ các tiến trình ROS2.")
 
     def cleanup_temp_files(self):
         for path in self.temp_files:
