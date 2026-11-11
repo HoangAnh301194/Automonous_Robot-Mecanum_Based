@@ -130,3 +130,32 @@ def test_admin_page_grid_and_indicators(app):
     page.set_battery(None)
     assert page.battery_text_label.text() == "--%"
 
+
+def test_kiosk_window_dock_hidden_on_idle_and_shown_on_home(app):
+    from unittest.mock import MagicMock
+    try:
+        from robot_ui.kiosk.signals import KioskSignals
+        from robot_ui.kiosk.window import KioskWindow
+    except ImportError:
+        pytest.skip("KioskWindow dependencies not in environment")
+
+    node = MagicMock()
+    signals = KioskSignals()
+    win = KioskWindow(node, signals)
+    win.show()
+    try:
+        assert win._active_page == "idle"
+        assert win.bottom_navigation.isHidden()
+        assert not win.bottom_navigation.isVisible()
+
+        win.show_page("home")
+        assert win._active_page == "home"
+        assert win.bottom_navigation.isVisible()
+
+        win.show_page("idle")
+        assert win._active_page == "idle"
+        assert win.bottom_navigation.isHidden()
+    finally:
+        win.close()
+
+
