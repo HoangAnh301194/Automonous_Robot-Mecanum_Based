@@ -2,12 +2,13 @@ import math
 import time
 
 import rclpy
+from action_msgs.srv import CancelGoal
 from rclpy.node import Node
 from rclpy.action import ActionClient
 from rclpy.qos import qos_profile_sensor_data
 from std_srvs.srv import Trigger
 from std_msgs.msg import String, Bool
-from geometry_msgs.msg import PointStamped, PoseStamped
+from geometry_msgs.msg import PointStamped, PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from tf2_ros import Buffer, TransformListener
 
@@ -40,25 +41,32 @@ class MissionControllerNode(Node):
 
         self.blackboard.set('HMI_start_patrol', True)
         self.blackboard.set('HAND_WAVE_ACTIVE', False)
+        self.blackboard.set('APPROACH_ACTIVE', False)
+        self.blackboard.set('WAVING_PERSON', None)
         self.blackboard.set('PERSON_IN_PATH', False)
+        self.blackboard.set('ENCOUNTER_ACTIVE', False)
         self.blackboard.set('IS_SERVING', False)
         self.blackboard.set('SERVE_REQUESTED', False)
         self.blackboard.set('FINISH_SERVING_REQUESTED', False)
         self.blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', 0.0)
+        self.blackboard.set('WAVE_COOLDOWN_UNTIL', 0.0)
 
-        # Bộ đếm thời gian người đứng chắn trước mặt để chống nhiễu
         self._person_in_front_since = None
+        self._last_wave_seen_at = 0.0
+        self._wave_timeout_sec = 2.0
 
         # 2. TF2 Buffer để chuyển đổi tọa độ sang map
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # 3. Action Client tới Nav2
+        # 3. Action Client & Cancel Client tới Nav2 + khóa /cmd_vel
         self.nav2_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
+        self.cancel_nav2_client = self.create_client(CancelGoal, '/navigate_to_pose/_action/cancel_goal')
 
         # 4. Publishers
         self.pub_log = self.create_publisher(String, '/mission/status_log', 10)
         self.pub_popup = self.create_publisher(String, '/mission/service_popup_cmd', 10)
+        self.pub_cmd_vel = self.create_publisher(Twist, '/cmd_vel', 10)
 
         # 5. Subscriptions từ tầng AI mới
         self.sub_tracked_people = self.create_subscription(
@@ -115,35 +123,62 @@ class MissionControllerNode(Node):
 
         self.get_logger().info('🚀 Mission Controller Node (Autonomous FSM / BT) đã khởi động thành công!')
 
+    def publish_zero_vel(self):
+        """Publish zero velocity to keep the robot stationary during hold/serving states."""
+        self.pub_cmd_vel.publish(Twist())
+
+    def stop_robot_motion(self, cancel_nav2: bool = True):
+        """Immediately zero /cmd_vel and cancel any active Nav2 NavigateToPose goal."""
+        self.publish_zero_vel()
+        if cancel_nav2 and self.cancel_nav2_client.service_is_ready():
+            try:
+                self.cancel_nav2_client.call_async(CancelGoal.Request())
+            except Exception as exc:
+                self.get_logger().warn(f"Lỗi gọi cancel Nav2: {exc}")
+
+    def _activate_serving(self):
+        self.blackboard.set('SERVE_REQUESTED', False)
+        self.blackboard.set('ENCOUNTER_ACTIVE', False)
+        self.blackboard.set('APPROACH_ACTIVE', False)
+        self.blackboard.set('HAND_WAVE_ACTIVE', False)
+        self.blackboard.set('IS_SERVING', True)
+
     def cb_tracked_people(self, msg: TrackedPersonArray):
         """Xử lý dữ liệu AI đa người: phát hiện người vẫy tay hoặc người chắn đường."""
         has_waving = False
         waving_person = None
         has_blocking = False
+        has_preview = self.blackboard.get('PERSON_PREVIEW_MAP_POSE', None) is not None
 
         for p in msg.people:
-            # Kiểm tra giơ tay vẫy
-            if p.is_waving and p.wave_valid:
-                has_waving = True
-                waving_person = p
-                break  # Ưu tiên người vẫy tay đầu tiên
+            pos_valid = (
+                bool(getattr(p, 'position_valid', True))
+                and math.isfinite(p.position.x)
+                and math.isfinite(p.position.y)
+            )
+            if p.is_waving and p.wave_valid and (pos_valid or has_preview):
+                if waving_person is None or (pos_valid and not getattr(waving_person, 'position_valid', False)):
+                    has_waving = True
+                    waving_person = p
 
-            # Kiểm tra người đứng chắn chính diện mũi xe (< 1.8m, lệch ngang < 0.65m)
-            x = p.position.x
-            y = p.position.y
-            dist = math.hypot(x, y)
-            if 0.30 <= dist <= 1.80 and abs(y) <= 0.65:
-                has_blocking = True
+            if pos_valid:
+                dist = math.hypot(p.position.x, p.position.y)
+                if 0.30 <= dist <= 1.80 and abs(p.position.y) <= 0.65:
+                    has_blocking = True
 
-        # 1. Cập nhật trạng thái giơ tay
+        now_mono = time.monotonic()
         if has_waving:
+            self._last_wave_seen_at = now_mono
             self.blackboard.set('HAND_WAVE_ACTIVE', True)
             self.blackboard.set('WAVING_PERSON', waving_person)
-        else:
-            # Nếu không còn thấy vẫy nữa thì reset cờ sau 2s
-            pass
+        elif (
+            self.blackboard.get('HAND_WAVE_ACTIVE', False)
+            and not self.blackboard.get('APPROACH_ACTIVE', False)
+            and (now_mono - self._last_wave_seen_at) >= self._wave_timeout_sec
+        ):
+            self.blackboard.set('HAND_WAVE_ACTIVE', False)
+            self.blackboard.set('WAVING_PERSON', None)
 
-        # 2. Cập nhật trạng thái người chắn đường (cần đứng yên > 0.8s để chống nhiễu)
         now = time.time()
         if has_blocking:
             if self._person_in_front_since is None:
@@ -177,14 +212,14 @@ class MissionControllerNode(Node):
 
     def cb_serve_trigger(self, msg: Bool):
         if msg.data:
-            self.blackboard.set('SERVE_REQUESTED', True)
+            self._activate_serving()
 
     def cb_finish_serving(self, msg: Bool):
         if msg.data:
             self.blackboard.set('FINISH_SERVING_REQUESTED', True)
 
     def cb_srv_trigger_serve(self, request, response):
-        self.blackboard.set('SERVE_REQUESTED', True)
+        self._activate_serving()
         response.success = True
         response.message = "Đã kích hoạt yêu cầu phục vụ nước."
         return response
@@ -205,7 +240,7 @@ class MissionControllerNode(Node):
 
     def cb_pause_patrol(self, request, response):
         self.blackboard.set('HMI_start_patrol', False)
-        self.blackboard.set('CANCEL_PATROL_GOAL', True)
+        self.stop_robot_motion(cancel_nav2=True)
         response.success = True
         response.message = "Tạm dừng tuần tra"
         self.publish_log("Lệnh HMI: Tạm dừng tuần tra.")
@@ -296,6 +331,13 @@ class MissionControllerNode(Node):
         return root
 
     def tick_tree(self):
+        if (
+            self.blackboard.get('HAND_WAVE_ACTIVE', False)
+            and not self.blackboard.get('APPROACH_ACTIVE', False)
+            and (time.monotonic() - self._last_wave_seen_at) >= self._wave_timeout_sec
+        ):
+            self.blackboard.set('HAND_WAVE_ACTIVE', False)
+            self.blackboard.set('WAVING_PERSON', None)
         self.tree.tick(self.blackboard)
 
 

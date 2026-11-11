@@ -248,7 +248,14 @@ class RosInterface(Node):
             ("cam_ai_color", "/ai_camera/color/image_raw"),
             ("cam_ai_depth", "/ai_camera/depth/image_raw"),
         ):
-            self.create_subscription(Image, topic_name, lambda _msg, k=dbg_key: self._mark_topic_rx(k), qos_profile_sensor_data)
+            # Skip CDR pixel deserialization in Python since only arrival timestamps/Hz are tracked.
+            self.create_subscription(
+                Image,
+                topic_name,
+                lambda _msg, k=dbg_key: self._mark_topic_rx(k),
+                qos_profile_sensor_data,
+                raw=True,
+            )
         for side, topic_name in (("front", "/scan_obstacles"), ("rear", "/rear_scan_obstacle")):
             self.create_subscription(LaserScan, topic_name, lambda msg, s=side: self._on_obstacle_scan(s, msg), best_effort_qos)
         self._battery_voltages = deque(maxlen=25)
@@ -964,6 +971,61 @@ class ProcessManager:
         except Exception as exc:
             self.log(f"[{name}] read output error: {exc}")
 
+    def _terminate_groups(self, entries):
+        """Gracefully stop process groups with SIGINT first so ros2 launch shuts down camera streams cleanly."""
+        pending = []
+        for name, proc in entries:
+            if not proc or proc.poll() is not None:
+                continue
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGINT)
+                pending.append((name, proc, pgid))
+            except ProcessLookupError:
+                pass
+            except Exception as exc:
+                self.log(f"[{name}] stop error: {exc}")
+
+        if not pending:
+            return
+
+        for sig, timeout_s, label in (
+            (None, 2.0, None),
+            (signal.SIGTERM, 0.5, "SIGTERM"),
+        ):
+            still_alive = []
+            for name, proc, pgid in pending:
+                if proc.poll() is not None:
+                    continue
+                if sig is not None:
+                    try:
+                        os.killpg(pgid, sig)
+                        self.log(f"[{name}] {label}")
+                    except ProcessLookupError:
+                        continue
+                    except Exception as exc:
+                        self.log(f"[{name}] stop error: {exc}")
+                still_alive.append((name, proc, pgid))
+            pending = still_alive
+            if not pending:
+                return
+
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                if all(proc.poll() is not None for _, proc, _ in pending):
+                    return
+                time.sleep(0.05)
+
+        for name, proc, pgid in pending:
+            if proc.poll() is None:
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                    self.log(f"[{name}] FORCE KILL (SIGKILL)")
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    self.log(f"[{name}] stop error: {exc}")
+
     def stop(self, name):
         proc = self.processes.get(name)
         if not proc:
@@ -971,19 +1033,7 @@ class ProcessManager:
             return
         if proc.poll() is None:
             self.log(f"[{name}] STOP")
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGTERM)
-                for _ in range(3):
-                    time.sleep(0.1)
-                    if proc.poll() is not None:
-                        break
-                if proc.poll() is None:
-                    os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            except Exception as exc:
-                self.log(f"[{name}] stop error: {exc}")
+            self._terminate_groups([(name, proc)])
         else:
             self.log(f"[{name}] đã dừng.")
 
@@ -992,32 +1042,16 @@ class ProcessManager:
         return bool(proc and proc.poll() is None)
 
     def stop_all(self):
-        active = []
-        for name, proc in list(self.processes.items()):
-            if proc and proc.poll() is None:
-                try:
-                    pgid = os.getpgid(proc.pid)
-                    active.append((name, proc, pgid))
-                    os.killpg(pgid, signal.SIGTERM)
-                    self.log(f"[{name}] STOP (SIGTERM)")
-                except Exception:
-                    pass
-
+        active = [
+            (name, proc)
+            for name, proc in list(self.processes.items())
+            if proc and proc.poll() is None
+        ]
         if not active:
             return
-
-        for _ in range(3):
-            time.sleep(0.1)
-            if all(proc.poll() is not None for _, proc, _ in active):
-                break
-
-        for name, proc, pgid in active:
-            if proc.poll() is None:
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                    self.log(f"[{name}] FORCE KILL (SIGKILL)")
-                except Exception:
-                    pass
+        for name, _ in active:
+            self.log(f"[{name}] STOP (SIGINT)")
+        self._terminate_groups(active)
 
 class MainWindow(QWidget):
     log_signal = pyqtSignal(str)
@@ -2707,6 +2741,7 @@ class MainWindow(QWidget):
             "usb_cam_node_exe",
             "yolo_node",
             "tracking_node",
+            "yolo_ros/debug_node",
             "hand_wave_detector",
             "rough_localizer",
             "backend.launch.py",
