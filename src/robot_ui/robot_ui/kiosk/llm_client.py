@@ -16,7 +16,6 @@ DEFAULT_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:20128/v1")
 DEFAULT_API_KEY = os.getenv("LLM_API_KEY", "")
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "hehe")
 RAG_DOCS_DIR = Path(__file__).parent / "rag_docs"
-REQUEST_TIMEOUT = 30
 MAX_MESSAGE_CHARS = 2000
 
 
@@ -27,6 +26,7 @@ def _safe_int(name: str, default: int, minimum: int, maximum: int) -> int:
         return default
 
 
+REQUEST_TIMEOUT = _safe_int("LLM_REQUEST_TIMEOUT", 60, 5, 180)
 MAX_HISTORY_TURNS = _safe_int("KIOSK_CHAT_MAX_TURNS", 6, 1, 20)
 try:
     STATUS_MAX_AGE_SECONDS = max(1.0, float(os.getenv("ROBOT_STATUS_MAX_AGE_SECONDS", "4")))

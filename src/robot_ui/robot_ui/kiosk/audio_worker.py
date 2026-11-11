@@ -115,6 +115,12 @@ class VoiceController:
         if not enabled and self._state == VoiceState.SPEAKING:
             self.stop_speaking()
 
+    def set_volume(self, volume: int) -> None:
+        self.player.set_volume(volume)
+
+    def get_volume(self) -> int:
+        return self.player.volume
+
     def toggle_listening(self) -> None:
         """Toggle recording: if listening, stops and submits; otherwise starts recording."""
         with self._lock:

@@ -9,7 +9,7 @@ from typing import Any
 
 import cv2
 import numpy as np
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPoint
 from PyQt5.QtGui import (
     QColor,
     QFont,
@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
@@ -618,12 +619,165 @@ def strip_emojis(text: str) -> str:
     return "\n".join(lines).strip()
 
 
+class SpeakerButton(QPushButton):
+    """Nút loa hỗ trợ: Bấm nhanh = Mute toggle; Bấm giữ + Kéo = Điều chỉnh âm lượng."""
+
+    long_press_started = pyqtSignal()
+    drag_moved = pyqtSignal(int, int)  # (global_x, global_y)
+    drag_finished = pyqtSignal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._press_pos: QPoint | None = None
+        self._is_long_press = False
+        self._drag_active = False
+        self._long_timer = QTimer(self)
+        self._long_timer.setSingleShot(True)
+        self._long_timer.setInterval(250)
+        self._long_timer.timeout.connect(self._on_long_press_timeout)
+
+    def _on_long_press_timeout(self) -> None:
+        self._is_long_press = True
+        self._drag_active = True
+        self.long_press_started.emit()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            self._press_pos = event.globalPos()
+            self._is_long_press = False
+            self._drag_active = False
+            self._long_timer.start()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_active:
+            gpos = event.globalPos()
+            self.drag_moved.emit(gpos.x(), gpos.y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        self._long_timer.stop()
+        if self._drag_active or self._is_long_press:
+            self._drag_active = False
+            self.drag_finished.emit()
+            self.setDown(False)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
+class VolumeSliderWidget(QFrame):
+    """Thanh trượt âm lượng pop-up ngắn gọn nằm cạnh nút loa."""
+
+    volume_changed = pyqtSignal(int)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("volumeSliderWidget")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setFixedHeight(44)
+        self.setMinimumWidth(150)
+        self.setMaximumWidth(185)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 4, 10, 4)
+        layout.setSpacing(8)
+
+        self._label = QLabel("80%")
+        self._label.setObjectName("volumeLabel")
+        self._label.setAlignment(Qt.AlignCenter)
+        self._label.setFixedWidth(36)
+
+        self._slider = QSlider(Qt.Horizontal)
+        self._slider.setObjectName("volumeSlider")
+        self._slider.setRange(0, 100)
+        self._slider.setValue(80)
+        self._slider.setCursor(Qt.PointingHandCursor)
+        self._slider.valueChanged.connect(self._on_slider_value_changed)
+
+        layout.addWidget(self._label)
+        layout.addWidget(self._slider, 1)
+
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(2500)
+        self._hide_timer.timeout.connect(self.hide)
+
+        self.setStyleSheet("""
+            QFrame#volumeSliderWidget {
+                background: #1c1c1c;
+                border: 1px solid #383838;
+                border-radius: 12px;
+            }
+            QLabel#volumeLabel {
+                color: #ffb32c;
+                font-size: 12px;
+                font-weight: 700;
+            }
+            QSlider#volumeSlider::groove:horizontal {
+                height: 6px;
+                background: #2b2b2b;
+                border-radius: 3px;
+            }
+            QSlider#volumeSlider::sub-page:horizontal {
+                background: #ffb32c;
+                border-radius: 3px;
+            }
+            QSlider#volumeSlider::handle:horizontal {
+                background: #ffffff;
+                border: 2px solid #ffb32c;
+                width: 18px;
+                height: 18px;
+                margin: -6px 0;
+                border-radius: 9px;
+            }
+        """)
+
+    @property
+    def value(self) -> int:
+        return self._slider.value()
+
+    def set_volume(self, value: int, notify: bool = True) -> None:
+        val = max(0, min(100, int(value)))
+        self._label.setText(f"{val}%")
+        self._slider.blockSignals(not notify)
+        self._slider.setValue(val)
+        self._slider.blockSignals(False)
+        if notify:
+            self.volume_changed.emit(val)
+
+    def show_slider(self) -> None:
+        self.show()
+        self.raise_()
+        self._hide_timer.stop()
+
+    def start_hide_timer(self) -> None:
+        self._hide_timer.start(2500)
+
+    def update_from_global_point(self, gx: int, gy: int) -> None:
+        self.show_slider()
+        pt_in_slider = self._slider.mapFromGlobal(QPoint(gx, gy))
+        w = self._slider.width()
+        if w > 0:
+            ratio = max(0.0, min(1.0, pt_in_slider.x() / float(w)))
+            val = int(round(ratio * 100))
+            self.set_volume(val, notify=True)
+
+    def _on_slider_value_changed(self, value: int) -> None:
+        self._label.setText(f"{value}%")
+        self.volume_changed.emit(value)
+        self._hide_timer.start(2500)
+
+
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     home_requested = pyqtSignal()
     mic_clicked = pyqtSignal()
     speaker_toggled = pyqtSignal(bool)
     stop_speaking_requested = pyqtSignal()
+    volume_changed = pyqtSignal(int)
 
     DEFAULT_SUGGESTIONS = (
         "Giới thiệu về PTIT",
@@ -721,13 +875,22 @@ class ChatPage(QWidget):
         self._stop_speaking_btn.clicked.connect(self._on_stop_speaking_clicked)
         header_layout.addWidget(self._stop_speaking_btn)
 
+        # Volume slider popup/bar (hidden by default)
+        self._volume_widget = VolumeSliderWidget()
+        self._volume_widget.hide()
+        self._volume_widget.volume_changed.connect(self._on_volume_widget_changed)
+        header_layout.addWidget(self._volume_widget)
+
         # Speaker toggle button (min 48x48)
-        self._speaker_btn = QPushButton()
+        self._speaker_btn = SpeakerButton()
         self._speaker_btn.setObjectName("chatSpeakerButton")
         self._speaker_btn.setFixedSize(48, 48)
         self._speaker_btn.setIconSize(QSize(26, 26))
         self._speaker_btn.setCursor(Qt.PointingHandCursor)
         self._speaker_btn.clicked.connect(self._toggle_speaker)
+        self._speaker_btn.long_press_started.connect(self._on_speaker_long_pressed)
+        self._speaker_btn.drag_moved.connect(self._on_speaker_drag_moved)
+        self._speaker_btn.drag_finished.connect(self._on_speaker_drag_finished)
         header_layout.addWidget(self._speaker_btn)
         self._update_speaker_ui()
 
@@ -1031,8 +1194,33 @@ class ChatPage(QWidget):
                 else None,
             )
 
+    def _on_speaker_long_pressed(self) -> None:
+        self._volume_widget.show_slider()
+
+    def _on_speaker_drag_moved(self, gx: int, gy: int) -> None:
+        self._volume_widget.update_from_global_point(gx, gy)
+
+    def _on_speaker_drag_finished(self) -> None:
+        self._volume_widget.start_hide_timer()
+
+    def _on_volume_widget_changed(self, val: int) -> None:
+        if val == 0 and self._speaker_enabled:
+            self._speaker_enabled = False
+            self._update_speaker_ui()
+            self.speaker_toggled.emit(False)
+        elif val > 0 and not self._speaker_enabled:
+            self._speaker_enabled = True
+            self._update_speaker_ui()
+            self.speaker_toggled.emit(True)
+        self.volume_changed.emit(val)
+
+    def set_volume(self, val: int) -> None:
+        self._volume_widget.set_volume(val, notify=False)
+
     def _toggle_speaker(self) -> None:
         self._speaker_enabled = not self._speaker_enabled
+        if self._speaker_enabled and self._volume_widget.value == 0:
+            self._volume_widget.set_volume(80, notify=True)
         self._update_speaker_ui()
         if not self._speaker_enabled and self._is_speaking:
             self.stop_speaking()

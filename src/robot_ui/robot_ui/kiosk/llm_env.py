@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 from typing import MutableMapping
 
-LLM_KEYS = frozenset(("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"))
+LLM_KEYS = frozenset(("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_REQUEST_TIMEOUT"))
 VOICE_KEYS = frozenset((
     "GROQ_API_KEY",
     "GROQ_STT_MODEL",
@@ -18,6 +18,8 @@ VOICE_KEYS = frozenset((
     "AUDIO_MAX_RECORD_SECONDS",
     "AUDIO_MIN_RECORD_SECONDS",
     "AUDIO_SILENCE_TIMEOUT_SECONDS",
+    "AUDIO_RMS_THRESHOLD",
+    "AUDIO_PLAYBACK_VOLUME",
     "KIOSK_TTS_ENABLED",
     "KIOSK_TTS_BASE_URL",
     "KIOSK_TTS_DEFAULT_LANGUAGE",

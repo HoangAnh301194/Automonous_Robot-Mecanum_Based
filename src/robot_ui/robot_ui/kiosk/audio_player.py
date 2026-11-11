@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import threading
 from typing import Callable
@@ -26,11 +27,65 @@ class AudioPlayer:
 
         self.player_cmd = player_cmd or os.getenv("KIOSK_AUDIO_PLAYER", "mpv")
         self.playback_speed = os.getenv("AUDIO_PLAYBACK_SPEED", "1.15").strip()
+        try:
+            default_vol = int(os.getenv("AUDIO_PLAYBACK_VOLUME", "80"))
+        except ValueError:
+            default_vol = 80
+        self._volume = max(0, min(100, default_vol))
         self._muted = False
         self._lock = threading.Lock()
         self._process: subprocess.Popen | None = None
         self._worker_thread: threading.Thread | None = None
         self._active_request_id: int | None = None
+
+    @property
+    def volume(self) -> int:
+        with self._lock:
+            return self._volume
+
+    def set_volume(self, volume: int) -> None:
+        """Set volume in percent (0..100). Applies to future playback and default sink."""
+        val = max(0, min(100, int(volume)))
+        with self._lock:
+            self._volume = val
+        threading.Thread(
+            target=self._apply_system_volume,
+            args=(val,),
+            name="pactl-set-volume",
+            daemon=True,
+        ).start()
+
+    @staticmethod
+    def _apply_system_volume(volume: int) -> None:
+        try:
+            subprocess.run(
+                ["pactl", "set-sink-volume", "@DEFAULT_SINK@", f"{volume}%"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=1.0,
+                check=False,
+            )
+        except Exception as exc:
+            LOG.debug("Failed to set system volume via pactl: %s", exc)
+
+    @staticmethod
+    def get_system_volume() -> int:
+        """Query current volume of default sink via pactl, default to 80 if failed."""
+        try:
+            res = subprocess.run(
+                ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=1.0,
+                check=False,
+            )
+            match = re.search(r"(\d+)%", res.stdout)
+            if match:
+                return max(0, min(100, int(match.group(1))))
+        except Exception:
+            pass
+        return 80
 
     @property
     def is_muted(self) -> bool:
@@ -65,7 +120,8 @@ class AudioPlayer:
         # Stop existing playback cleanly first
         self.stop()
 
-        cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", "-"]
+        vol = self._volume
+        cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", f"--volume={vol}", "-"]
         try:
             proc = subprocess.Popen(
                 cmd,

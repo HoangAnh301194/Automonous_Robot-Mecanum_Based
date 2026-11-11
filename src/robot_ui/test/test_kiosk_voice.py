@@ -330,3 +330,49 @@ def test_speaker_toggle_behavior(app):
     page._speaker_btn.click()
     assert page._speaker_enabled is True
     assert toggled[-1] is True
+
+
+def test_audio_capture_rms_and_silence_defaults():
+    cap = AudioCapture()
+    assert cap.rms_threshold == 200.0
+    assert cap.silence_timeout == 1.5
+
+
+def test_audio_player_volume_management():
+    player = AudioPlayer()
+    assert 0 <= player.volume <= 100
+    player.set_volume(45)
+    assert player.volume == 45
+    # Clamping
+    player.set_volume(150)
+    assert player.volume == 100
+    player.set_volume(-10)
+    assert player.volume == 0
+
+
+def test_volume_slider_widget_and_chat_page(app):
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+
+    vol_events = []
+    page.volume_changed.connect(lambda v: vol_events.append(v))
+
+    assert page._volume_widget.isHidden()
+    # Trigger long press
+    page._speaker_btn.long_press_started.emit()
+    assert not page._volume_widget.isHidden()
+
+    # Drag adjusts volume
+    page._volume_widget.set_volume(65)
+    assert page._volume_widget.value == 65
+    assert page._volume_widget._label.text() == "65%"
+    assert 65 in vol_events
+
+    # Setting volume to 0 mutes speaker
+    page._volume_widget.set_volume(0)
+    assert page._speaker_enabled is False
+
+    # Setting volume > 0 restores speaker
+    page._volume_widget.set_volume(50)
+    assert page._speaker_enabled is True
+

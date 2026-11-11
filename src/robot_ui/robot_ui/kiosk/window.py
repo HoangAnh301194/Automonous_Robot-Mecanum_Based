@@ -565,6 +565,11 @@ class KioskWindow(QMainWindow):
         self.chat_page.mic_clicked.connect(self._voice_controller.toggle_listening)
         self.chat_page.stop_speaking_requested.connect(self._on_stop_requested)
         self.chat_page.speaker_toggled.connect(self._voice_controller.set_speaker_enabled)
+        self.chat_page.volume_changed.connect(self._voice_controller.set_volume)
+        try:
+            self.chat_page.set_volume(self._voice_controller.get_volume())
+        except Exception:
+            pass
 
         signals.voice_state_changed.connect(self._on_voice_state_changed)
         signals.voice_transcript_ready.connect(self._on_voice_transcript_ready)
