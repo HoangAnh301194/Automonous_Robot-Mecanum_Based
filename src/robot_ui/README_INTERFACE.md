@@ -91,9 +91,14 @@ use a strong PIN / secret storage and consider local OS access control.
 7. Leave the screen idle; verify return to Souta Robot and reset of Chat.
 8. Confirm changing pages **does not** send Nav2 cancel goals.
 
+## Multilingual Voice Chat (STT & TTS)
+
+For full architecture, voice mappings (Vi/En/Ja/Zh/Ko), hardware requirements and configuration options, see:
+* [README_VOICE_CHAT.md](README_VOICE_CHAT.md)
+
 Offscreen GUI smoke tests:
 
 ```bash
 PYTHONPATH=src/robot_ui QT_QPA_PLATFORM=offscreen python3 -m pytest \
-  src/robot_ui/test/test_kiosk_interface.py -q
+  src/robot_ui/test/ -q
 ```

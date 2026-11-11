@@ -597,6 +597,8 @@ class MicState(Enum):
     UNAVAILABLE = "unavailable"
     STT_PROCESSING = "stt_processing"
     LLM_PROCESSING = "llm_processing"
+    TTS_PROCESSING = "tts_processing"
+    SPEAKING = "speaking"
     ERROR = "error"
 
 
@@ -649,6 +651,10 @@ class ChatPage(QWidget):
         self._typing_timer = QTimer(self)
         self._typing_timer.timeout.connect(self._update_typing_dots)
         self._suggestions_widget: QWidget | None = None
+
+        self._pulse_timer = QTimer(self)
+        self._pulse_timer.timeout.connect(self._animate_listening_pulse)
+        self._pulse_state = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 12, 18, 14)
@@ -918,12 +924,32 @@ class ChatPage(QWidget):
         self.set_busy(True)
         self.chat_submitted.emit(text)
 
+    def _animate_listening_pulse(self) -> None:
+        self._pulse_state = not self._pulse_state
+        border = "#ff4d4d" if self._pulse_state else "#ffb32c"
+        self.mic_btn.setStyleSheet(f"#chatMicButton {{ border: 2px solid {border}; background-color: rgba(255, 77, 77, 0.25); }}")
+
+    def submit_voice_transcript(self, text: str) -> None:
+        """Submit voice transcript as user message and trigger LLM processing."""
+        text = text.strip()
+        if not text or not self.input.isEnabled():
+            return
+        self._hide_suggestions()
+        self.input.clear()
+        self._add_message("Bạn", text, from_user=True)
+        self.set_busy(True)
+        self.chat_submitted.emit(text)
+
     # ------------------------------------------------------------------
     # Voice Chat & Speaker State Management
     # ------------------------------------------------------------------
 
     def set_mic_state(self, state: MicState) -> None:
         self._mic_state = state
+        if state != MicState.LISTENING:
+            self._pulse_timer.stop()
+            self.mic_btn.setStyleSheet("")
+
         if state == MicState.READY:
             self.mic_btn.setIcon(self._get_icon("mic"))
             self.mic_btn.setEnabled(True)
@@ -935,6 +961,7 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(True)
             self.mic_btn.setToolTip("Đang ghi âm (chạm để dừng)")
             self.mic_btn.setProperty("listening", "true")
+            self._pulse_timer.start(450)
             self.set_status("Đang nghe...")
         elif state == MicState.UNAVAILABLE:
             self.mic_btn.setIcon(self._get_icon("mic_off"))
@@ -953,6 +980,20 @@ class ChatPage(QWidget):
             self.mic_btn.setToolTip("Đang xử lý câu hỏi...")
             self.mic_btn.setProperty("listening", "false")
             self.set_status("Thinking...")
+        elif state == MicState.TTS_PROCESSING:
+            self.mic_btn.setIcon(self._get_icon("mic"))
+            self.mic_btn.setEnabled(False)
+            self.mic_btn.setToolTip("Đang tạo giọng nói...")
+            self.mic_btn.setProperty("listening", "false")
+            self._stop_speaking_btn.show()
+            self.set_status("Đang tạo giọng nói...")
+        elif state == MicState.SPEAKING:
+            self.mic_btn.setIcon(self._get_icon("mic"))
+            self.mic_btn.setEnabled(False)
+            self.mic_btn.setToolTip("Souta đang nói...")
+            self.mic_btn.setProperty("listening", "false")
+            self._stop_speaking_btn.show()
+            self.set_status("Souta đang nói...")
         elif state == MicState.ERROR:
             self.mic_btn.setIcon(self._get_icon("mic_off"))
             self.mic_btn.setEnabled(False)
@@ -961,6 +1002,13 @@ class ChatPage(QWidget):
             self.set_status("Lỗi microphone")
         self.mic_btn.style().unpolish(self.mic_btn)
         self.mic_btn.style().polish(self.mic_btn)
+
+    def set_speaker_enabled(self, enabled: bool) -> None:
+        self._speaker_enabled = enabled
+        self._update_speaker_ui()
+
+    def set_voice_status(self, message: str) -> None:
+        self.set_status(message)
 
     def _on_mic_clicked(self) -> None:
         self.mic_clicked.emit()
@@ -1050,7 +1098,7 @@ class ChatPage(QWidget):
             if not self._is_speaking and self._mic_state != MicState.LISTENING:
                 self.set_status("Sẵn sàng trò chuyện")
             if self._mic_state == MicState.LLM_PROCESSING:
-                self.set_mic_state(MicState.UNAVAILABLE)
+                self.set_mic_state(MicState.READY)
         self._llm_status_label.style().unpolish(self._llm_status_label)
         self._llm_status_label.style().polish(self._llm_status_label)
 

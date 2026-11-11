@@ -95,6 +95,14 @@ def main(args: list[str] | None = None) -> int:
         # The navigation UI may still be useful without 9router.
         print(f"[robot_ui] Warning: 9router settings not loaded: {exc}", file=sys.stderr)
 
+    voice_env = Path("config/voice.local.env")
+    if voice_env.is_file():
+        try:
+            load_llm_env_file(voice_env)
+            print(f"[robot_ui] Voice config loaded from {voice_env.resolve()}", flush=True)
+        except Exception as exc:
+            print(f"[robot_ui] Warning: voice settings not loaded: {exc}", file=sys.stderr)
+
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
     qt_plugin_path = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "")
     if "cv2" in qt_plugin_path:

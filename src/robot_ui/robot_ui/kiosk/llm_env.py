@@ -8,6 +8,23 @@ from pathlib import Path
 from typing import MutableMapping
 
 LLM_KEYS = frozenset(("LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL"))
+VOICE_KEYS = frozenset((
+    "GROQ_API_KEY",
+    "GROQ_STT_MODEL",
+    "GROQ_STT_LANGUAGE",
+    "KIOSK_MIC_SOURCE",
+    "AUDIO_SAMPLE_RATE",
+    "AUDIO_CHANNELS",
+    "AUDIO_MAX_RECORD_SECONDS",
+    "AUDIO_MIN_RECORD_SECONDS",
+    "AUDIO_SILENCE_TIMEOUT_SECONDS",
+    "KIOSK_TTS_ENABLED",
+    "KIOSK_TTS_BASE_URL",
+    "KIOSK_TTS_DEFAULT_LANGUAGE",
+    "KIOSK_TTS_AUTO_SPEAK",
+    "KIOSK_AUDIO_PLAYER",
+))
+ALLOWED_KEYS = LLM_KEYS | VOICE_KEYS
 _ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$")
 
 
@@ -42,8 +59,8 @@ def load_llm_env_file(
         if match is None:
             raise ValueError(f"Invalid 9router configuration syntax at line {number}")
         key, raw_value = match.groups()
-        if key not in LLM_KEYS:
-            # Keep this loader limited to LLM settings; never set arbitrary vars.
+        if key not in ALLOWED_KEYS:
+            # Keep this loader limited to LLM and Voice settings; never set arbitrary vars.
             continue
         try:
             values = shlex.split(raw_value, comments=True, posix=True)

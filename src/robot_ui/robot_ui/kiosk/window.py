@@ -9,11 +9,12 @@ from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
+from robot_ui.kiosk.audio_worker import VoiceController, VoiceState
 from robot_ui.kiosk.llm_client import LLMWorker
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
-from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, NavigationPage
+from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, MicState, NavigationPage
 
 
 KIOSK_STYLESHEET = """
@@ -542,6 +543,34 @@ class KioskWindow(QMainWindow):
         )
         self.chat_page.chat_submitted.connect(self._on_chat_submitted)
 
+        # Voice controller – thread-safe callbacks emit vào Qt signals
+        def _on_voice_state(state: VoiceState, msg: str) -> None:
+            signals.voice_state_changed.emit(state.value, msg)
+
+        def _on_voice_transcript(session_id: int, turn_id: int, text: str) -> None:
+            signals.voice_transcript_ready.emit(session_id, turn_id, text)
+
+        def _on_tts_start(session_id: int, turn_id: int) -> None:
+            signals.tts_started.emit(session_id, turn_id)
+
+        def _on_tts_finish(session_id: int, turn_id: int) -> None:
+            signals.tts_finished.emit(session_id, turn_id)
+
+        self._voice_controller = VoiceController(
+            on_state_changed=_on_voice_state,
+            on_transcript_ready=_on_voice_transcript,
+            on_tts_started=_on_tts_start,
+            on_tts_finished=_on_tts_finish,
+        )
+        self.chat_page.mic_clicked.connect(self._voice_controller.toggle_listening)
+        self.chat_page.stop_speaking_requested.connect(self._voice_controller.stop_speaking)
+        self.chat_page.speaker_toggled.connect(self._voice_controller.set_speaker_enabled)
+
+        signals.voice_state_changed.connect(self._on_voice_state_changed)
+        signals.voice_transcript_ready.connect(self._on_voice_transcript_ready)
+        signals.tts_started.connect(lambda _s, _t: self.chat_page.set_speaker_speaking(True))
+        signals.tts_finished.connect(lambda _s, _t: self.chat_page.set_speaker_speaking(False))
+
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
         self.idle_page.video.set_video(self.emotions.path("idle"))
@@ -581,6 +610,8 @@ class KioskWindow(QMainWindow):
 
         if self._active_page == "chat" and page_id != "chat":
             self.chat_page.stop_speaking()
+            self._voice_controller.stop_speaking()
+            self._voice_controller.capture.cancel()
 
         if track_history and self._active_page not in {"", "idle"}:
             self._page_history.append(self._active_page)
@@ -704,12 +735,29 @@ class KioskWindow(QMainWindow):
         if not sent:
             self.chat_page.receive_response("Robot đang xử lý một câu hỏi khác.")
 
+    def _on_voice_state_changed(self, state_str: str, msg: str) -> None:
+        try:
+            self.chat_page.set_mic_state(MicState(state_str))
+        except ValueError:
+            pass
+        if msg:
+            self.chat_page.set_voice_status(msg)
+
+    def _on_voice_transcript_ready(self, session_id: int, turn_id: int, text: str) -> None:
+        if session_id != self._llm_worker.session_id:
+            return
+        self._voice_controller.notify_llm_processing()
+        self.chat_page.submit_voice_transcript(text)
+
     def _receive_llm_response(self, session_id: int, response: str) -> None:
         # A queued response from a prior visitor must never enter this session.
         if session_id != self._llm_worker.session_id:
             return
         self.chat_page.receive_response(response)
         self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
+        # Route to TTS only if response is valid text (not a technical error)
+        if not response.startswith("⚠️"):
+            self._voice_controller.handle_llm_response(session_id, response)
 
     def eventFilter(self, watched: Any, event: QEvent) -> bool:
         input_events = (
@@ -734,6 +782,10 @@ class KioskWindow(QMainWindow):
             self.admin_page.update_wifi()
         if self._active_page == "idle":
             return
+        # Do not expire session while visitor is actively recording, waiting for STT/LLM/TTS, or robot is speaking
+        if self._voice_controller.is_active or self._llm_worker.is_busy:
+            self._last_activity_at = time.monotonic()
+            return
         timeout = (
             self._admin_idle_timeout_seconds
             if self._active_page in {"admin", "navigation"}
@@ -744,6 +796,7 @@ class KioskWindow(QMainWindow):
         self._last_activity_at = time.monotonic()
         self._admin_authenticated = False
         self._llm_worker.reset_session()
+        self._voice_controller.reset_session()
         self.chat_page.reset_conversation()
         self.signals.llm_status_changed.emit("LLM: ĐÃ LÀM MỚI PHIÊN")
         # UI timeout only: never cancel an ongoing robot mission/navigation.
@@ -779,6 +832,7 @@ class KioskWindow(QMainWindow):
     def closeEvent(self, event: Any) -> None:
         QApplication.instance().removeEventFilter(self)
         self.chat_page.stop_speaking()
+        self._voice_controller.shutdown()
         self._llm_worker.reset_session()
         self.idle_page.video.stop()
         super().closeEvent(event)
