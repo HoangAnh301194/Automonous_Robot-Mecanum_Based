@@ -630,7 +630,7 @@ class MapViewer(QLabel):
         self.get_ros_node = ros_node_getter
         self.on_map_click = on_map_click
         self.on_map_drag = on_map_drag
-        self.setMinimumSize(260, 220)
+        self.setMinimumSize(220, 180)
         self.setAlignment(Qt.AlignCenter)
         self.setStyleSheet("background-color: #1e1e1e; border: 1px solid #555;")
         self.setText("Chưa có dữ liệu /map")
@@ -940,7 +940,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Robot Control GUI v3 - Autonomous Patrol & Map Console")
-        self.resize(1320, 820)
+        self._fit_window_to_screen()
         self.temp_files = []
         self.map_dir = _pick_first_existing([DEFAULT_MAP_DIR, MO_HINH_MAP_DIR, WS_ROOT])
         self.selected_map_file = ""
@@ -981,6 +981,20 @@ class MainWindow(QWidget):
         self.mock_timer = QTimer(self)
         self.mock_timer.timeout.connect(self._on_mock_timer_tick)
         self.mock_timer.start(400)
+
+    def _fit_window_to_screen(self):
+        """Clamp initial window size and position to fit smaller displays (e.g. Jetson VNC)."""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            self.resize(1024, 680)
+            return
+        avail = screen.availableGeometry()
+        w = min(1320, max(640, int(avail.width() * 0.94)))
+        h = min(820, max(480, int(avail.height() * 0.92)))
+        self.resize(w, h)
+        x = avail.x() + max(0, (avail.width() - w) // 2)
+        y = avail.y() + max(0, (avail.height() - h) // 2)
+        self.move(x, y)
 
     def init_ui(self):
         self.lbl_robot_mode_val = QLabel("Robot thật (Jetson Orin Nano)")
@@ -1114,7 +1128,7 @@ class MainWindow(QWidget):
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
-        self.tabs_info.setMinimumHeight(260)
+        self.tabs_info.setMinimumHeight(180)
 
         # TAB 1: Log gốc hệ thống
         tab_log = QWidget()
@@ -1258,10 +1272,10 @@ class MainWindow(QWidget):
         left_layout.addWidget(control_group); left_layout.addWidget(self.tabs_info, stretch=1)
         left_widget = QWidget(); left_widget.setLayout(left_layout)
         left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True); left_scroll.setWidget(left_widget)
-        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(340)
+        left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff); left_scroll.setMinimumWidth(290)
         self.map_view = MapViewer(self.get_ros_node, on_map_click=self.on_map_clicked, on_map_drag=self.on_map_dragged)
         right_layout = QVBoxLayout(); right_layout.addWidget(self.map_view)
-        right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(320)
+        right_widget = QWidget(); right_widget.setLayout(right_layout); right_widget.setMinimumWidth(260)
 
         # === TAB LỚN 1: BẢN ĐỒ & VẬN HÀNH HỆ THỐNG ===
         self.tab_system = QWidget()
@@ -1272,8 +1286,8 @@ class MainWindow(QWidget):
         tab1_layout.setSpacing(6)
 
         # === TAB LỚN 2: TRUNG TÂM TUẦN TRA & PHỤC VỤ (MISSION DASHBOARD) ===
-        self.tab_mission = QWidget()
-        mission_root = QHBoxLayout(self.tab_mission)
+        mission_container = QWidget()
+        mission_root = QHBoxLayout(mission_container)
         mission_root.setContentsMargins(8, 8, 8, 8)
         mission_root.setSpacing(10)
 
@@ -1322,7 +1336,7 @@ class MainWindow(QWidget):
         mission_left.addWidget(setup_group)
 
         self.patrol_map_view = MapViewer(self.get_ros_node, on_map_click=self.on_patrol_map_clicked)
-        self.patrol_map_view.setMinimumHeight(300)
+        self.patrol_map_view.setMinimumHeight(200)
         mission_left.addWidget(self.patrol_map_view, stretch=3)
 
         wp_table_group = QGroupBox("📋 Danh sách các điểm tuần tra (có thể sửa trực tiếp X, Y trước khi Lưu)")
@@ -1330,7 +1344,7 @@ class MainWindow(QWidget):
         self.table_waypoints = QTableWidget(0, 4)
         self.table_waypoints.setHorizontalHeaderLabels(["Tên điểm", "X (m)", "Y (m)", "Ghi chú"])
         self.table_waypoints.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table_waypoints.setMinimumHeight(150)
+        self.table_waypoints.setMinimumHeight(110)
         wp_table_layout.addWidget(self.table_waypoints)
         wp_table_group.setLayout(wp_table_layout)
         mission_left.addWidget(wp_table_group, stretch=2)
@@ -1423,10 +1437,15 @@ class MainWindow(QWidget):
         mission_root.addWidget(mission_left_widget, stretch=1)
         mission_root.addWidget(mission_right_widget, stretch=1)
 
+        self.tab_mission = QScrollArea()
+        self.tab_mission.setWidgetResizable(True)
+        self.tab_mission.setFrameShape(QFrame.NoFrame)
+        self.tab_mission.setWidget(mission_container)
+
         # === THANH TAB LỚN TOÀN CỬA SỔ ===
         self.main_tabs = QTabWidget()
         self.main_tabs.setStyleSheet(
-            "QTabBar::tab { background-color: #f1f5f9; color: #334155; font-size: 13px; font-weight: bold; padding: 10px 20px; border: 1px solid #cbd5e1; }"
+            "QTabBar::tab { background-color: #f1f5f9; color: #334155; font-size: 13px; font-weight: bold; padding: 8px 14px; border: 1px solid #cbd5e1; }"
             "QTabBar::tab:selected { background-color: #ffffff; color: #000000; border-bottom: 3px solid #2563eb; }"
         )
         self.main_tabs.addTab(self.tab_system, "🗺️ BẢN ĐỒ & VẬN HÀNH HỆ THỐNG")
