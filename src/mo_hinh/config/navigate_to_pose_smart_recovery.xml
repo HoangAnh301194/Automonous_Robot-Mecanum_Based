@@ -19,10 +19,20 @@
         <RateController hz="1.0">
           <RecoveryNode number_of_retries="2" name="ComputePathRecovery">
             <Fallback name="ComputeOrReusePath">
-              <!-- Nếu đường đi cũ vẫn thông thoáng thì không cần tính lại liên tục -->
-              <Inverter>
+              <ReactiveSequence name="CheckReusablePath">
+                <!-- Đường đi chưa quá 10 giây -->
+                <Inverter>
+                  <PathExpiringTimer seconds="10" path="{path}"/>
+                </Inverter>
+                <!-- Mục tiêu điều hướng không thay đổi -->
+                <Inverter>
+                  <GlobalUpdatedGoal/>
+                </Inverter>
+                <!-- Đường đi hiện tại vẫn hợp lệ (không bị vật cản cắt ngang) -->
                 <IsPathValid path="{path}"/>
-              </Inverter>
+              </ReactiveSequence>
+
+              <!-- Nếu bất kỳ điều kiện nào không đạt, tính toán lại đường đi mới -->
               <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased"/>
             </Fallback>
             

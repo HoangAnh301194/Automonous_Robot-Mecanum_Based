@@ -253,10 +253,6 @@ class ObstacleDetectorNode(Node):
 
         valid_mask = (current_roi > 0) & (ground_roi > 0)
         diff = ground_roi.astype(np.int32) - current_roi.astype(np.int32)
-        
-        # Blind-zone occlusion: mặt sàn nền hợp lệ (<=2.5m) nhưng hiện tại bị che khuất thành 0/N/A
-        # Do người hoặc vật cản tiến sát camera (<0.35m) gây mất độ sâu
-        blind_zone_mask = (current_roi == 0) & (ground_roi > 0) & (ground_roi <= 2500)
 
         # Adaptive distance penalty: threshold increases with ground distance
         if self.penalty_k > 0:
@@ -268,9 +264,6 @@ class ObstacleDetectorNode(Node):
         else:
             obstacle_mask = np.zeros_like(diff, dtype=np.uint8)
             obstacle_mask[valid_mask & (diff > self.thresh_val)] = 255
-        
-        # Thêm vùng điểm mù cận cảnh (vật cản áp sát <0.35m) vào mask vật cản
-        obstacle_mask[blind_zone_mask] = 255
 
         if self.k_median > 1:
             obstacle_mask = cv2.medianBlur(obstacle_mask, self.k_median)
@@ -293,10 +286,6 @@ class ObstacleDetectorNode(Node):
             u_coords = rx + x_idx
             v_coords = ry + y_idx
             depths_m = current_roi[y_idx, x_idx].astype(np.float32) / 1000.0
-            
-            # Gán khoảng cách 0.35m cho các điểm N/A (điểm mù cự ly gần) có nền sàn hợp lệ
-            is_blind_zone = (current_roi[y_idx, x_idx] == 0) & (ground_roi[y_idx, x_idx] > 0)
-            depths_m[is_blind_zone] = 0.35
 
             valid = depths_m > 0
             u_coords, v_coords, depths_m = u_coords[valid], v_coords[valid], depths_m[valid]

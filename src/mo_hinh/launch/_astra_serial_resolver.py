@@ -292,6 +292,91 @@ def resolve_video_from_serial(
     return match, report
 
 
+def resolve_available_cameras(
+    ai_serial,
+    front_serial,
+    rear_serial,
+    enable_ai=True,
+    allow_missing=True,
+    openni_devices=None,
+    sys_usb_root=Path("/sys/bus/usb/devices"),
+    sys_video_root=Path("/sys/class/video4linux"),
+    dev_root=Path("/dev"),
+):
+    """Inspect connected Astra cameras and resolve AI RGB only when present.
+
+    Returns (available_serials_set, ai_video_device_or_none, report_lines, missing_serials).
+    Never guesses an RGB /dev/videoN node: if ai_serial is connected and enable_ai is True,
+    still requires unambiguous OpenNI -> USB hub -> V4L2 index-0 pairing among connected devices.
+    """
+    configured = [str(s).strip() for s in (front_serial, rear_serial, ai_serial)]
+    if any(not s for s in configured) or len(set(configured)) != len(configured):
+        raise CameraIdentityError("Camera serials (front, rear, ai) must be nonempty and unique.")
+
+    try:
+        devices = (
+            enumerate_openni_devices()
+            if openni_devices is None else list(openni_devices)
+        )
+    except CameraIdentityError as exc:
+        if not allow_missing:
+            raise
+        return set(), None, ["OpenNI enumeration skipped: {}".format(exc)], list(configured)
+
+    available = {d.serial: d for d in devices}
+    present_serials = [s for s in configured if s in available]
+    missing_serials = [s for s in configured if s not in available]
+
+    if missing_serials and not allow_missing:
+        raise CameraIdentityError(
+            "OpenNI serial(s) not found: {}. Found: {}. "
+            "Check all three Astra Pro USB Depth interfaces.".format(
+                ", ".join(missing_serials), ", ".join(sorted(available))
+            )
+        )
+
+    if not enable_ai or ai_serial not in available:
+        report = [
+            "{} [OpenNI {}] (depth-only)".format(s, available[s].uri)
+            for s in present_serials
+        ]
+        return set(present_serials), None, report, missing_serials
+
+    try:
+        ai_video, report = resolve_video_from_serial(
+            ai_serial=ai_serial,
+            required_serials=present_serials,
+            openni_devices=devices,
+            sys_usb_root=sys_usb_root,
+            sys_video_root=sys_video_root,
+            dev_root=dev_root,
+        )
+    except CameraIdentityError as exc:
+        # If front/rear lacks UVC RGB, still verify ai_serial unambiguously against its own hub.
+        if len(present_serials) > 1:
+            ai_video, report = resolve_video_from_serial(
+                ai_serial=ai_serial,
+                required_serials=[ai_serial],
+                openni_devices=devices,
+                sys_usb_root=sys_usb_root,
+                sys_video_root=sys_video_root,
+                dev_root=dev_root,
+            )
+            by_bus = _usb_devices(Path(sys_usb_root))
+            ai_usb = by_bus.get((available[ai_serial].usb_bus, available[ai_serial].usb_device))
+            ai_hub = ai_usb.parent if ai_usb is not None else None
+            for s in present_serials:
+                if s == ai_serial:
+                    continue
+                other_usb = by_bus.get((available[s].usb_bus, available[s].usb_device))
+                if ai_hub is not None and other_usb is not None and other_usb.parent == ai_hub:
+                    raise exc
+        else:
+            raise
+
+    return set(present_serials), ai_video, report, missing_serials
+
+
 def _cli():
     import argparse
     parser = argparse.ArgumentParser(

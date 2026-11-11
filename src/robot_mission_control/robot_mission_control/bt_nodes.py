@@ -1,6 +1,7 @@
 import math
 import time
 import rclpy
+from action_msgs.msg import GoalStatus
 from rclpy.duration import Duration
 from rclpy.action import ActionClient
 from geometry_msgs.msg import PoseStamped, PointStamped, Quaternion
@@ -19,7 +20,7 @@ class IsEmergency(Condition):
         lidar_ok = blackboard.get('SYSTEM_lidar_ok', True)
         odom_ok = blackboard.get('SYSTEM_odom_ok', True)
         localization_ok = blackboard.get('SYSTEM_localization_ok', True)
-        
+
         if not lidar_ok or not odom_ok or not localization_ok:
             return NodeStatus.SUCCESS
         return NodeStatus.FAILURE
@@ -45,10 +46,15 @@ class IsServingCustomer(Condition):
 
 
 class IsHandWavingDetected(Condition):
-    """Ưu tiên cao nhất: Có người giơ tay vẫy gọi xe."""
+    """Ưu tiên cao nhất khi chạy: Có người giơ tay vẫy gọi xe hoặc đang tiếp cận người vẫy."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        # Nếu đang phục vụ người khác dở thì không ngắt
         if blackboard.get('IS_SERVING', False):
+            return NodeStatus.FAILURE
+
+        if blackboard.get('APPROACH_ACTIVE', False):
+            return NodeStatus.SUCCESS
+
+        if time.time() < blackboard.get('WAVE_COOLDOWN_UNTIL', 0.0):
             return NodeStatus.FAILURE
 
         is_waving = blackboard.get('HAND_WAVE_ACTIVE', False)
@@ -56,12 +62,19 @@ class IsHandWavingDetected(Condition):
 
 
 class IsCustomerEncountered(Condition):
-    """Gặp người đứng chắn đường (cự ly < 1.8m, không vẫy)."""
+    """Gặp người đứng chắn đường (cự ly < 1.8m, không vẫy) hoặc đang giữ đếm ngược 5s."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        if blackboard.get('IS_SERVING', False) or blackboard.get('HAND_WAVE_ACTIVE', False):
+        if (
+            blackboard.get('IS_SERVING', False)
+            or blackboard.get('HAND_WAVE_ACTIVE', False)
+            or blackboard.get('APPROACH_ACTIVE', False)
+        ):
             return NodeStatus.FAILURE
 
-        # Kiểm tra thời gian hồi chiêu (Cooldown) 10s để không dừng giật cục
+        # Giữ khóa đủ 5 giây đếm ngược mời nước ngay cả khi người hơi nhích khỏi khung hình.
+        if blackboard.get('ENCOUNTER_ACTIVE', False):
+            return NodeStatus.SUCCESS
+
         cooldown_until = blackboard.get('ENCOUNTER_COOLDOWN_UNTIL', 0.0)
         if time.time() < cooldown_until:
             return NodeStatus.FAILURE
@@ -73,7 +86,6 @@ class IsCustomerEncountered(Condition):
 class IsPatrolRequested(Condition):
     """Chế độ tuần tra mặc định."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        # Tự động bật tuần tra nếu không bị pause
         patrol_requested = blackboard.get('HMI_start_patrol', True)
         return NodeStatus.SUCCESS if patrol_requested else NodeStatus.FAILURE
 
@@ -86,12 +98,26 @@ class StopRobot(Action):
     def __init__(self, name="StopRobot", node=None):
         super().__init__(name)
         self.node = node
+        self._last_log_time = 0.0
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        if self.node:
+        now = time.monotonic()
+        if self.status != NodeStatus.RUNNING:
+            if self.node and hasattr(self.node, 'stop_robot_motion'):
+                self.node.stop_robot_motion(cancel_nav2=True)
+            self.status = NodeStatus.RUNNING
+        elif self.node and hasattr(self.node, 'publish_zero_vel'):
+            self.node.publish_zero_vel()
+
+        if self.node and (now - self._last_log_time >= 5.0):
+            self._last_log_time = now
             self.node.get_logger().error("EMERGENCY STOP! Canceling all navigation.")
             self.node.publish_log("[KHẨN CẤP] Cảm biến gặp sự cố! Dừng xe ngay lập tức.")
-        return NodeStatus.SUCCESS
+        return NodeStatus.RUNNING
+
+    def halt(self, blackboard: Blackboard = None) -> None:
+        self._last_log_time = 0.0
+        self.status = NodeStatus.FAILURE
 
 
 class ActionGoCharging(Action):
@@ -104,6 +130,8 @@ class ActionGoCharging(Action):
         if self.status != NodeStatus.RUNNING:
             msg = "CẢNH BÁO: Pin yếu! Đang về trạm sạc..."
             if self.node:
+                if hasattr(self.node, 'stop_robot_motion'):
+                    self.node.stop_robot_motion(cancel_nav2=True)
                 self.node.get_logger().warn(msg)
                 self.node.publish_log(msg)
             self.start_time = time.time()
@@ -120,6 +148,10 @@ class ActionGoCharging(Action):
 
         return NodeStatus.RUNNING
 
+    def halt(self, blackboard: Blackboard = None) -> None:
+        self.start_time = None
+        self.status = NodeStatus.FAILURE
+
 
 class ActionGoRefill(Action):
     def __init__(self, name="ActionGoRefill", node=None):
@@ -131,6 +163,8 @@ class ActionGoRefill(Action):
         if self.status != NodeStatus.RUNNING:
             msg = "CẢNH BÁO: Gần hết nước! Đang về trạm cấp nước..."
             if self.node:
+                if hasattr(self.node, 'stop_robot_motion'):
+                    self.node.stop_robot_motion(cancel_nav2=True)
                 self.node.get_logger().warn(msg)
                 self.node.publish_log(msg)
             self.start_time = time.time()
@@ -148,6 +182,10 @@ class ActionGoRefill(Action):
 
         return NodeStatus.RUNNING
 
+    def halt(self, blackboard: Blackboard = None) -> None:
+        self.start_time = None
+        self.status = NodeStatus.FAILURE
+
 
 # ==========================================
 # SMART AUTONOMOUS ACTIONS
@@ -155,12 +193,12 @@ class ActionGoRefill(Action):
 
 class ActionApproachWavingPerson(Action):
     """
-    Ưu tiên cao nhất: Khi phát hiện người giơ tay vẫy:
-    1. Hủy mục tiêu tuần tra hiện tại.
-    2. Lấy tọa độ 3D người vẫy tay từ AI.
-    3. Tính điểm đỗ an toàn cách người 0.9m (không đâm vào chân).
+    Ưu tiên cao khi phát hiện người giơ tay vẫy:
+    1. Nhánh Fallback tự động halt ActionPatrol để hủy goal tuần tra cũ.
+    2. Lấy tọa độ 3D người vẫy tay từ AI (chỉ dùng khi position_valid hoặc có preview map).
+    3. Tính điểm đỗ an toàn cách người 0.9m.
     4. Điều khiển Nav2 chạy lại trước mặt người đó.
-    5. Đến nơi -> Chuyển sang CHẾ ĐỘ PHỤC VỤ (IS_SERVING = True).
+    5. Chỉ khi Nav2 báo STATUS_SUCCEEDED -> Chuyển sang CHẾ ĐỘ PHỤC VỤ (IS_SERVING = True).
     """
     def __init__(self, name="ActionApproachWavingPerson", node=None):
         super().__init__(name)
@@ -169,130 +207,179 @@ class ActionApproachWavingPerson(Action):
         self.goal_handle = None
         self.is_navigating = False
         self.standoff_distance = 0.90  # Đỗ cách người 90cm an toàn
+        self._goal_seq = 0
 
         if self.node:
             self.nav2_client = ActionClient(self.node, NavigateToPose, 'navigate_to_pose')
 
-    def tick(self, blackboard: Blackboard) -> NodeStatus:
-        if self.status != NodeStatus.RUNNING:
-            # Bắt đầu tiếp cận
-            waving_person = blackboard.get('WAVING_PERSON')
-            if not waving_person:
-                self.status = NodeStatus.FAILURE
-                return NodeStatus.FAILURE
+    def _cancel_active_goal(self):
+        self._goal_seq += 1
+        if self.goal_handle is not None and self.is_navigating:
+            try:
+                self.goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+        self.goal_handle = None
+        self.is_navigating = False
 
-            # Báo cho Patrol biết để hủy goal tuần tra
-            blackboard.set('CANCEL_PATROL_GOAL', True)
+    def _abort_approach(self, blackboard: Blackboard, reason: str):
+        self._cancel_active_goal()
+        blackboard.set('HAND_WAVE_ACTIVE', False)
+        blackboard.set('APPROACH_ACTIVE', False)
+        blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
+        if self.node and reason:
+            self.node.get_logger().warn(reason)
+        self.status = NodeStatus.FAILURE
+        return NodeStatus.FAILURE
 
+    def _resolve_target_pose_map(self, blackboard: Blackboard):
+        waving_person = blackboard.get('WAVING_PERSON')
+        if waving_person is not None and getattr(waving_person, 'position_valid', False):
             x_base = float(waving_person.position.x)
             y_base = float(waving_person.position.y)
-            dist = math.hypot(x_base, y_base)
-            angle = math.atan2(y_base, x_base)
+            if math.isfinite(x_base) and math.isfinite(y_base):
+                dist = math.hypot(x_base, y_base)
+                angle = math.atan2(y_base, x_base)
+                approach_dist = max(0.0, dist - self.standoff_distance)
 
-            # Tính tọa độ đỗ cách người standoff_distance
-            approach_dist = max(0.0, dist - self.standoff_distance)
-            x_target_base = approach_dist * math.cos(angle)
-            y_target_base = approach_dist * math.sin(angle)
+                pose_base = PoseStamped()
+                pose_base.header.stamp = self.node.get_clock().now().to_msg()
+                pose_base.header.frame_id = 'base_footprint'
+                pose_base.pose.position.x = approach_dist * math.cos(angle)
+                pose_base.pose.position.y = approach_dist * math.sin(angle)
+                pose_base.pose.position.z = 0.0
+                pose_base.pose.orientation.z = math.sin(angle / 2.0)
+                pose_base.pose.orientation.w = math.cos(angle / 2.0)
 
-            # Tạo PoseStamped trong base_footprint hướng mặt về phía người
-            pose_base = PoseStamped()
-            pose_base.header.stamp = self.node.get_clock().now().to_msg()
-            pose_base.header.frame_id = 'base_footprint'
-            pose_base.pose.position.x = x_target_base
-            pose_base.pose.position.y = y_target_base
-            pose_base.pose.position.z = 0.0
-            pose_base.pose.orientation.z = math.sin(angle / 2.0)
-            pose_base.pose.orientation.w = math.cos(angle / 2.0)
+                try:
+                    if self.node and hasattr(self.node, 'tf_buffer'):
+                        transform = self.node.tf_buffer.lookup_transform(
+                            'map', 'base_footprint', rclpy.time.Time(),
+                            timeout=Duration(seconds=0.05)
+                        )
+                        import tf2_geometry_msgs
+                        return tf2_geometry_msgs.do_transform_pose_stamped(pose_base, transform), dist
+                except Exception as e:
+                    if self.node:
+                        self.node.get_logger().warn(f"TF transform lỗi: {e}")
 
-            # Chuyển đổi sang hệ tọa độ map qua TF
-            pose_map = None
-            try:
-                if self.node and hasattr(self.node, 'tf_buffer'):
-                    transform = self.node.tf_buffer.lookup_transform(
-                        'map', 'base_footprint', rclpy.time.Time(),
-                        timeout=Duration(seconds=1.0)
-                    )
-                    import tf2_geometry_msgs
-                    pose_map = tf2_geometry_msgs.do_transform_pose_stamped(pose_base, transform)
-            except Exception as e:
-                if self.node:
-                    self.node.get_logger().warn(f"TF transform lỗi: {e}")
+        preview_pose = blackboard.get('PERSON_PREVIEW_MAP_POSE', None)
+        if preview_pose is not None:
+            return preview_pose, 0.0
+        return None, 0.0
 
-            if not pose_map:
-                # Nếu không chuyển đổi được, dùng topic preview map từ localizer
-                pose_map = blackboard.get('PERSON_PREVIEW_MAP_POSE', None)
+    def tick(self, blackboard: Blackboard) -> NodeStatus:
+        if self.status != NodeStatus.RUNNING:
+            pose_map, dist = self._resolve_target_pose_map(blackboard)
+            if pose_map is None:
+                return self._abort_approach(blackboard, "Không thể xác định tọa độ map hợp lệ của người vẫy tay!")
 
-            if not pose_map:
-                if self.node:
-                    self.node.get_logger().error("Không thể xác định tọa độ map của người vẫy tay!")
-                self.status = NodeStatus.FAILURE
-                return NodeStatus.FAILURE
+            if not self.nav2_client or not self.nav2_client.server_is_ready():
+                return self._abort_approach(blackboard, "Nav2 Action Server chưa sẵn sàng để tiếp cận người vẫy tay!")
 
+            blackboard.set('APPROACH_ACTIVE', True)
             msg = f"👋 PHÁT HIỆN NGƯỜI VẪY TAY! Đang tiếp cận người (cách {dist:.2f}m)..."
             if self.node:
                 self.node.get_logger().info(msg)
                 self.node.publish_log(msg)
                 self.node.publish_popup_cmd("HIDE")
 
-            # Gửi goal tới Nav2
             self.send_nav2_goal(pose_map)
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
-        # Nếu đang trong quá trình chạy đến
         if self.is_navigating:
             return NodeStatus.RUNNING
 
         return self.status
 
     def send_nav2_goal(self, pose_map: PoseStamped):
-        if not self.nav2_client.wait_for_server(timeout_sec=2.0):
-            if self.node:
-                self.node.get_logger().error("Nav2 Action Server không phản hồi!")
-            self.status = NodeStatus.FAILURE
-            return
+        self._cancel_active_goal()
+        seq = self._goal_seq
 
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = pose_map
         send_future = self.nav2_client.send_goal_async(goal_msg)
-        send_future.add_done_callback(self.goal_response_callback)
+        send_future.add_done_callback(lambda fut, s=seq: self.goal_response_callback(fut, s))
         self.is_navigating = True
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
+    def goal_response_callback(self, future, seq=None):
+        if seq is not None and seq != self._goal_seq:
+            return
+        try:
+            goal_handle = future.result()
+        except Exception as exc:
+            self.is_navigating = False
+            if self.node:
+                self.node.get_logger().error(f"Lỗi gửi goal tiếp cận người: {exc}")
+                self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
+                self.node.blackboard.set('APPROACH_ACTIVE', False)
+                self.node.blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
+            self.status = NodeStatus.FAILURE
+            return
+
         if not goal_handle.accepted:
+            self.is_navigating = False
             if self.node:
                 self.node.get_logger().error("Goal tiếp cận người bị Nav2 từ chối!")
-            self.is_navigating = False
+                self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
+                self.node.blackboard.set('APPROACH_ACTIVE', False)
+                self.node.blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
             self.status = NodeStatus.FAILURE
             return
 
         self.goal_handle = goal_handle
         get_res_future = goal_handle.get_result_async()
-        get_res_future.add_done_callback(self.result_callback)
+        get_res_future.add_done_callback(lambda fut, s=seq: self.result_callback(fut, s))
 
-    def result_callback(self, future):
+    def result_callback(self, future, seq=None):
+        if seq is not None and seq != self._goal_seq:
+            return
         self.is_navigating = False
-        msg = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
-        if self.node:
-            self.node.get_logger().info(msg)
-            self.node.publish_log(msg)
+        self.goal_handle = None
 
-        # Chuyển sang chế độ phục vụ
+        status = GoalStatus.STATUS_ABORTED
+        try:
+            res_wrapper = future.result()
+            status = res_wrapper.status
+        except Exception as exc:
+            if self.node:
+                self.node.get_logger().warn(f"Lỗi nhận kết quả tiếp cận người: {exc}")
+
         if self.node and hasattr(self.node, 'blackboard'):
             self.node.blackboard.set('HAND_WAVE_ACTIVE', False)
-            self.node.blackboard.set('IS_SERVING', True)
+            self.node.blackboard.set('APPROACH_ACTIVE', False)
 
-        self.status = NodeStatus.SUCCESS
+        if status == GoalStatus.STATUS_SUCCEEDED:
+            msg = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
+            if self.node:
+                self.node.get_logger().info(msg)
+                self.node.publish_log(msg)
+                self.node.blackboard.set('IS_SERVING', True)
+            self.status = NodeStatus.SUCCESS
+        else:
+            msg = f"⚠️ Không thể tiếp cận người vẫy tay (Nav2 status={status}), quay lại tuần tra."
+            if self.node:
+                self.node.get_logger().warn(msg)
+                self.node.publish_log(msg)
+                self.node.blackboard.set('WAVE_COOLDOWN_UNTIL', time.time() + 3.0)
+            self.status = NodeStatus.FAILURE
+
+    def halt(self, blackboard: Blackboard = None) -> None:
+        self._cancel_active_goal()
+        if blackboard is not None:
+            blackboard.set('APPROACH_ACTIVE', False)
+            blackboard.set('HAND_WAVE_ACTIVE', False)
+        self.status = NodeStatus.FAILURE
 
 
 class ActionCustomerEncounter(Action):
     """
-    Khi gặp người đứng cản trước mặt (cự ly < 1.8m, > 1.5s):
-    1. Dừng tĩnh 5 giây tại chỗ.
+    Khi gặp người đứng cản trước mặt (cự ly < 1.8m):
+    1. Hủy goal Nav2/Patrol hiện tại và ghìm /cmd_vel = 0 đứng tĩnh đủ 5 giây.
     2. Bật Popup mời nước lên HMI Kiosk (SHOW_5S_INVITE).
-    3. Nếu thầy cô bấm "Phục vụ" -> IS_SERVING = True.
-    4. Nếu sau 5s không bấm -> Chào nhẹ, đi tiếp và Cooldown 10s.
+    3. Nếu bấm "Phục vụ" -> IS_SERVING = True.
+    4. Nếu hết 5s không bấm -> Chào nhẹ, đi tiếp và Cooldown 10s.
     """
     def __init__(self, name="ActionCustomerEncounter", node=None):
         super().__init__(name)
@@ -302,8 +389,9 @@ class ActionCustomerEncounter(Action):
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
             self.start_time = time.time()
-            # Báo Patrol tạm dừng
-            blackboard.set('CANCEL_PATROL_GOAL', True)
+            blackboard.set('ENCOUNTER_ACTIVE', True)
+            if self.node and hasattr(self.node, 'stop_robot_motion'):
+                self.node.stop_robot_motion(cancel_nav2=True)
 
             msg = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước..."
             if self.node:
@@ -314,14 +402,17 @@ class ActionCustomerEncounter(Action):
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
-        # 1. Nếu người dùng bấm "Lấy nước / Phục vụ" trên HMI
+        if self.node and hasattr(self.node, 'publish_zero_vel'):
+            self.node.publish_zero_vel()
+
         if blackboard.get('SERVE_REQUESTED', False):
             blackboard.set('SERVE_REQUESTED', False)
+            blackboard.set('ENCOUNTER_ACTIVE', False)
             blackboard.set('IS_SERVING', True)
+            self.start_time = None
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
 
-        # 2. Nếu hết 5 giây không ai bấm
         if time.time() - self.start_time >= 5.0:
             msg = "⏱ Hết 5s không yêu cầu nước. Chúc Thầy/Cô một ngày tốt lành và tiếp tục tuần tra!"
             if self.node:
@@ -329,21 +420,28 @@ class ActionCustomerEncounter(Action):
                 self.node.publish_log(msg)
                 self.node.publish_popup_cmd("HIDE")
 
-            # Đặt Cooldown 10s để không bị dừng liên tục
+            blackboard.set('ENCOUNTER_ACTIVE', False)
             blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', time.time() + 10.0)
+            self.start_time = None
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
 
         return NodeStatus.RUNNING
 
+    def halt(self, blackboard: Blackboard = None) -> None:
+        if blackboard is not None:
+            blackboard.set('ENCOUNTER_ACTIVE', False)
+        self.start_time = None
+        self.status = NodeStatus.FAILURE
+
 
 class ActionServeCustomer(Action):
     """
     Chế độ Phục Vụ Nước (IS_SERVING == True):
-    1. Khóa cứng bánh xe đứng yên.
-    2. Bật Popup phục vụ (SHOW_SERVING) & phát MP3 giới thiệu chúc mừng.
-    3. Đợi thầy cô bấm "Đã hài lòng" HOẶC hết 25 giây Timeout.
-    4. Cảm ơn, tắt popup, chuyển sang điểm tuần tra tiếp theo.
+    1. Hủy toàn bộ goal Nav2/Patrol đang chạy và khóa /cmd_vel = 0 đứng yên.
+    2. Bật Popup phục vụ (SHOW_SERVING).
+    3. Đợi bấm "Đã hài lòng" HOẶC hết 25 giây Timeout.
+    4. Cảm ơn, tắt popup, mở khóa và chuyển sang điểm tuần tra tiếp theo.
     """
     def __init__(self, name="ActionServeCustomer", node=None):
         super().__init__(name)
@@ -354,6 +452,13 @@ class ActionServeCustomer(Action):
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
             self.start_time = time.time()
+            blackboard.set('ENCOUNTER_ACTIVE', False)
+            blackboard.set('APPROACH_ACTIVE', False)
+            blackboard.set('HAND_WAVE_ACTIVE', False)
+            blackboard.set('SERVE_REQUESTED', False)
+            if self.node and hasattr(self.node, 'stop_robot_motion'):
+                self.node.stop_robot_motion(cancel_nav2=True)
+
             msg = "☕ BẮT ĐẦU PHỤC VỤ NƯỚC: Kính mời Thầy/Cô nhận nước trên khay!"
             if self.node:
                 self.node.get_logger().info(msg)
@@ -363,7 +468,10 @@ class ActionServeCustomer(Action):
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
-        # Kiểm tra điều kiện hoàn thành:
+        # Giữ /cmd_vel = 0 trong suốt thời gian phục vụ nước để xe đứng yên tuyệt đối.
+        if self.node and hasattr(self.node, 'publish_zero_vel'):
+            self.node.publish_zero_vel()
+
         finish_by_button = blackboard.get('FINISH_SERVING_REQUESTED', False)
         finish_by_timeout = (time.time() - self.start_time >= self.timeout_sec)
 
@@ -375,26 +483,32 @@ class ActionServeCustomer(Action):
                 self.node.publish_log(msg)
                 self.node.publish_popup_cmd("HIDE")
 
-            # Đặt lại các cờ
             blackboard.set('IS_SERVING', False)
             blackboard.set('FINISH_SERVING_REQUESTED', False)
+            blackboard.set('HAND_WAVE_ACTIVE', False)
             blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', time.time() + 10.0)
-
-            # Báo cho Patrol chuyển sang waypoint tiếp theo
             blackboard.set('PATROL_ADVANCE_NEXT', True)
 
+            self.start_time = None
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
 
         return NodeStatus.RUNNING
+
+    def halt(self, blackboard: Blackboard = None) -> None:
+        if blackboard is not None:
+            blackboard.set('IS_SERVING', False)
+            blackboard.set('FINISH_SERVING_REQUESTED', False)
+        self.start_time = None
+        self.status = NodeStatus.FAILURE
 
 
 class ActionPatrol(Action):
     """
     Hành vi tuần tra chu kỳ qua các điểm [Trạm nước -> Điểm A -> Điểm B -> Điểm C -> Trạm]:
     - Lấy lộ trình từ /config/get_route (nếu có).
-    - Có danh sách điểm mặc định nếu chưa cấu hình.
-    - Hỗ trợ tạm dừng / hủy mượt mà khi có sự kiện ưu tiên (gặp người, giơ tay).
+    - Hủy goal sạch sẽ qua halt() khi bị ngắt bởi sự kiện ưu tiên cao hơn hoặc Pause.
+    - Dùng sequence token để bỏ qua callback muộn từ goal cũ đã hủy.
     """
     def __init__(self, name="ActionPatrol", node=None):
         super().__init__(name)
@@ -409,20 +523,49 @@ class ActionPatrol(Action):
         self.wait_start_time = 0.0
         self.is_waiting_at_waypoint = False
         self.is_fetching_route = False
+        self._route_loaded = False
+        self._goal_seq = 0
+        self._route_seq = 0
+        self._advance_after_wait = True
 
         if self.node:
             self.action_client = ActionClient(self.node, DirectGo, '/navigation/direct_go')
             self.get_route_client = self.node.create_client(GetRoute, '/config/get_route')
 
-    def fetch_route(self):
-        if not self.get_route_client:
-            self.patrol_points = list(self.default_points)
-            return
+    def _schedule_wait(self, advance: bool):
+        self.is_waiting_for_result = False
+        self.wait_start_time = time.time()
+        self._advance_after_wait = advance
+        self.is_waiting_at_waypoint = True
 
-        if not self.get_route_client.wait_for_service(timeout_sec=0.2):
+    def _cancel_active_goal(self):
+        self._goal_seq += 1
+        if self.goal_handle is not None and self.is_waiting_for_result:
+            try:
+                self.goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+        self.goal_handle = None
+        self.is_waiting_for_result = False
+
+    def halt(self, blackboard: Blackboard = None) -> None:
+        self._cancel_active_goal()
+        self._route_seq += 1
+        self.is_fetching_route = False
+        self.is_waiting_at_waypoint = False
+        self.status = NodeStatus.FAILURE
+
+    def fetch_route(self):
+        self._route_seq += 1
+        seq = self._route_seq
+
+        if not self.get_route_client or not self.get_route_client.service_is_ready():
             if self.node:
                 self.node.get_logger().info("Chưa tìm thấy /config/get_route, dùng lộ trình mặc định: " + str(self.default_points))
             self.patrol_points = list(self.default_points)
+            self._route_loaded = True
+            self.current_idx = 0
+            self.is_fetching_route = False
             self.send_next_goal()
             return
 
@@ -430,9 +573,11 @@ class ActionPatrol(Action):
         req = GetRoute.Request()
         req.route_name = "patrol_route"
         future = self.get_route_client.call_async(req)
-        future.add_done_callback(self.route_response_callback)
+        future.add_done_callback(lambda fut, s=seq: self.route_response_callback(fut, s))
 
-    def route_response_callback(self, future):
+    def route_response_callback(self, future, seq=None):
+        if seq is not None and seq != self._route_seq:
+            return
         try:
             response = future.result()
             if response.success and len(response.waypoints) > 0:
@@ -446,57 +591,48 @@ class ActionPatrol(Action):
         if self.node:
             self.node.get_logger().info(msg)
             self.node.publish_log(msg)
+        self._route_loaded = True
         self.current_idx = 0
         self.is_fetching_route = False
         self.send_next_goal()
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        # Nếu có lệnh hủy goal từ sự kiện ưu tiên
-        if blackboard.get('CANCEL_PATROL_GOAL', False):
-            blackboard.set('CANCEL_PATROL_GOAL', False)
-            if self.is_waiting_for_result and self.goal_handle:
-                self.goal_handle.cancel_goal_async()
-            self.is_waiting_for_result = False
-            self.status = NodeStatus.FAILURE
-            return NodeStatus.FAILURE
-
-        # Nếu có lệnh chuyển waypoint sau khi phục vụ xong
-        if blackboard.get('PATROL_ADVANCE_NEXT', False):
+        if blackboard.get('PATROL_ROUTE_CHANGED', False):
+            blackboard.set('PATROL_ROUTE_CHANGED', False)
             blackboard.set('PATROL_ADVANCE_NEXT', False)
-            if self.patrol_points:
-                self.current_idx = (self.current_idx + 1) % len(self.patrol_points)
-            self.is_waiting_for_result = False
+            self._cancel_active_goal()
+            self._route_loaded = False
             self.is_waiting_at_waypoint = False
-            self.send_next_goal()
-
-        route_changed = blackboard.get('PATROL_ROUTE_CHANGED', False)
-
-        if self.status != NodeStatus.RUNNING or route_changed:
-            if route_changed:
-                blackboard.set('PATROL_ROUTE_CHANGED', False)
-                if self.is_waiting_for_result and self.goal_handle:
-                    self.goal_handle.cancel_goal_async()
-
-            self.is_waiting_at_waypoint = False
-            self.is_waiting_for_result = False
             self.fetch_route()
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
-        if self.is_fetching_route:
+        if blackboard.get('PATROL_ADVANCE_NEXT', False):
+            blackboard.set('PATROL_ADVANCE_NEXT', False)
+            if self.patrol_points:
+                self.current_idx = (self.current_idx + 1) % len(self.patrol_points)
+
+        if self.status != NodeStatus.RUNNING:
+            self.is_waiting_at_waypoint = False
+            self.is_waiting_for_result = False
+            self.status = NodeStatus.RUNNING
+            if not self._route_loaded:
+                self.fetch_route()
+            else:
+                self.send_next_goal()
+            return NodeStatus.RUNNING
+
+        if self.is_fetching_route or self.is_waiting_for_result:
             return NodeStatus.RUNNING
 
         if not self.patrol_points:
             self.patrol_points = list(self.default_points)
 
-        if self.is_waiting_for_result:
-            return NodeStatus.RUNNING
-
-        # Đợi 2 giây tại mỗi điểm waypoint rồi đi tiếp
         if self.is_waiting_at_waypoint:
             if time.time() - self.wait_start_time > 2.0:
                 self.is_waiting_at_waypoint = False
-                self.current_idx = (self.current_idx + 1) % len(self.patrol_points)
+                if self._advance_after_wait:
+                    self.current_idx = (self.current_idx + 1) % len(self.patrol_points)
                 self.send_next_goal()
             return NodeStatus.RUNNING
 
@@ -505,7 +641,14 @@ class ActionPatrol(Action):
     def send_next_goal(self):
         if not self.action_client or not self.patrol_points:
             return
+        if self.is_waiting_for_result or self.is_fetching_route:
+            return
+        if not self.action_client.server_is_ready():
+            self._schedule_wait(advance=False)
+            return
 
+        self._goal_seq += 1
+        seq = self._goal_seq
         target = self.patrol_points[self.current_idx]
         msg = f"🚀 [TUẦN TRA] Đang di chuyển đến điểm: {target}"
         if self.node:
@@ -516,27 +659,41 @@ class ActionPatrol(Action):
         goal_msg.target_location = target
 
         send_future = self.action_client.send_goal_async(goal_msg)
-        send_future.add_done_callback(self.goal_response_callback)
+        send_future.add_done_callback(lambda fut, s=seq: self.goal_response_callback(fut, s))
         self.is_waiting_for_result = True
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
+    def goal_response_callback(self, future, seq=None):
+        if seq is not None and seq != self._goal_seq:
+            return
+        try:
+            goal_handle = future.result()
+        except Exception:
+            self._schedule_wait(advance=False)
+            return
+
         if not goal_handle.accepted:
             if self.node:
                 self.node.get_logger().warn(f"Goal tới {self.patrol_points[self.current_idx]} chưa được nhận, sẽ thử lại.")
-            self.is_waiting_for_result = False
-            self.wait_start_time = time.time()
-            self.is_waiting_at_waypoint = True
+            self._schedule_wait(advance=True)
             return
 
         self.goal_handle = goal_handle
         get_res_future = goal_handle.get_result_async()
-        get_res_future.add_done_callback(self.result_callback)
+        get_res_future.add_done_callback(lambda fut, s=seq: self.result_callback(fut, s))
 
-    def result_callback(self, future):
-        result = future.result().result
+    def result_callback(self, future, seq=None):
+        if seq is not None and seq != self._goal_seq:
+            return
+        self.goal_handle = None
         target = self.patrol_points[self.current_idx]
-        if result.success:
+        success = False
+        try:
+            res_wrapper = future.result()
+            success = bool(res_wrapper.result.success) and (res_wrapper.status == GoalStatus.STATUS_SUCCEEDED)
+        except Exception:
+            success = False
+
+        if success:
             msg = f"🏁 [TUẦN TRA] Đã đến điểm: {target}"
         else:
             msg = f"⚠️ [TUẦN TRA] Không thể đến được {target}, chuyển điểm tiếp theo."
@@ -545,6 +702,4 @@ class ActionPatrol(Action):
             self.node.get_logger().info(msg)
             self.node.publish_log(msg)
 
-        self.is_waiting_for_result = False
-        self.wait_start_time = time.time()
-        self.is_waiting_at_waypoint = True
+        self._schedule_wait(advance=True)

@@ -26,46 +26,71 @@ class TreeNode:
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         raise NotImplementedError("Tick must be implemented by subclasses")
 
+    def halt(self, blackboard: Blackboard = None) -> None:
+        """Reset node state when preempted by a higher-priority branch or invalidated."""
+        self.status = NodeStatus.FAILURE
+
+
 class Sequence(TreeNode):
     """
     Sequence ticks its children sequentially.
     - If a child returns RUNNING, Sequence returns RUNNING.
-    - If a child returns FAILURE, Sequence returns FAILURE.
+    - If a child returns FAILURE, Sequence halts remaining children and returns FAILURE.
     - If all children return SUCCESS, Sequence returns SUCCESS.
     """
     def __init__(self, name="Sequence", children=None):
         super().__init__(name)
         self.children = children if children else []
 
-    def tick(self, blackboard: Blackboard) -> NodeStatus:
+    def halt(self, blackboard: Blackboard = None) -> None:
         for child in self.children:
+            if child.status == NodeStatus.RUNNING:
+                child.halt(blackboard)
+        self.status = NodeStatus.FAILURE
+
+    def tick(self, blackboard: Blackboard) -> NodeStatus:
+        for idx, child in enumerate(self.children):
             status = child.tick(blackboard)
             if status != NodeStatus.SUCCESS:
+                for tail in self.children[idx + 1:]:
+                    if tail.status == NodeStatus.RUNNING:
+                        tail.halt(blackboard)
                 self.status = status
                 return status
         self.status = NodeStatus.SUCCESS
         return NodeStatus.SUCCESS
 
+
 class Fallback(TreeNode):
     """
     Fallback (Selector) ticks its children sequentially.
-    - If a child returns RUNNING, Fallback returns RUNNING.
-    - If a child returns SUCCESS, Fallback returns SUCCESS.
+    - If a child returns RUNNING, Fallback halts lower-priority running siblings and returns RUNNING.
+    - If a child returns SUCCESS, Fallback halts lower-priority running siblings and returns SUCCESS.
     - If all children return FAILURE, Fallback returns FAILURE.
-    This acts as a priority manager (Reactive).
+    This acts as a reactive priority manager with preemption.
     """
     def __init__(self, name="Fallback", children=None):
         super().__init__(name)
         self.children = children if children else []
 
-    def tick(self, blackboard: Blackboard) -> NodeStatus:
+    def halt(self, blackboard: Blackboard = None) -> None:
         for child in self.children:
+            if child.status == NodeStatus.RUNNING:
+                child.halt(blackboard)
+        self.status = NodeStatus.FAILURE
+
+    def tick(self, blackboard: Blackboard) -> NodeStatus:
+        for idx, child in enumerate(self.children):
             status = child.tick(blackboard)
             if status != NodeStatus.FAILURE:
+                for j, other in enumerate(self.children):
+                    if j != idx and other.status == NodeStatus.RUNNING:
+                        other.halt(blackboard)
                 self.status = status
                 return status
         self.status = NodeStatus.FAILURE
         return NodeStatus.FAILURE
+
 
 class Condition(TreeNode):
     """
@@ -74,6 +99,7 @@ class Condition(TreeNode):
     """
     def __init__(self, name="Condition"):
         super().__init__(name)
+
 
 class Action(TreeNode):
     """
