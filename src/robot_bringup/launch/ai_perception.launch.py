@@ -28,6 +28,7 @@ def generate_launch_description():
     enable_rear = LaunchConfiguration('enable_rear')
     enable_ai = LaunchConfiguration('enable_ai')
     enable_ai_depth = LaunchConfiguration('enable_ai_depth')
+    allow_missing_cameras = LaunchConfiguration('allow_missing_cameras')
     device_num = LaunchConfiguration('device_num')
     ai_color_width = LaunchConfiguration('ai_color_width')
     ai_color_height = LaunchConfiguration('ai_color_height')
@@ -55,6 +56,7 @@ def generate_launch_description():
             'enable_rear': enable_rear,
             'enable_ai': enable_ai,
             'enable_ai_depth': enable_ai_depth,
+            'allow_missing_cameras': allow_missing_cameras,
             'device_num': device_num,
             'ai_color_width': ai_color_width,
             'ai_color_height': ai_color_height,
@@ -127,7 +129,8 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_rear', default_value='true'),
         DeclareLaunchArgument('enable_ai', default_value='true'),
         DeclareLaunchArgument('enable_ai_depth', default_value='true'),
-        DeclareLaunchArgument('device_num', default_value='3'),
+        DeclareLaunchArgument('allow_missing_cameras', default_value='true'),
+        DeclareLaunchArgument('device_num', default_value='auto'),
         DeclareLaunchArgument('ai_color_width', default_value='640'),
         DeclareLaunchArgument('ai_color_height', default_value='480'),
         DeclareLaunchArgument('ai_color_fps', default_value='30'),

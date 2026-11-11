@@ -31,13 +31,13 @@ from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import OccupancyGrid
+from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Image, LaserScan
 from std_msgs.msg import Bool, Int32MultiArray, String
 from std_srvs.srv import Trigger
 from tf2_ros import TransformException
@@ -49,6 +49,12 @@ try:
     HAS_TRACKED_PERSON_MSG = True
 except ImportError:
     HAS_TRACKED_PERSON_MSG = False
+
+try:
+    from robot_interfaces.msg import RobotStatus
+    HAS_ROBOT_STATUS_MSG = True
+except ImportError:
+    HAS_ROBOT_STATUS_MSG = False
 
 try:
     from robot_interfaces.srv import SaveLocation, SaveRoute
@@ -177,12 +183,13 @@ SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_exi
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 class RosInterface(Node):
-    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None):
+    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None, obstacle_scan_callback=None):
         super().__init__("desktop_nav_gui_v3")
         self.log_callback = log_callback
         self.map_callback = map_callback
         self.pose_callback = pose_callback
         self.scan_callback = scan_callback
+        self.obstacle_scan_callback = obstacle_scan_callback
         self.dataenc_callback = dataenc_callback
         self.nav_feedback_callback = nav_feedback_callback
         self.nav_status_callback = nav_status_callback
@@ -194,14 +201,31 @@ class RosInterface(Node):
         self.initial_goal_dist = None
         self.last_scan_ui_pub = 0.0
         self.last_tf_warn_time = 0.0
+        self._dbg_lock = threading.Lock()
+        self._topic_stats = {}
+        self._last_obs_ui_pub = {"front": 0.0, "rear": 0.0}
         self.target_map_frame = "map"
         self.target_base_frame = "base_footprint"
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         map_qos = QoSProfile(reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL, history=HistoryPolicy.KEEP_LAST, depth=1)
+        best_effort_qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10)
         self._map_sub = self.create_subscription(OccupancyGrid, "/map", self.on_map, map_qos)
-        self.scan_sub = self.create_subscription(LaserScan, "/scan", self.on_scan, QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT, durability=DurabilityPolicy.VOLATILE, history=HistoryPolicy.KEEP_LAST, depth=10))
+        self.scan_sub = self.create_subscription(LaserScan, "/scan", self.on_scan, best_effort_qos)
         self.dataenc_sub = self.create_subscription(Int32MultiArray, "/dataenc", self.on_dataenc, 20)
+        for dbg_key, topic_name in (
+            ("cam_front_depth", "/front_camera/depth/image_raw"),
+            ("cam_rear_depth", "/rear_camera/depth/image_raw"),
+            ("cam_ai_color", "/ai_camera/color/image_raw"),
+            ("cam_ai_depth", "/ai_camera/depth/image_raw"),
+        ):
+            self.create_subscription(Image, topic_name, lambda _msg, k=dbg_key: self._mark_topic_rx(k), qos_profile_sensor_data)
+        for side, topic_name in (("front", "/scan_obstacles"), ("rear", "/rear_scan_obstacle")):
+            self.create_subscription(LaserScan, topic_name, lambda msg, s=side: self._on_obstacle_scan(s, msg), best_effort_qos)
+        self.create_subscription(Odometry, "/odom", self._on_odom, 20)
+        self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, 10)
+        if HAS_ROBOT_STATUS_MSG:
+            self.create_subscription(RobotStatus, "/robot_status", self._on_robot_status, 10)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.current_goal_handle = None
@@ -415,10 +439,80 @@ class RosInterface(Node):
             world_points.append((r00 * lx + r01 * ly + tr.x, r10 * lx + r11 * ly + tr.y))
         return world_points
 
+    @staticmethod
+    def _min_scan_range(msg):
+        return min(
+            (r for r in msg.ranges if math.isfinite(r) and msg.range_min <= r <= msg.range_max),
+            default=None,
+        )
+
+    def _mark_topic_rx(self, key, extra=None):
+        """Record message arrival timestamp and smoothed Hz under _dbg_lock."""
+        now = time.monotonic()
+        with self._dbg_lock:
+            entry = self._topic_stats.get(key)
+            if entry is None:
+                self._topic_stats[key] = {"last_ts": now, "hz": 0.0, "extra": extra}
+            else:
+                dt = now - entry["last_ts"]
+                if dt > 0.002:
+                    inst_hz = 1.0 / dt
+                    prev_hz = entry["hz"]
+                    entry["hz"] = inst_hz if prev_hz <= 0.0 else (0.7 * prev_hz + 0.3 * inst_hz)
+                entry["last_ts"] = now
+                if extra is not None:
+                    entry["extra"] = extra
+        return now
+
+    def _on_obstacle_scan(self, side, msg):
+        now = self._mark_topic_rx(f"obs_{side}", {"min_dist": self._min_scan_range(msg)})
+        if not self.obstacle_scan_callback:
+            return
+        if now - self._last_obs_ui_pub.get(side, 0.0) < 0.15:
+            return
+        self._last_obs_ui_pub[side] = now
+        self.obstacle_scan_callback(side, self._scan_to_world_points(msg))
+
+    def _on_odom(self, msg):
+        self._mark_topic_rx("odom", (float(msg.twist.twist.linear.x), float(msg.twist.twist.angular.z)))
+
+    def _on_cmd_vel(self, msg):
+        self._mark_topic_rx("cmd_vel", (float(msg.linear.x), float(msg.angular.z)))
+
+    def _on_robot_status(self, msg):
+        self._mark_topic_rx("robot_status", {
+            "battery_percent": float(msg.battery_percent),
+            "water_liter": float(msg.water_liter),
+            "lidar_ok": bool(msg.lidar_ok),
+            "odom_ok": bool(msg.odom_ok),
+        })
+
+    def get_debug_snapshot(self):
+        """Return thread-safe sensor telemetry snapshot and TF tree availability."""
+        with self._dbg_lock:
+            stats_copy = {k: dict(v) for k, v in self._topic_stats.items()}
+        try:
+            odom_tf_ok = bool(self.tf_buffer.can_transform("odom", self.target_base_frame, Time(), timeout=Duration(seconds=0.0)))
+        except Exception:
+            odom_tf_ok = False
+        try:
+            map_tf_ok = bool(self.tf_buffer.can_transform(self.target_map_frame, "odom", Time(), timeout=Duration(seconds=0.0)))
+        except Exception:
+            map_tf_ok = False
+        return {
+            "now": time.monotonic(),
+            "stats": stats_copy,
+            "odom_tf_ok": odom_tf_ok,
+            "map_tf_ok": map_tf_ok,
+        }
+
     def on_scan(self, msg):
+        now = self._mark_topic_rx(
+            "lidar_scan",
+            {"min_dist": self._min_scan_range(msg), "count": len(msg.ranges)},
+        )
         if not self.scan_callback:
             return
-        now = time.monotonic()
         if now - self.last_scan_ui_pub < 0.1:
             return
         self.last_scan_ui_pub = now
@@ -553,6 +647,8 @@ class MapViewer(QLabel):
         self.latest_scan = None
         self.scan_points_world = []
         self.scan_points_from_tf = False
+        self.front_obs_points_world = []
+        self.rear_obs_points_world = []
         self.batch_waypoints = []
         self.is_dragging = False
 
@@ -603,6 +699,25 @@ class MapViewer(QLabel):
         self.batch_waypoints = list(waypoints)
         self.update_display()
 
+    def update_obstacle_scan(self, side, points_world):
+        """Update cached world-frame obstacle scan points for 'front' or 'rear' camera."""
+        pts = list(points_world) if points_world else []
+        if side == "front":
+            self.front_obs_points_world = pts
+        elif side == "rear":
+            self.rear_obs_points_world = pts
+        self.update_display()
+
+    def _draw_world_points(self, painter, points, color, width, label_w, label_h):
+        """Draw world-frame (wx, wy) points onto the map canvas."""
+        if not points:
+            return
+        painter.setPen(QPen(color, width))
+        for wx, wy in points:
+            sx, sy = self.world_to_widget(wx, wy)
+            if sx is not None and 0 <= sx < label_w and 0 <= sy < label_h:
+                painter.drawPoint(sx, sy)
+
     def _recompute_scan_points(self):
         self.scan_points_world = []
         if self.latest_scan is None or self.robot_x is None or self.robot_y is None or self.robot_yaw is None:
@@ -643,12 +758,9 @@ class MapViewer(QLabel):
         canvas.fill(QColor("#1e1e1e"))
         painter = QPainter(canvas)
         painter.drawPixmap(self.offset_x, self.offset_y, scaled)
-        if self.scan_points_world:
-            painter.setPen(QPen(QColor(0, 255, 255), 1))
-            for wx, wy in self.scan_points_world:
-                sx, sy = self.world_to_widget(wx, wy)
-                if sx is not None and 0 <= sx < label_w and 0 <= sy < label_h:
-                    painter.drawPoint(sx, sy)
+        self._draw_world_points(painter, self.scan_points_world, QColor(0, 255, 255), 1, label_w, label_h)
+        self._draw_world_points(painter, self.front_obs_points_world, QColor(245, 158, 11), 3, label_w, label_h)
+        self._draw_world_points(painter, self.rear_obs_points_world, QColor(232, 121, 249), 3, label_w, label_h)
         if self.batch_waypoints:
             painter.setFont(QFont("Arial", 10))
             for i, wp in enumerate(self.batch_waypoints):
@@ -677,7 +789,7 @@ class MapViewer(QLabel):
         painter.setFont(QFont("Arial", 10))
         painter.drawText(10, 20, "Click trái để gửi goal Nav2")
         painter.drawText(10, 38, f"Pose source: {self.pose_source}")
-        painter.drawText(10, 56, f"/scan points: {len(self.scan_points_world)}")
+        painter.drawText(10, 56, f"/scan: {len(self.scan_points_world)} | FrontObs: {len(self.front_obs_points_world)} | RearObs: {len(self.rear_obs_points_world)}")
         painter.end()
         self.setPixmap(canvas)
 
@@ -811,6 +923,7 @@ class MainWindow(QWidget):
     map_signal = pyqtSignal(object)
     pose_signal = pyqtSignal(float, float, float, str)
     scan_signal = pyqtSignal(object, object)
+    obstacle_scan_signal = pyqtSignal(str, object)
     dataenc_signal = pyqtSignal(object)
     nav_feedback_signal = pyqtSignal(float, float, float, float, int)
     nav_thought_signal = pyqtSignal(str, str, str)
@@ -821,6 +934,7 @@ class MainWindow(QWidget):
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
     CAMERAS = "cameras"
+    OBSTACLE_DEBUGGER = "obstacle_debugger"
     AI_PERCEPTION, BACKEND = "ai_perception", "backend"
 
     def __init__(self):
@@ -849,6 +963,7 @@ class MainWindow(QWidget):
         self.map_signal.connect(self._on_new_map_ui)
         self.pose_signal.connect(self._on_new_pose_ui)
         self.scan_signal.connect(self._on_new_scan_ui)
+        self.obstacle_scan_signal.connect(self._on_new_obstacle_scan_ui)
         self.dataenc_signal.connect(self._on_new_dataenc_ui)
         self.nav_feedback_signal.connect(self._on_nav_feedback_ui)
         self.nav_thought_signal.connect(self._on_nav_thought_ui)
@@ -970,6 +1085,10 @@ class MainWindow(QWidget):
         self.lbl_nav2_status = QLabel("Nav2: OFF"); self.lbl_cameras_status = QLabel("Cam + Vật cản: OFF")
         self.lbl_ai_status = QLabel("AI Perception: OFF"); self.lbl_backend_status = QLabel("Backend: OFF")
         self.lbl_odom_status = QLabel("Odom source: esp -> /odom"); self.lbl_dataenc = QLabel("Encoder /dataenc: -")
+        self.lbl_sensor_summary = QLabel("LiDAR: 0.0Hz | Odom: 0.0Hz | TF: MISS")
+        self.lbl_sensor_summary.setStyleSheet("font-size: 11px; color: #334155;")
+        self.lbl_cam_summary = QLabel("Cam F/R/AI: -/-/- | Obs(m): F=- R=-")
+        self.lbl_cam_summary.setStyleSheet("font-size: 11px; color: #334155;")
         control_group = QGroupBox("Điều khiển"); control_layout = QGridLayout()
         control_layout.addWidget(self.btn_start_platform, 0, 0); control_layout.addWidget(self.btn_stop_platform, 0, 1)
         control_layout.addWidget(self.btn_start_mode, 1, 0); control_layout.addWidget(self.btn_stop_mode, 1, 1)
@@ -986,11 +1105,12 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.lbl_nav2_status, 13, 0, 1, 2); control_layout.addWidget(self.lbl_cameras_status, 14, 0, 1, 2)
         control_layout.addWidget(self.lbl_ai_status, 15, 0, 1, 2); control_layout.addWidget(self.lbl_backend_status, 16, 0, 1, 2)
         control_layout.addWidget(self.lbl_odom_status, 17, 0, 1, 2); control_layout.addWidget(self.lbl_dataenc, 18, 0, 1, 2)
+        control_layout.addWidget(self.lbl_sensor_summary, 19, 0, 1, 2); control_layout.addWidget(self.lbl_cam_summary, 20, 0, 1, 2)
         self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
         self.chk_mock_human.setStyleSheet("color: #0f172a; font-weight: bold;")
         self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
         self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
-        control_layout.addWidget(self.chk_mock_human, 19, 0, 1, 2)
+        control_layout.addWidget(self.chk_mock_human, 21, 0, 1, 2)
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
@@ -1086,6 +1206,52 @@ class MainWindow(QWidget):
         tab_mind_layout.addWidget(self.thought_history_box, stretch=1)
         tab_mind.setLayout(tab_mind_layout)
         self.tabs_info.addTab(tab_mind, "🧠 Trạng Thái & Suy Nghĩ")
+
+        # TAB 3: Debug Cảm biến, Camera, TF & Chuyển động
+        tab_debug = QWidget()
+        tab_debug_layout = QVBoxLayout()
+        tab_debug_layout.setContentsMargins(6, 6, 6, 6)
+        tab_debug_layout.setSpacing(6)
+
+        dbg_hw_group = QGroupBox("Cảm biến, TF & Chuyển động")
+        dbg_hw_layout = QVBoxLayout()
+        dbg_hw_layout.setSpacing(3)
+        self.lbl_dbg_lidar = QLabel("LiDAR (/scan): OFF")
+        self.lbl_dbg_odom_cmd = QLabel("Odom (0.0Hz): vx=+0.00 wz=+0.00 | CmdVel: vx=+0.00 wz=+0.00")
+        self.lbl_dbg_tf = QLabel("TF: map->odom [MISS] | odom->base_footprint [MISS]")
+        self.lbl_dbg_robot_status = QLabel("/robot_status: Chưa có dữ liệu (cần Start Backend)")
+        for lbl in (self.lbl_dbg_lidar, self.lbl_dbg_odom_cmd, self.lbl_dbg_tf, self.lbl_dbg_robot_status):
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("font-size: 11px; color: #0f172a;")
+            dbg_hw_layout.addWidget(lbl)
+        dbg_hw_group.setLayout(dbg_hw_layout)
+
+        dbg_cam_group = QGroupBox("3 Camera & Vật cản (160×120)")
+        dbg_cam_layout = QVBoxLayout()
+        dbg_cam_layout.setSpacing(3)
+        self.lbl_dbg_cam_front = QLabel("Cam Trước Depth: OFF")
+        self.lbl_dbg_cam_rear = QLabel("Cam Sau Depth: OFF")
+        self.lbl_dbg_cam_ai = QLabel("Cam AI RGB/Depth: OFF / OFF")
+        self.lbl_dbg_obs_front = QLabel("/scan_obstacles: OFF | min=-")
+        self.lbl_dbg_obs_rear = QLabel("/rear_scan_obstacle: OFF | min=-")
+        self.btn_open_cam_debugger = QPushButton("🛠 Mở Debugger 2 Cam (ROI / Mặt sàn)")
+        self.btn_open_cam_debugger.setToolTip("Chạy depth_obstacle_detector debugger_gui để hiệu chuẩn cam trước/sau")
+        self.btn_open_cam_debugger.clicked.connect(self.launch_obstacle_debugger)
+        for lbl in (
+            self.lbl_dbg_cam_front, self.lbl_dbg_cam_rear, self.lbl_dbg_cam_ai,
+            self.lbl_dbg_obs_front, self.lbl_dbg_obs_rear,
+        ):
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("font-size: 11px; color: #0f172a;")
+            dbg_cam_layout.addWidget(lbl)
+        dbg_cam_layout.addWidget(self.btn_open_cam_debugger)
+        dbg_cam_group.setLayout(dbg_cam_layout)
+
+        tab_debug_layout.addWidget(dbg_hw_group)
+        tab_debug_layout.addWidget(dbg_cam_group)
+        tab_debug_layout.addStretch()
+        tab_debug.setLayout(tab_debug_layout)
+        self.tabs_info.addTab(tab_debug, "📡 Debug Sensor")
 
         left_layout = QVBoxLayout()
         left_layout.addWidget(system_group); left_layout.addWidget(map_group)
@@ -1280,6 +1446,7 @@ class MainWindow(QWidget):
             map_callback=self.on_new_map,
             pose_callback=self.on_new_pose,
             scan_callback=self.on_new_scan,
+            obstacle_scan_callback=self.on_new_obstacle_scan,
             dataenc_callback=self.on_new_dataenc,
             nav_feedback_callback=self.on_new_nav_feedback,
             nav_status_callback=self.on_new_nav_status,
@@ -1425,6 +1592,8 @@ class MainWindow(QWidget):
         self.pose_signal.emit(float(x), float(y), float(yaw), source)
     def on_new_scan(self, msg, scan_points_world):
         self.scan_signal.emit(msg, scan_points_world)
+    def on_new_obstacle_scan(self, side, points_world):
+        self.obstacle_scan_signal.emit(str(side), list(points_world))
     def on_new_dataenc(self, values):
         self.dataenc_signal.emit(values)
 
@@ -1442,6 +1611,11 @@ class MainWindow(QWidget):
         self.map_view.update_scan(msg, scan_points_world)
         if hasattr(self, "patrol_map_view"):
             self.patrol_map_view.update_scan(msg, scan_points_world)
+
+    def _on_new_obstacle_scan_ui(self, side, points_world):
+        self.map_view.update_obstacle_scan(side, points_world)
+        if hasattr(self, "patrol_map_view"):
+            self.patrol_map_view.update_obstacle_scan(side, points_world)
 
     def _on_new_dataenc_ui(self, values):
         if not values:
@@ -2072,6 +2246,11 @@ class MainWindow(QWidget):
         cmd = self._build_ai_launch_cmd(enable_cameras=True, enable_obstacles=enable_obs, enable_ai_nodes=False)
         self.proc_mgr.start(self.CAMERAS, cmd)
     def stop_cameras(self): self.proc_mgr.stop(self.CAMERAS)
+    def launch_obstacle_debugger(self):
+        self.proc_mgr.start(
+            self.OBSTACLE_DEBUGGER,
+            self.ros_prefix() + "ros2 run depth_obstacle_detector debugger_gui",
+        )
     def start_ai_perception(self):
         if self.proc_mgr.is_running(self.CAMERAS):
             enable_cams = False
@@ -2160,6 +2339,84 @@ class MainWindow(QWidget):
         self._set_status_label(self.lbl_ai_status, "AI Perception", ai_on)
         self._set_status_label(self.lbl_backend_status, "Backend", backend_on)
         self.lbl_odom_status.setText(f"Odom source: {self.get_selected_odom_source()} -> /odom")
+        self._update_sensor_debug_ui()
+
+    def _stream_state(self, stats, key, now, timeout=2.0):
+        entry = stats.get(key)
+        if not entry:
+            return False, 0.0, None
+        age = now - entry["last_ts"]
+        if age > timeout:
+            return False, 0.0, entry.get("extra")
+        return True, entry.get("hz", 0.0), entry.get("extra")
+
+    def _update_sensor_debug_ui(self):
+        if not self.ros_node:
+            return
+        snap = self.ros_node.get_debug_snapshot()
+        now = snap["now"]
+        stats = snap["stats"]
+
+        lidar_ok, lidar_hz, lidar_extra = self._stream_state(stats, "lidar_scan", now)
+        odom_ok, odom_hz, odom_extra = self._stream_state(stats, "odom", now)
+        cmd_ok, _, cmd_extra = self._stream_state(stats, "cmd_vel", now, timeout=1.0)
+        cf_ok, cf_hz, _ = self._stream_state(stats, "cam_front_depth", now)
+        cr_ok, cr_hz, _ = self._stream_state(stats, "cam_rear_depth", now)
+        ca_rgb_ok, ca_rgb_hz, _ = self._stream_state(stats, "cam_ai_color", now)
+        ca_dep_ok, ca_dep_hz, _ = self._stream_state(stats, "cam_ai_depth", now)
+        of_ok, of_hz, of_extra = self._stream_state(stats, "obs_front", now)
+        or_ok, or_hz, or_extra = self._stream_state(stats, "obs_rear", now)
+        rs_ok, _, rs_extra = self._stream_state(stats, "robot_status", now, timeout=3.0)
+
+        odom_tf_ok = snap["odom_tf_ok"]
+        map_tf_ok = snap["map_tf_ok"]
+        tf_short = "map+odom" if (map_tf_ok and odom_tf_ok) else ("odom" if odom_tf_ok else "MISS")
+        self.lbl_sensor_summary.setText(
+            f"LiDAR: {lidar_hz:.1f}Hz | Odom: {odom_hz:.1f}Hz | TF: {tf_short}"
+        )
+        f_min = f"{of_extra['min_dist']:.2f}" if (of_ok and of_extra and of_extra.get("min_dist") is not None) else ("inf" if of_ok else "-")
+        r_min = f"{or_extra['min_dist']:.2f}" if (or_ok and or_extra and or_extra.get("min_dist") is not None) else ("inf" if or_ok else "-")
+        ai_on_flag = ca_rgb_ok or ca_dep_ok
+        self.lbl_cam_summary.setText(
+            f"Cam F/R/AI: {'ON' if cf_ok else '-'}/{'ON' if cr_ok else '-'}/{'ON' if ai_on_flag else '-'} | Obs(m): F={f_min} R={r_min}"
+        )
+
+        if hasattr(self, "lbl_dbg_lidar"):
+            l_min = f"{lidar_extra['min_dist']:.2f}m" if (lidar_ok and lidar_extra and lidar_extra.get("min_dist") is not None) else "--"
+            l_cnt = lidar_extra.get("count", 0) if (lidar_ok and lidar_extra) else 0
+            self.lbl_dbg_lidar.setText(
+                f"LiDAR (/scan): {'ON' if lidar_ok else 'OFF'} | {lidar_hz:.1f} Hz | gần nhất: {l_min} ({l_cnt} tia)"
+            )
+            self.lbl_dbg_lidar.setStyleSheet(f"color: {'#16a34a' if lidar_ok else '#dc2626'}; font-weight: bold;")
+
+            ovx, owz = odom_extra if (odom_ok and odom_extra) else (0.0, 0.0)
+            cvx, cwz = cmd_extra if (cmd_ok and cmd_extra) else (0.0, 0.0)
+            self.lbl_dbg_odom_cmd.setText(
+                f"Odom ({odom_hz:.1f}Hz): vx={ovx:+.2f} wz={owz:+.2f} | CmdVel: vx={cvx:+.2f} wz={cwz:+.2f}"
+            )
+            self.lbl_dbg_tf.setText(
+                f"TF: map->odom [{'OK' if map_tf_ok else 'MISS'}] | odom->base_footprint [{'OK' if odom_tf_ok else 'MISS'}]"
+            )
+            self.lbl_dbg_tf.setStyleSheet(
+                f"color: {'#16a34a' if (map_tf_ok and odom_tf_ok) else ('#d97706' if odom_tf_ok else '#dc2626')}; font-weight: bold;"
+            )
+            if rs_ok and rs_extra:
+                self.lbl_dbg_robot_status.setText(
+                    f"/robot_status: Pin {rs_extra['battery_percent']:.0f}% | Nước {rs_extra['water_liter']:.1f}L | lidar_ok={rs_extra['lidar_ok']} odom_ok={rs_extra['odom_ok']}"
+                )
+            else:
+                self.lbl_dbg_robot_status.setText("/robot_status: Chưa có dữ liệu (cần Start Backend)")
+
+            self.lbl_dbg_cam_front.setText(f"Cam Trước Depth: {'ON (' + f'{cf_hz:.1f}Hz)' if cf_ok else 'OFF'}")
+            self.lbl_dbg_cam_front.setStyleSheet(f"color: {'#16a34a' if cf_ok else '#64748b'}; font-weight: bold;")
+            self.lbl_dbg_cam_rear.setText(f"Cam Sau Depth: {'ON (' + f'{cr_hz:.1f}Hz)' if cr_ok else 'OFF'}")
+            self.lbl_dbg_cam_rear.setStyleSheet(f"color: {'#16a34a' if cr_ok else '#64748b'}; font-weight: bold;")
+            self.lbl_dbg_cam_ai.setText(
+                f"Cam AI RGB/Depth: {'ON' if ca_rgb_ok else 'OFF'} ({ca_rgb_hz:.1f}Hz) / {'ON' if ca_dep_ok else 'OFF'} ({ca_dep_hz:.1f}Hz)"
+            )
+            self.lbl_dbg_cam_ai.setStyleSheet(f"color: {'#16a34a' if ai_on_flag else '#64748b'}; font-weight: bold;")
+            self.lbl_dbg_obs_front.setText(f"/scan_obstacles: {'ON (' + f'{of_hz:.1f}Hz)' if of_ok else 'OFF'} | min={f_min}")
+            self.lbl_dbg_obs_rear.setText(f"/rear_scan_obstacle: {'ON (' + f'{or_hz:.1f}Hz)' if or_ok else 'OFF'} | min={r_min}")
 
     def stop_one_shot_processes(self):
         with self.one_shot_lock:
@@ -2209,6 +2466,7 @@ class MainWindow(QWidget):
             "three_astra",
             "dual_camera_obstacles",
             "obstacle_detector",
+            "debugger_gui",
             "astra_camera_node",
             "usb_cam_node_exe",
             "yolo_node",
