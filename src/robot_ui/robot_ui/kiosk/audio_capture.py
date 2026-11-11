@@ -56,7 +56,7 @@ class AudioCapture:
         channels: int = 1,
         max_duration_seconds: float = 15.0,
         min_duration_seconds: float = 0.3,
-        silence_timeout_seconds: float = 1.0,
+        silence_timeout_seconds: float = 0.6,
         rms_threshold: float = 350.0,
         source_name: str | None = None,
     ) -> None:

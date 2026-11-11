@@ -950,6 +950,9 @@ class ChatPage(QWidget):
             self._pulse_timer.stop()
             self.mic_btn.setStyleSheet("")
 
+        if state not in (MicState.LLM_PROCESSING, MicState.TTS_PROCESSING, MicState.SPEAKING):
+            self._stop_speaking_btn.hide()
+
         if state == MicState.READY:
             self.mic_btn.setIcon(self._get_icon("mic"))
             self.mic_btn.setEnabled(True)
@@ -979,12 +982,17 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Đang xử lý câu hỏi...")
             self.mic_btn.setProperty("listening", "false")
+            self._stop_speaking_btn.setText("Dừng")
+            self._stop_speaking_btn.setToolTip("Hủy câu hỏi đang xử lý")
+            self._stop_speaking_btn.show()
             self.set_status("Thinking...")
         elif state == MicState.TTS_PROCESSING:
             self.mic_btn.setIcon(self._get_icon("mic"))
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Đang tạo giọng nói...")
             self.mic_btn.setProperty("listening", "false")
+            self._stop_speaking_btn.setText("Dừng nói")
+            self._stop_speaking_btn.setToolTip("Dừng phát âm thanh")
             self._stop_speaking_btn.show()
             self.set_status("Đang tạo giọng nói...")
         elif state == MicState.SPEAKING:
@@ -992,6 +1000,8 @@ class ChatPage(QWidget):
             self.mic_btn.setEnabled(False)
             self.mic_btn.setToolTip("Souta đang nói...")
             self.mic_btn.setProperty("listening", "false")
+            self._stop_speaking_btn.setText("Dừng nói")
+            self._stop_speaking_btn.setToolTip("Dừng phát âm thanh")
             self._stop_speaking_btn.show()
             self.set_status("Souta đang nói...")
         elif state == MicState.ERROR:
@@ -1036,10 +1046,12 @@ class ChatPage(QWidget):
     def set_speaker_speaking(self, is_speaking: bool) -> None:
         self._is_speaking = is_speaking
         if is_speaking:
+            self._stop_speaking_btn.setText("Dừng nói")
             self._stop_speaking_btn.show()
             self.set_status("Đang nói...")
         else:
-            self._stop_speaking_btn.hide()
+            if self._mic_state not in (MicState.LLM_PROCESSING, MicState.TTS_PROCESSING):
+                self._stop_speaking_btn.hide()
             if self._mic_state != MicState.LISTENING and self.input.isEnabled():
                 self.set_status("Sẵn sàng trò chuyện")
 

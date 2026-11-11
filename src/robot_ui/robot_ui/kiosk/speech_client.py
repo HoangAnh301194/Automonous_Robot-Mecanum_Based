@@ -59,6 +59,10 @@ def clean_markdown_for_tts(text: str) -> str:
     cleaned = re.sub(r"[*_~`#>]", " ", cleaned)
     # Remove list bullet marks
     cleaned = re.sub(r"^\s*[-+*]\s+", "", cleaned, flags=re.MULTILINE)
+    # Strip parenthesized and bracketed annotations (e.g. (Souta), (phiên âm), （ソウタ）, 【chú thích】)
+    without_annotations = re.sub(r"[\(\uff08\[\u3010][^\)\uff09\]\u3011]*[\)\uff09\]\u3011]", "", cleaned)
+    if without_annotations.strip():
+        cleaned = without_annotations
     # Normalize multiple whitespace and newlines
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned

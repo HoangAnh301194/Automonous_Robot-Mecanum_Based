@@ -63,12 +63,23 @@ def test_hallucination_filter():
 
 
 def test_markdown_cleaning_for_tts():
-    raw = "Xin chào **Souta**! Bạn có thể xem [tại đây](https://ptit.edu.vn). *Cảm ơn*."
+    raw = "Xin chào **Souta**! Bạn có thể xem [tại đây](https://ptit.edu.vn). *Cảm ơn* (chú thích). 【Ghi chú】"
     cleaned = clean_markdown_for_tts(raw)
     assert "https://" not in cleaned
     assert "[" not in cleaned
     assert "**" not in cleaned
-    assert "Xin chào Souta! Bạn có thể xem tại đây . Cảm ơn ." in cleaned or "Souta" in cleaned
+    assert "(chú thích)" not in cleaned
+    assert "【Ghi chú】" not in cleaned
+    assert "Xin chào Souta" in cleaned
+
+
+def test_annotation_stripping_for_cjk_tts():
+    raw = "こんにちは (Xin chào), わたしはソウタです（Souta Robot）。【phát âm】"
+    cleaned = clean_markdown_for_tts(raw)
+    assert "(Xin chào)" not in cleaned
+    assert "（Souta Robot）" not in cleaned
+    assert "【phát âm】" not in cleaned
+    assert "こんにちは" in cleaned
 
 
 def test_language_detection_and_voice_routing_5_languages():
@@ -254,6 +265,12 @@ def test_chat_page_icons_and_states(app):
     page.set_mic_state(MicState.STT_PROCESSING)
     assert not page.mic_btn.isEnabled()
     assert not page._pulse_timer.isActive()
+
+    # LLM_PROCESSING (shows stop button)
+    page.set_mic_state(MicState.LLM_PROCESSING)
+    assert not page.mic_btn.isEnabled()
+    assert not page._stop_speaking_btn.isHidden()
+    assert page._stop_speaking_btn.text() == "Dừng"
 
     # TTS_PROCESSING (shows stop speaking button)
     page.set_mic_state(MicState.TTS_PROCESSING)

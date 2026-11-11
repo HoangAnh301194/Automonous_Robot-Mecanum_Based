@@ -563,7 +563,7 @@ class KioskWindow(QMainWindow):
             on_tts_finished=_on_tts_finish,
         )
         self.chat_page.mic_clicked.connect(self._voice_controller.toggle_listening)
-        self.chat_page.stop_speaking_requested.connect(self._voice_controller.stop_speaking)
+        self.chat_page.stop_speaking_requested.connect(self._on_stop_requested)
         self.chat_page.speaker_toggled.connect(self._voice_controller.set_speaker_enabled)
 
         signals.voice_state_changed.connect(self._on_voice_state_changed)
@@ -748,6 +748,18 @@ class KioskWindow(QMainWindow):
             return
         self._voice_controller.notify_llm_processing()
         self.chat_page.submit_voice_transcript(text)
+
+    def _on_stop_requested(self) -> None:
+        """Hủy xử lý câu hỏi LLM và dừng phát âm thanh ngay lập tức."""
+        if self._llm_worker.is_busy:
+            self._llm_worker.reset_session()
+            self.chat_page.set_busy(False)
+            self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
+            self.chat_page.set_status("Đã dừng câu hỏi")
+
+        self._voice_controller.stop_speaking()
+        self._voice_controller.capture.cancel()
+        self.chat_page.set_mic_state(MicState.READY)
 
     def _receive_llm_response(self, session_id: int, response: str) -> None:
         # A queued response from a prior visitor must never enter this session.

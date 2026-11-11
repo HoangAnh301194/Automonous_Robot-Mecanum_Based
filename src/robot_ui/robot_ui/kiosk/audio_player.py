@@ -25,6 +25,7 @@ class AudioPlayer:
         self.on_playback_error = on_playback_error        # (request_id, error_msg)
 
         self.player_cmd = player_cmd or os.getenv("KIOSK_AUDIO_PLAYER", "mpv")
+        self.playback_speed = os.getenv("AUDIO_PLAYBACK_SPEED", "1.15").strip()
         self._muted = False
         self._lock = threading.Lock()
         self._process: subprocess.Popen | None = None
@@ -64,7 +65,7 @@ class AudioPlayer:
         # Stop existing playback cleanly first
         self.stop()
 
-        cmd = [self.player_cmd, "--no-terminal", "--idle=no", "-"]
+        cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", "-"]
         try:
             proc = subprocess.Popen(
                 cmd,
