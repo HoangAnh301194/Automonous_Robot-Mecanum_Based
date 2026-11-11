@@ -1,3 +1,5 @@
+> **Giao diện Kiosk mới (nhánh `simulator_interface`):** Idle Dasai Mochi → Home PTIT → Chat / Admin PIN. Xem [README_INTERFACE.md](README_INTERFACE.md) để biết luồng màn hình, biến môi trường và cách chạy.
+
 # Robot UI — Souta
 
 Giao diện PyQt5 gồm **Home, Navigation, Chatbot (9router + RAG)**.
