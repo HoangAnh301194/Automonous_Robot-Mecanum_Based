@@ -104,6 +104,14 @@ def main(args: list[str] | None = None) -> int:
         except Exception as exc:
             print(f"[robot_ui] Warning: voice settings not loaded: {exc}", file=sys.stderr)
 
+    try:
+        from robot_ui.kiosk.camera_mic_resolver import get_effective_mic_source
+        eff_mic = get_effective_mic_source()
+        if eff_mic and eff_mic != "@DEFAULT_SOURCE@":
+            print(f"[robot_ui] Microphone auto-resolved to AI Camera: {eff_mic}", flush=True)
+    except Exception as exc:
+        print(f"[robot_ui] Warning: mic auto-resolution note: {exc}", file=sys.stderr)
+
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
     qt_plugin_path = os.environ.get("QT_QPA_PLATFORM_PLUGIN_PATH", "")
     if "cv2" in qt_plugin_path:

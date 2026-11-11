@@ -12,6 +12,8 @@ import time
 import wave
 from typing import Callable
 
+from robot_ui.kiosk.camera_mic_resolver import get_effective_mic_source
+
 LOG = logging.getLogger(__name__)
 
 
@@ -70,7 +72,7 @@ class AudioCapture:
         self.min_duration = float(os.getenv("AUDIO_MIN_RECORD_SECONDS", str(min_duration_seconds)))
         self.silence_timeout = float(os.getenv("AUDIO_SILENCE_TIMEOUT_SECONDS", str(silence_timeout_seconds)))
         self.rms_threshold = float(os.getenv("AUDIO_RMS_THRESHOLD", str(rms_threshold)))
-        self.source_name = source_name or os.getenv("KIOSK_MIC_SOURCE", "").strip() or "@DEFAULT_SOURCE@"
+        self.source_name = get_effective_mic_source(source_name)
 
         self._process: subprocess.Popen | None = None
         self._thread: threading.Thread | None = None
