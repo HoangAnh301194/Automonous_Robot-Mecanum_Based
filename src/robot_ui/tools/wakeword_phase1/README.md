@@ -106,6 +106,22 @@ increase false activations. Preserve the before/after results separately.
     python probe.py live --models-dir ~/vosk-models
     python probe.py live --models-dir ~/vosk-models --source '@DEFAULT_SOURCE@'
 
+If no wake events appear, turn on diagnostics to examine what each model
+**actually recognizes**. Pause briefly after each phrase; Vosk finalizes
+segments at speech boundaries. Use --debug-partials to inspect interim
+recognition when final transcripts do not appear:
+
+    python probe.py live --models-dir ~/vosk-models --debug-transcripts --debug-partials
+
+In a second terminal, verify the active PulseAudio microphone:
+
+    pactl get-default-source
+    pactl list short sources
+
+Debug transcripts can contain private speech: do not upload or publish raw
+logs without consent. Remove --debug-transcripts and --debug-partials
+after troubleshooting.
+
 One parec process captures PCM and feeds three pretrained recognizers.
 Events are written to stdout in JSON with keyword IDs; **no LLM/STT/TTS is
 called**. Detectors use completed ASR segments, so latency may be larger than
