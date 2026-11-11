@@ -27,35 +27,35 @@ class WakeWordMatchingTests(unittest.TestCase):
         self.aliases = {k: v["aliases"] for k, v in self.config["keywords"].items()}
 
     def test_vietnamese_trigger(self):
-        self.assertTrue(match_wake_phrase("Sota ơi, giới thiệu về PTIT", "vi_sota_oi", self.aliases))
-        self.assertTrue(match_wake_phrase("Souta ơi!", "vi_sota_oi", self.aliases))
-        self.assertFalse(match_wake_phrase("Sota mới là một cái tên", "vi_sota_oi", self.aliases))
+        self.assertTrue(match_wake_phrase("Maica, giới thiệu về PTIT", "vi_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("Maica!", "vi_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("Mai là một cái tên", "vi_maica", self.aliases))
 
     def test_english_trigger_and_boundaries(self):
-        self.assertTrue(match_wake_phrase("Hey Souta! How are you?", "en_hey_souta", self.aliases))
-        self.assertTrue(match_wake_phrase("hey sota", "en_hey_souta", self.aliases))
-        self.assertFalse(match_wake_phrase("hey soutabee", "en_hey_souta", self.aliases))
-        self.assertFalse(match_wake_phrase("hey somebody", "en_hey_souta", self.aliases))
+        self.assertTrue(match_wake_phrase("Maica! How are you?", "en_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("maica", "en_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("maicabee", "en_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("hey somebody", "en_maica", self.aliases))
 
     def test_japanese_variants_and_kana(self):
-        self.assertTrue(match_wake_phrase("そうたくん、こんにちは", "ja_soutakun", self.aliases))
-        self.assertTrue(match_wake_phrase("そうた君", "ja_soutakun", self.aliases))
-        self.assertTrue(match_wake_phrase("ソウタクン", "ja_soutakun", self.aliases))
-        self.assertFalse(match_wake_phrase("そうだね", "ja_soutakun", self.aliases))
+        self.assertTrue(match_wake_phrase("まいか、こんにちは", "ja_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("マイカ", "ja_maica", self.aliases))
+        self.assertTrue(match_wake_phrase("マイカ", "ja_maica", self.aliases))
+        self.assertFalse(match_wake_phrase("そうだね", "ja_maica", self.aliases))
 
     def test_unicode_normalization(self):
-        self.assertEqual(normalize("  Ｈｅｙ　Ｓｏｕｔａ！", "en_hey_souta"), "hey souta")
-        self.assertEqual(normalize("ソウタクン", "ja_soutakun"), "そうたくん")
-        self.assertEqual(normalize("Ｓｏｔａ  Ơi", "vi_sota_oi"), "sota ơi")
+        self.assertEqual(normalize("  Ｍａｉｃａ！", "en_maica"), "maica")
+        self.assertEqual(normalize("マイカ", "ja_maica"), "まいか")
+        self.assertEqual(normalize("Ｍａｉｃａ", "vi_maica"), "maica")
 
     def test_alias_overrides_are_explicit(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "aliases.json"
-            path.write_text('{"vi_sota_oi": ["sô ta ơi"]}', encoding="utf-8")
+            path.write_text('{"vi_maica": ["maika"]}', encoding="utf-8")
             changed = load_aliases(str(path), self.aliases)
-            self.assertTrue(match_wake_phrase("sô ta ơi", "vi_sota_oi", changed))
-            self.assertFalse(match_wake_phrase("sota ơi", "vi_sota_oi", changed))
-            self.assertEqual(changed["ja_soutakun"], self.aliases["ja_soutakun"])
+            self.assertTrue(match_wake_phrase("maika", "vi_maica", changed))
+            self.assertFalse(match_wake_phrase("maica", "vi_maica", changed))
+            self.assertEqual(changed["ja_maica"], self.aliases["ja_maica"])
 
     def test_rejects_invalid_alias_structure(self):
         with tempfile.TemporaryDirectory() as d:
@@ -69,7 +69,7 @@ class ConfigurationTests(unittest.TestCase):
     def test_valid_default_config(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
         self.assertIn("keywords", cfg)
-        for kw_id in ("vi_sota_oi", "en_hey_souta", "ja_soutakun"):
+        for kw_id in ("vi_maica", "en_maica", "ja_maica"):
             self.assertIn(kw_id, cfg["keywords"])
             self.assertTrue(cfg["keywords"][kw_id]["enabled"])
 
@@ -113,7 +113,7 @@ class DummyRecognizer:
         return self.calls == 2
 
     def Result(self):
-        return json.dumps({"text": "hey souta" if self.model == "en" else ""})
+        return json.dumps({"text": "maica" if self.model == "en" else ""})
 
     def FinalResult(self):
         return json.dumps({"text": "please" if self.model == "en" else ""})
@@ -140,10 +140,10 @@ class AudioPipelineTests(unittest.TestCase):
             wav = Path(d) / "sample.wav"
             self._make_wav(wav)
             transcripts, elapsed, duration = recognize_file(
-                wav, DummyVosk, {"en_hey_souta": "en", "vi_sota_oi": "vi"}
+                wav, DummyVosk, {"en_maica": "en", "vi_maica": "vi"}
             )
-            self.assertEqual(transcripts["en_hey_souta"], "hey souta please")
-            self.assertEqual(transcripts["vi_sota_oi"], "")
+            self.assertEqual(transcripts["en_maica"], "maica please")
+            self.assertEqual(transcripts["vi_maica"], "")
             self.assertAlmostEqual(duration, 1.0)
             self.assertGreaterEqual(elapsed, 0)
 
@@ -157,7 +157,7 @@ class AudioPipelineTests(unittest.TestCase):
 
     def test_missing_model_directory_exits(self):
         with tempfile.TemporaryDirectory() as d:
-            active = {"vi_sota_oi": {"model": "non_existent_folder"}}
+            active = {"vi_maica": {"model": "non_existent_folder"}}
             with self.assertRaises(SystemExit):
                 load_models(Path(d), active)
 
