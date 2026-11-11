@@ -371,11 +371,27 @@ behavior_server:
     local_footprint_topic: local_costmap/published_footprint
     global_footprint_topic: global_costmap/published_footprint
     cycle_frequency: 10.0
-    behavior_plugins: ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
+    behavior_plugins: ["spin", "backup", "custom_backup", "drive_on_heading", "assisted_teleop", "wait"]
     spin:
       plugin: "nav2_behaviors/Spin"
     backup:
       plugin: "nav2_behaviors/BackUp"
+    custom_backup:
+      plugin: "nav2_custom_plugins/CustomBackUp"
+      rear_scan_topic: "/rear_scan_obstacle"
+      rear_health_topic: "/rear_scan_obstacle/health"
+      min_distance: 0.55
+      rear_scan_timeout: 0.50
+      rear_health_timeout: 0.50
+      costmap_timeout: 2.5
+      footprint_timeout: 2.5
+      require_rear_health: true
+      rear_stop_margin: 0.05
+      rear_corner_lateral_margin: 0.04
+      front_overlap_min_x: 0.08
+      max_front_overlap_depth: 0.23
+      max_front_overlap_ratio: 0.35
+      whitelist_match_radius: 0.085
     drive_on_heading:
       plugin: "nav2_behaviors/DriveOnHeading"
     wait:

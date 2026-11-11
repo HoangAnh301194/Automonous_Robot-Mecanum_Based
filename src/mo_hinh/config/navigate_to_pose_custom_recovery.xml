@@ -55,7 +55,7 @@
                 <ReactiveSequence name="SafeBackUp">
                   <CheckRearSafety topic="/rear_scan_obstacle" min_distance="0.55" timeout="0.50"/>
                   <!-- Không xóa local costmap ở đây để BackUp vẫn còn dữ liệu vật cản tổng thể -->
-                  <BackUp backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
+                  <BackUp server_name="custom_backup" backup_dist="0.30" backup_speed="0.10" time_allowance="6.0"/>
                 </ReactiveSequence>
                 
                 <!-- Hoàn thành lùi an toàn, dọn dẹp để thử lập kế hoạch lại -->

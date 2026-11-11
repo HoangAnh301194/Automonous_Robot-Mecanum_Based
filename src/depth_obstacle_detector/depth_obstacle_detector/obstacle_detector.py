@@ -9,6 +9,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from sensor_msgs.msg import Image, CameraInfo, LaserScan, PointCloud2, PointField
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from std_msgs.msg import Header
 from cv_bridge import CvBridge
 
@@ -17,6 +18,169 @@ import tf2_geometry_msgs
 import sensor_msgs_py.point_cloud2 as pc2
 
 from depth_obstacle_detector.config_paths import resolve_ground_path
+
+
+def build_observability_lut(ground_roi, rx, ry, rw, rh, fx, fy, cx, cy,
+                            translation, R, min_range, max_range,
+                            corridor_half_width=0.35, center_half_width=0.25,
+                            near_zone_max_x=0.85,
+                            z_min=-2.0, z_max=2.0):
+    """Precompute unit rays in target frame and expected ground corridor masks."""
+    u_grid, v_grid = np.meshgrid(
+        np.arange(rx, rx + rw, dtype=np.float32),
+        np.arange(ry, ry + rh, dtype=np.float32),
+    )
+    ray_x = (u_grid - np.float32(cx)) / np.float32(fx)
+    ray_y = (v_grid - np.float32(cy)) / np.float32(fy)
+    ray_z = np.ones_like(ray_x, dtype=np.float32)
+
+    rays_opt = np.stack([ray_x, ray_y, ray_z], axis=-1).reshape(-1, 3)
+    ray_target_flat = rays_opt @ R.astype(np.float32).T
+
+    g_flat = ground_roi.reshape(-1)
+    g_valid_flat = (g_flat > 0) & (g_flat < 65000)
+    g_d = g_flat[g_valid_flat].astype(np.float32) / 1000.0
+    g_pts = ray_target_flat[g_valid_flat] * g_d[:, None] + translation.astype(np.float32)
+
+    gx, gy, gz = g_pts[:, 0], g_pts[:, 1], g_pts[:, 2]
+    gr = np.hypot(gx, gy)
+    valid_g_corr = (
+        (gx > 0.05) &
+        (gr >= float(min_range)) &
+        (gr <= float(max_range)) &
+        (np.abs(gy) <= float(corridor_half_width)) &
+        (gz >= float(z_min)) &
+        (gz <= float(z_max))
+    )
+
+    valid_flat_indices = np.flatnonzero(g_valid_flat)
+    ground_corridor_flat_indices = valid_flat_indices[valid_g_corr]
+    ground_near_flat_indices = valid_flat_indices[valid_g_corr & (gx <= float(near_zone_max_x))]
+    ground_center_flat_indices = valid_flat_indices[valid_g_corr & (np.abs(gy) <= float(center_half_width))]
+
+    return {
+        'ray_target_flat': ray_target_flat,
+        'translation': translation.astype(np.float32),
+        'g_valid_flat': g_valid_flat,
+        'g_valid_count': int(np.count_nonzero(g_valid_flat)),
+        'ground_corridor_flat_indices': ground_corridor_flat_indices,
+        'ground_near_flat_indices': ground_near_flat_indices,
+        'ground_center_flat_indices': ground_center_flat_indices,
+        'roi_total_pixels': int(g_flat.size),
+    }
+
+
+def evaluate_corridor_observability(current_roi, lut, min_range, max_range,
+                                    corridor_half_width=0.35,
+                                    fov_check_half_angle=0.45,
+                                    num_sectors=18,
+                                    min_observed_x_max=0.55,
+                                    z_min=-2.0, z_max=2.0):
+    """Evaluate actual geometric observability of the rear safety corridor."""
+    curr_flat = current_roi.reshape(-1)
+    roi_total = max(1, int(lut['roi_total_pixels']))
+    curr_valid_mask = (curr_flat > 0) & (curr_flat < 65000)
+    pair_valid_mask = curr_valid_mask & lut['g_valid_flat']
+
+    current_valid_ratio = float(np.count_nonzero(curr_valid_mask)) / float(roi_total)
+    valid_ratio = float(np.count_nonzero(pair_valid_mask)) / float(roi_total)
+
+    g_corr_idx = lut['ground_corridor_flat_indices']
+    g_near_idx = lut['ground_near_flat_indices']
+    g_center_idx = lut['ground_center_flat_indices']
+
+    if g_corr_idx.size > 0:
+        corr_valid_sub = curr_valid_mask[g_corr_idx]
+        corridor_observed_ratio = float(np.count_nonzero(corr_valid_sub)) / float(g_corr_idx.size)
+        obs_corr_idx = g_corr_idx[corr_valid_sub]
+    else:
+        corridor_observed_ratio = 0.0
+        obs_corr_idx = np.empty(0, dtype=np.int64)
+
+    if g_near_idx.size > 0:
+        near_zone_observed_ratio = float(np.count_nonzero(curr_valid_mask[g_near_idx])) / float(g_near_idx.size)
+    else:
+        near_zone_observed_ratio = 0.0
+
+    if g_center_idx.size > 0:
+        center_observed_ratio = float(np.count_nonzero(curr_valid_mask[g_center_idx])) / float(g_center_idx.size)
+    else:
+        center_observed_ratio = 0.0
+
+    observed_angle_min = 0.0
+    observed_angle_max = 0.0
+    observed_x_min = 0.0
+    observed_x_max = 0.0
+    observed_y_min = 0.0
+    observed_y_max = 0.0
+    sector_coverage_ratio = 0.0
+
+    if obs_corr_idx.size >= 20:
+        d_m = curr_flat[obs_corr_idx].astype(np.float32) / 1000.0
+        pts_obs = lut['ray_target_flat'][obs_corr_idx] * d_m[:, None] + lut['translation']
+        ox, oy, oz = pts_obs[:, 0], pts_obs[:, 1], pts_obs[:, 2]
+        or_r = np.hypot(ox, oy)
+        corr_mask = (
+            (ox > 0.05) &
+            (or_r >= float(min_range)) &
+            (or_r <= float(max_range)) &
+            (np.abs(oy) <= float(corridor_half_width)) &
+            (oz >= float(z_min)) &
+            (oz <= float(z_max))
+        )
+        if np.count_nonzero(corr_mask) >= 20:
+            ox_c = ox[corr_mask]
+            oy_c = oy[corr_mask]
+            thetas_c = np.arctan2(oy_c, ox_c)
+
+            edges = np.linspace(-float(fov_check_half_angle), float(fov_check_half_angle), num_sectors + 1)
+            counts, _ = np.histogram(thetas_c, bins=edges)
+            min_pts_per_sector = max(3, int(g_corr_idx.size // (num_sectors * 14)))
+            supported = counts >= min_pts_per_sector
+            sector_coverage_ratio = float(np.count_nonzero(supported)) / float(num_sectors)
+
+            if np.any(supported):
+                centers = 0.5 * (edges[:-1] + edges[1:])
+                sup_centers = centers[supported]
+                observed_angle_min = float(sup_centers[0])
+                observed_angle_max = float(sup_centers[-1])
+
+            observed_x_min = float(np.percentile(ox_c, 2))
+            observed_x_max = float(np.percentile(ox_c, 98))
+            observed_y_min = float(np.percentile(oy_c, 2))
+            observed_y_max = float(np.percentile(oy_c, 98))
+
+    corridor_observed = bool(
+        g_corr_idx.size >= 50
+        and valid_ratio >= 0.15
+        and current_valid_ratio >= 0.15
+        and corridor_observed_ratio >= 0.60
+        and near_zone_observed_ratio >= 0.55
+        and center_observed_ratio >= 0.60
+        and sector_coverage_ratio >= 0.70
+        and observed_angle_min <= -0.32
+        and observed_angle_max >= 0.32
+        and observed_y_min <= -0.24
+        and observed_y_max >= 0.24
+        and observed_x_min <= 0.50
+        and observed_x_max >= float(min_observed_x_max)
+    )
+
+    return {
+        'valid_ratio': valid_ratio,
+        'current_valid_ratio': current_valid_ratio,
+        'corridor_observed_ratio': corridor_observed_ratio,
+        'near_zone_observed_ratio': near_zone_observed_ratio,
+        'center_observed_ratio': center_observed_ratio,
+        'sector_coverage_ratio': sector_coverage_ratio,
+        'observed_angle_min': observed_angle_min,
+        'observed_angle_max': observed_angle_max,
+        'observed_x_min': observed_x_min,
+        'observed_x_max': observed_x_max,
+        'observed_y_min': observed_y_min,
+        'observed_y_max': observed_y_max,
+        'corridor_observed': corridor_observed,
+    }
 
 
 class ObstacleDetectorNode(Node):
@@ -41,11 +205,63 @@ class ObstacleDetectorNode(Node):
         
         self.camera_info = None
         self.cached_tf = None
+        self.health_pub = None
+        self._observability_lut = None
+        self._observability_lut_key = None
         
         self.load_configuration(config_path)
 
         if self.cam_name == "Rear" and self.debug_enabled:
             self.pc_pub = self.create_publisher(PointCloud2, '/rear_obstacle_points', 1)
+
+    def _publish_rear_health(self, stamp, camera_ok, tf_ok, ground_ok, obs_metrics=None, reason="OK"):
+        if self.health_pub is None:
+            return
+        diag_arr = DiagnosticArray()
+        diag_arr.header.stamp = stamp
+        diag_arr.header.frame_id = self.target_frame
+
+        status = DiagnosticStatus()
+        status.name = "rear_depth_obstacle_detector"
+        status.hardware_id = self.depth_topic
+
+        if not (camera_ok and tf_ok and ground_ok):
+            status.level = DiagnosticStatus.ERROR
+            status.message = reason
+            corridor_observed = False
+        elif obs_metrics is not None and obs_metrics.get('corridor_observed', False):
+            status.level = DiagnosticStatus.OK
+            status.message = "OK"
+            corridor_observed = True
+        else:
+            status.level = DiagnosticStatus.WARN
+            status.message = "REAR_CORRIDOR_NOT_OBSERVED"
+            corridor_observed = False
+
+        kv = [
+            KeyValue(key="camera_ok", value="true" if camera_ok else "false"),
+            KeyValue(key="tf_ok", value="true" if tf_ok else "false"),
+            KeyValue(key="ground_ok", value="true" if ground_ok else "false"),
+            KeyValue(key="corridor_observed", value="true" if corridor_observed else "false"),
+        ]
+        if obs_metrics is not None:
+            kv.extend([
+                KeyValue(key="valid_ratio", value=f"{obs_metrics['valid_ratio']:.4f}"),
+                KeyValue(key="current_valid_ratio", value=f"{obs_metrics['current_valid_ratio']:.4f}"),
+                KeyValue(key="corridor_observed_ratio", value=f"{obs_metrics['corridor_observed_ratio']:.4f}"),
+                KeyValue(key="near_zone_observed_ratio", value=f"{obs_metrics['near_zone_observed_ratio']:.4f}"),
+                KeyValue(key="center_observed_ratio", value=f"{obs_metrics['center_observed_ratio']:.4f}"),
+                KeyValue(key="sector_coverage_ratio", value=f"{obs_metrics['sector_coverage_ratio']:.4f}"),
+                KeyValue(key="observed_angle_min", value=f"{obs_metrics['observed_angle_min']:.4f}"),
+                KeyValue(key="observed_angle_max", value=f"{obs_metrics['observed_angle_max']:.4f}"),
+                KeyValue(key="observed_x_min", value=f"{obs_metrics['observed_x_min']:.4f}"),
+                KeyValue(key="observed_x_max", value=f"{obs_metrics['observed_x_max']:.4f}"),
+                KeyValue(key="observed_y_min", value=f"{obs_metrics['observed_y_min']:.4f}"),
+                KeyValue(key="observed_y_max", value=f"{obs_metrics['observed_y_max']:.4f}"),
+            ])
+        status.values = kv
+        diag_arr.status = [status]
+        self.health_pub.publish(diag_arr)
 
     def load_configuration(self, config_path):
         try:
@@ -60,8 +276,9 @@ class ObstacleDetectorNode(Node):
                 self.cam_name = "Rear"
             else:
                 self.config = config_full
-                target = self.config.get('target_frame', '')
-                if 'rear' in target.lower():
+                target = str(self.config.get('target_frame', ''))
+                out_topic = str(self.config.get('output_scan_topic', ''))
+                if 'rear' in target.lower() or 'rear' in out_topic.lower():
                     self.cam_name = "Rear"
                 else:
                     self.cam_name = "Front"
@@ -117,6 +334,8 @@ class ObstacleDetectorNode(Node):
             self.info_sub = self.create_subscription(CameraInfo, self.info_topic, self.info_callback, qos_profile)
             self.subscription = self.create_subscription(Image, self.depth_topic, self.listener_callback, qos_profile)
             self.laser_pub = self.create_publisher(LaserScan, self.output_topic, 1)
+            if self.cam_name == "Rear":
+                self.health_pub = self.create_publisher(DiagnosticArray, f"{self.output_topic}/health", 10)
 
         except Exception as e:
             self.get_logger().error(f"Failed to load configuration: {str(e)}")
@@ -134,10 +353,28 @@ class ObstacleDetectorNode(Node):
                 cv_image = (cv_image * 1000.0).astype(np.uint16)
             self.process_frame(cv_image, msg.header.stamp, t0)
         except Exception as e:
+            if self.cam_name == "Rear":
+                self._publish_rear_health(
+                    msg.header.stamp,
+                    camera_ok=False,
+                    tf_ok=(self.cached_tf is not None),
+                    ground_ok=(self.ground_frame is not None),
+                    reason=f"image_decode_failed:{str(e)}",
+                )
             self.get_logger().error(f"Failed to process image: {str(e)}")
 
     def process_frame(self, cv_image, stamp, t0):
+        is_rear = (self.cam_name == "Rear")
+
         if self.ground_frame is None or self.ground_frame.shape != cv_image.shape:
+            if is_rear:
+                self._publish_rear_health(
+                    stamp,
+                    camera_ok=(self.camera_info is not None),
+                    tf_ok=(self.cached_tf is not None),
+                    ground_ok=False,
+                    reason="ground_frame_missing_or_shape_mismatch",
+                )
             return
             
         h, w = cv_image.shape
@@ -145,20 +382,36 @@ class ObstacleDetectorNode(Node):
         if self.camera_info is not None:
             fx, fy = self.camera_info.k[0], self.camera_info.k[4]
             cx, cy = self.camera_info.k[2], self.camera_info.k[5]
+            if fx <= 0.0 or fy <= 0.0:
+                if is_rear:
+                    self._publish_rear_health(
+                        stamp,
+                        camera_ok=False,
+                        tf_ok=(self.cached_tf is not None),
+                        ground_ok=True,
+                        reason="camera_info_invalid_intrinsics",
+                    )
+                return
             frame_id = self.camera_info.header.frame_id
             if frame_id == 'rear_camera_link':
                 frame_id = 'rear_camera_depth_optical_frame'
             elif frame_id == 'camera_link' or frame_id == 'front_camera_link':
                 frame_id = 'camera_depth_optical_frame'
         else:
-            if self.cam_name == "Rear":
+            if is_rear:
+                self._publish_rear_health(
+                    stamp,
+                    camera_ok=False,
+                    tf_ok=(self.cached_tf is not None),
+                    ground_ok=True,
+                    reason="camera_info_missing",
+                )
                 return
             fx = fy = 570.0
             cx, cy = w / 2.0, h / 2.0
             frame_id = 'camera_depth_optical_frame'
 
         fov = 2.0 * np.arctan(w / (2.0 * fx))
-        is_rear = (self.cam_name == "Rear")
         
         scan_msg = LaserScan()
         scan_msg.header.stamp = stamp
@@ -192,6 +445,13 @@ class ObstacleDetectorNode(Node):
                     ])
                     self.cached_tf = (translation, R)
                 except Exception as e:
+                    self._publish_rear_health(
+                        stamp,
+                        camera_ok=True,
+                        tf_ok=False,
+                        ground_ok=True,
+                        reason=f"tf_lookup_failed:{str(e)}",
+                    )
                     self.get_logger().warn(f"TF failed: {str(e)}", throttle_duration_sec=2.0)
                     return
             translation, R = self.cached_tf
@@ -324,6 +584,27 @@ class ObstacleDetectorNode(Node):
                 if len(planar_ranges) > 0:
                     np.minimum.at(ranges, bin_idx, planar_ranges)
                     
+        if is_rear:
+            lut_key = (rx, ry, rw, rh, float(fx), float(fy), float(cx), float(cy), float(self.min_range), float(self.max_range))
+            if self._observability_lut is None or self._observability_lut_key != lut_key:
+                self._observability_lut = build_observability_lut(
+                    ground_roi, rx, ry, rw, rh,
+                    fx, fy, cx, cy,
+                    translation, R,
+                    self.min_range, self.max_range,
+                )
+                self._observability_lut_key = lut_key
+            obs_metrics = evaluate_corridor_observability(
+                current_roi, self._observability_lut, self.min_range, self.max_range
+            )
+            self._publish_rear_health(
+                stamp,
+                camera_ok=True,
+                tf_ok=True,
+                ground_ok=True,
+                obs_metrics=obs_metrics,
+            )
+
         scan_msg.ranges = ranges.tolist()
         self.laser_pub.publish(scan_msg)
         

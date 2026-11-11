@@ -1236,12 +1236,17 @@ class MainWindow(QWidget):
 
         if "behavior_server" in data and "ros__parameters" in data["behavior_server"]:
             bs_params = data["behavior_server"]["ros__parameters"]
-            bs_params["behavior_plugins"] = ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
-            bs_params["spin"] = {"plugin": "nav2_behaviors/Spin"}
-            bs_params["backup"] = {"plugin": "nav2_behaviors/BackUp"}
-            bs_params["drive_on_heading"] = {"plugin": "nav2_behaviors/DriveOnHeading"}
-            bs_params["wait"] = {"plugin": "nav2_behaviors/Wait"}
-            bs_params["assisted_teleop"] = {"plugin": "nav2_behaviors/AssistedTeleop"}
+            bs_params.setdefault(
+                "behavior_plugins",
+                ["spin", "backup", "custom_backup", "drive_on_heading", "assisted_teleop", "wait"],
+            )
+            bs_params.setdefault("spin", {"plugin": "nav2_behaviors/Spin"})
+            bs_params.setdefault("backup", {"plugin": "nav2_behaviors/BackUp"})
+            if "custom_backup" in bs_params.get("behavior_plugins", []):
+                bs_params.setdefault("custom_backup", {"plugin": "nav2_custom_plugins/CustomBackUp"})
+            bs_params.setdefault("drive_on_heading", {"plugin": "nav2_behaviors/DriveOnHeading"})
+            bs_params.setdefault("wait", {"plugin": "nav2_behaviors/Wait"})
+            bs_params.setdefault("assisted_teleop", {"plugin": "nav2_behaviors/AssistedTeleop"})
 
         temp_path = self._write_temp_yaml(data, "nav2_gui_v3_")
         self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, giữ cấu hình BT/Recovery từ YAML)")
