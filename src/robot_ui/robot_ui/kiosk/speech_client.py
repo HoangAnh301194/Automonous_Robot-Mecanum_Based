@@ -48,21 +48,32 @@ HALLUCINATION_PATTERNS = [
 
 
 def clean_markdown_for_tts(text: str) -> str:
-    """Strip markdown syntax, raw URLs, and control symbols for smooth TTS."""
+    """Strip markdown syntax, raw URLs, source citations, and control symbols for smooth TTS."""
     if not text:
         return ""
     # Replace markdown links [text](url) -> text
     cleaned = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
     # Remove raw URLs
     cleaned = re.sub(r"https?://\S+", "", cleaned)
+    # Remove emails
+    cleaned = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "", cleaned)
+    # Strip source citations: e.g. "Nguồn: fee1_....txt", "Source: ...", "*Nguồn: ...*"
+    cleaned = re.sub(r"(?i)\*?\s*(?:nguồn|source|tài liệu|tham khảo)\s*:\s*.*", "", cleaned)
+    # Strip file names: e.g. "fee1_faculty_hoang_son_faq.txt", "abc.pdf"
+    cleaned = re.sub(r"\b[\w\.-]+\.(?:txt|pdf|md|docx?)\b", "", cleaned)
+    # Clean up empty label lines like "Email công tác:" or "Hồ sơ chính thức:"
+    cleaned = re.sub(r"(?i)\b(?:email(?: công tác)?|hồ sơ(?: chính thức)?|website|link|địa chỉ web|liên hệ)\s*[:：]\s*(?=[.,;!?]|$|\s)", "", cleaned)
     # Remove markdown header, bold, italic, inline code characters
     cleaned = re.sub(r"[*_~`#>]", " ", cleaned)
     # Remove list bullet marks
-    cleaned = re.sub(r"^\s*[-+*]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*[-+*•]\s+", "", cleaned, flags=re.MULTILINE)
     # Strip parenthesized and bracketed annotations (e.g. (Souta), (phiên âm), （ソウタ）, 【chú thích】)
     without_annotations = re.sub(r"[\(\uff08\[\u3010][^\)\uff09\]\u3011]*[\)\uff09\]\u3011]", "", cleaned)
     if without_annotations.strip():
         cleaned = without_annotations
+    # Clean up duplicate punctuation
+    cleaned = re.sub(r"\s+([,.;!?])", r"\1", cleaned)
+    cleaned = re.sub(r"([,.;!?])\s*\1+", r"\1", cleaned)
     # Normalize multiple whitespace and newlines
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
@@ -114,6 +125,19 @@ def resolve_voice_and_text(text: str, language_hint: str | None = None) -> tuple
     if lang == "vi":
         # Replace Souta -> Sota for natural Vietnamese TTS pronunciation
         tts_text = re.sub(r"\b[Ss]outa\b", "Sota", tts_text)
+        # PTIT -> Pi-ti-ai-ti
+        tts_text = re.sub(r"\bPTIT\b", "Pi-ti-ai-ti", tts_text, flags=re.IGNORECASE)
+        # Academic titles to natural speech words
+        tts_text = re.sub(r"\b(PGS|P\.GS)\.?\s*(TS|T\.S)\.?", "Phó giáo sư Tiến sĩ", tts_text, flags=re.IGNORECASE)
+        tts_text = re.sub(r"\b(GS|G\.S)\.?\s*(TS|T\.S)\.?", "Giáo sư Tiến sĩ", tts_text, flags=re.IGNORECASE)
+        tts_text = re.sub(r"\b(PGS|P\.GS)\.?", "Phó giáo sư", tts_text, flags=re.IGNORECASE)
+        tts_text = re.sub(r"\b(GS|G\.S)\.?", "Giáo sư", tts_text, flags=re.IGNORECASE)
+        tts_text = re.sub(r"\b(TS|T\.S)\.?", "Tiến sĩ", tts_text)
+        tts_text = re.sub(r"\b(ThS|Th\.S)\.?", "Thạc sĩ", tts_text)
+        tts_text = re.sub(r"\bAI\b", "Ây-ai", tts_text)
+        tts_text = re.sub(r"\bFEE[-_]?1\b", "Khoa Điện tử 1", tts_text, flags=re.IGNORECASE)
+        tts_text = re.sub(r"\s+([,.;!?])", r"\1", tts_text)
+        tts_text = re.sub(r"\s+", " ", tts_text).strip()
 
     # Truncate text if extremely long to prevent network timeout
     if len(tts_text) > 1500:

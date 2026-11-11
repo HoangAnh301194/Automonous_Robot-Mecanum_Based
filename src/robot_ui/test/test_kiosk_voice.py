@@ -83,11 +83,22 @@ def test_annotation_stripping_for_cjk_tts():
 
 
 def test_language_detection_and_voice_routing_5_languages():
-    # 1. Vietnamese (detect diacritics and phonetics fix Souta -> Sota)
+    # 1. Vietnamese (detect diacritics and phonetics fix Souta -> Sota, PTIT -> Pi-ti-ai-ti)
     voice_vi, text_vi = resolve_voice_and_text("Chào bạn, tôi là Souta Robot của PTIT.")
     assert voice_vi == "edge-tts/vi-VN-HoaiMyNeural"
     assert "Sota" in text_vi
     assert "Souta" not in text_vi
+    assert "Pi-ti-ai-ti" in text_vi
+
+
+def test_vietnamese_spoken_normalization():
+    raw = "TS. Hoàng Sơn ở Khoa FEE1, PTIT. *Nguồn: fee1_faculty_son.txt*."
+    voice, text = resolve_voice_and_text(raw)
+    assert "Tiến sĩ Hoàng Sơn" in text
+    assert "Pi-ti-ai-ti" in text
+    assert "Khoa Điện tử 1" in text
+    assert "fee1_faculty_son.txt" not in text
+    assert "Nguồn:" not in text
 
     # 2. English
     voice_en, text_en = resolve_voice_and_text("Hello, how are you today?")
