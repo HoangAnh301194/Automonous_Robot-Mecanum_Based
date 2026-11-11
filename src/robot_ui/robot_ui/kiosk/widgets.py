@@ -576,12 +576,13 @@ class NavigationPage(QWidget):
 
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
+    home_requested = pyqtSignal()
     def __init__(self, chat_icon: Path, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("chatPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 14, 20, 84)
+        root.setContentsMargins(20, 14, 20, 18)
         root.setSpacing(10)
 
         header = QFrame()
@@ -589,6 +590,15 @@ class ChatPage(QWidget):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 7, 12, 7)
         header_layout.setSpacing(10)
+
+        back = QPushButton("‹")
+        back.setObjectName("navHomeButton")
+        back.setToolTip("Trở về trang chủ")
+        back.setAccessibleName("Trở về trang chủ")
+        back.setFixedSize(48, 46)
+        back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
+        back.clicked.connect(self.home_requested)
+        header_layout.addWidget(back)
 
         icon_label = QLabel()
         icon_label.setObjectName("chatHeaderIcon")
@@ -758,7 +768,11 @@ class NavButton(QPushButton):
             color = QColor("#ffb32c" if dark_background else "#d97800")
         else:
             color = QColor("#ffffff" if dark_background else "#26343c")
-        self.setIcon(monochrome_icon(self.icon_path, color))
+        # Preserve the supplied full-colour JPEG Settings icon.
+        if self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
+            self.setIcon(QIcon(str(self.icon_path)))
+        else:
+            self.setIcon(monochrome_icon(self.icon_path, color))
         self.style().unpolish(self)
         self.style().polish(self)
 
@@ -774,8 +788,10 @@ class BottomNavigation(QFrame):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 7, 8, 7)
         layout.setSpacing(6)
-        for page_id, label in (("home", "Trang chủ"), ("navigation", "Dẫn đường"), ("chat", "Trò chuyện")):
-            button = NavButton(label, icons[page_id], page_id)
+        labels = {"home": "Trang chủ", "settings": "Quản trị",
+                  "navigation": "Dẫn đường", "chat": "Trò chuyện"}
+        for page_id, path in icons.items():
+            button = NavButton(labels.get(page_id, page_id), path, page_id)
             button.clicked.connect(lambda checked=False, name=page_id: self.page_requested.emit(name))
             layout.addWidget(button)
             self._buttons[page_id] = button
