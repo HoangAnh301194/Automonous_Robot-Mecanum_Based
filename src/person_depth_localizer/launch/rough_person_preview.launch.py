@@ -13,7 +13,7 @@ def generate_launch_description():
         test_parent_frame_arg,
         DeclareLaunchArgument('test_x', default_value='0.0'),
         DeclareLaunchArgument('test_y', default_value='0.0'),
-        DeclareLaunchArgument('test_z', default_value='1.5'),
+        DeclareLaunchArgument('test_z', default_value='1.2'),
         DeclareLaunchArgument('test_roll', default_value='-1.57079632679'),
         DeclareLaunchArgument('test_pitch', default_value='0.0'),
         DeclareLaunchArgument('test_yaw', default_value='-1.57079632679'),
