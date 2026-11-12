@@ -2749,6 +2749,8 @@ class MainWindow(QWidget):
             "slam_toolbox",
             "async_slam_toolbox",
             "nav2_bringup",
+            "component_container",
+            "nav2_container",
             "bt_navigator",
             "controller_server",
             "planner_server",
