@@ -57,7 +57,7 @@ ros2 launch yolo_bringup yolo.launch.py \
 ```
 
 ### Terminal 3: Khởi động Node Định Vị Người Đa Đối Tượng
-*(Chạy với TF giả định camera cao 1.5m nhìn thẳng phía trước để test)*
+*(Chạy với TF giả định camera cao 1.2m nhìn thẳng phía trước để test)*
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
