@@ -18,7 +18,7 @@ try:
 except ImportError:
     serial = None
 
-from PyQt5.QtCore import QPoint, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QPoint, QRectF, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QImage, QPainter, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog,
@@ -779,6 +779,11 @@ class MapViewer(QLabel):
         self.map_width = self.map_height = 0
         self.scale_factor = 1.0
         self.offset_x = self.offset_y = 0
+        self.zoom_factor = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self._is_panning = False
+        self._last_pan_pos = None
         self.robot_x = self.robot_y = None
         self.robot_yaw = 0.0
         self.pose_source = "none"
@@ -789,6 +794,24 @@ class MapViewer(QLabel):
         self.rear_obs_points_world = []
         self.batch_waypoints = []
         self.is_dragging = False
+
+    def reset_view(self):
+        """Reset map zoom and pan back to fit-to-window view."""
+        self.zoom_factor = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self.update_display()
+
+    def _compute_view_transform(self, label_w, label_h, zoom_factor=None, pan_x=None, pan_y=None):
+        """Compute effective scale factor and top-left offset for the current zoom and pan."""
+        zf = self.zoom_factor if zoom_factor is None else zoom_factor
+        px = self.pan_x if pan_x is None else pan_x
+        py = self.pan_y if pan_y is None else pan_y
+        fit_scale = min(label_w / max(1, self.map_width), label_h / max(1, self.map_height))
+        scale = fit_scale * zf
+        ox = (label_w - self.map_width * scale) / 2.0 + px
+        oy = (label_h - self.map_height * scale) / 2.0 + py
+        return fit_scale, scale, ox, oy
 
     def update_map(self, occ_grid):
         info = occ_grid.info
@@ -888,14 +911,17 @@ class MapViewer(QLabel):
         if self.map_pixmap is None:
             return
         label_w, label_h = max(1, self.width()), max(1, self.height())
-        scaled = self.map_pixmap.scaled(label_w, label_h, Qt.KeepAspectRatio, Qt.FastTransformation)
-        self.scale_factor = scaled.width() / self.map_width
-        self.offset_x = (label_w - scaled.width()) // 2
-        self.offset_y = (label_h - scaled.height()) // 2
+        _, self.scale_factor, self.offset_x, self.offset_y = self._compute_view_transform(label_w, label_h)
+        scaled_w = self.map_width * self.scale_factor
+        scaled_h = self.map_height * self.scale_factor
         canvas = QPixmap(label_w, label_h)
         canvas.fill(QColor("#1e1e1e"))
         painter = QPainter(canvas)
-        painter.drawPixmap(self.offset_x, self.offset_y, scaled)
+        painter.drawPixmap(
+            QRectF(self.offset_x, self.offset_y, scaled_w, scaled_h),
+            self.map_pixmap,
+            QRectF(0, 0, self.map_width, self.map_height),
+        )
         self._draw_world_points(painter, self.scan_points_world, QColor(0, 255, 255), 1, label_w, label_h)
         self._draw_world_points(painter, self.front_obs_points_world, QColor(245, 158, 11), 3, label_w, label_h)
         self._draw_world_points(painter, self.rear_obs_points_world, QColor(232, 121, 249), 3, label_w, label_h)
@@ -927,13 +953,50 @@ class MapViewer(QLabel):
                 painter.drawLine(px, py, ax, ay)
         painter.setPen(QPen(QColor(0, 255, 0), 1))
         painter.setFont(QFont("Arial", 10))
-        painter.drawText(10, 20, "Click trái để gửi goal Nav2")
+        painter.drawText(10, 20, f"Click trái: Goal/Point | Cuộn: Zoom ({self.zoom_factor:.1f}x) | Kéo chuột phải: Di chuyển (Đúp: Reset)")
         painter.drawText(10, 38, f"Pose source: {self.pose_source}")
         painter.drawText(10, 56, f"/scan: {len(self.scan_points_world)} | FrontObs: {len(self.front_obs_points_world)} | RearObs: {len(self.rear_obs_points_world)}")
         painter.end()
         self.setPixmap(canvas)
 
+    def wheelEvent(self, event):
+        if self.map_pixmap is None or self.map_width <= 0 or self.map_height <= 0:
+            super().wheelEvent(event)
+            return
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return
+        factor = 1.2 if delta > 0 else (1.0 / 1.2)
+        new_zoom = max(0.5, min(15.0, self.zoom_factor * factor))
+        if abs(new_zoom - self.zoom_factor) < 1e-6:
+            return
+        label_w, label_h = max(1, self.width()), max(1, self.height())
+        _, old_scale, old_ox, old_oy = self._compute_view_transform(label_w, label_h)
+        mx, my = event.pos().x(), event.pos().y()
+        map_px = (mx - old_ox) / old_scale
+        map_py = (my - old_oy) / old_scale
+        fit_scale, new_scale, _, _ = self._compute_view_transform(label_w, label_h, zoom_factor=new_zoom, pan_x=0.0, pan_y=0.0)
+        del fit_scale
+        self.pan_x = (mx - map_px * new_scale) - (label_w - self.map_width * new_scale) / 2.0
+        self.pan_y = (my - map_py * new_scale) - (label_h - self.map_height * new_scale) / 2.0
+        self.zoom_factor = new_zoom
+        self.update_display()
+        event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() in (Qt.RightButton, Qt.MiddleButton) and self.map_pixmap is not None:
+            self.reset_view()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
     def mousePressEvent(self, event):
+        if event.button() in (Qt.RightButton, Qt.MiddleButton) and self.map_pixmap is not None:
+            self._is_panning = True
+            self._last_pan_pos = event.pos()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton and self.map_pixmap is not None:
             world = self.widget_to_world(event.pos().x(), event.pos().y())
             if world is None:
@@ -947,6 +1010,14 @@ class MapViewer(QLabel):
                 ros_node.log(f"Đã click goal trên map: ({wx:.3f}, {wy:.3f})")
 
     def mouseMoveEvent(self, event):
+        if self._is_panning and self._last_pan_pos is not None:
+            delta = event.pos() - self._last_pan_pos
+            self.pan_x += delta.x()
+            self.pan_y += delta.y()
+            self._last_pan_pos = event.pos()
+            self.update_display()
+            event.accept()
+            return
         if self.is_dragging and self.on_map_drag is not None:
             world = self.widget_to_world(event.pos().x(), event.pos().y())
             if world is not None:
@@ -954,6 +1025,12 @@ class MapViewer(QLabel):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if event.button() in (Qt.RightButton, Qt.MiddleButton) and self._is_panning:
+            self._is_panning = False
+            self._last_pan_pos = None
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+            return
         if event.button() == Qt.LeftButton:
             if self.is_dragging and self.on_map_drag is not None:
                 self.on_map_drag(None, None)
