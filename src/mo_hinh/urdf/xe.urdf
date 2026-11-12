@@ -347,10 +347,12 @@
     </inertial>
   </link>
 
+  <!-- LiDAR optical/scanning frame height: 0.300000 m above base_footprint.
+       base_link is 0.030526 m above ground, so laser_joint z = 0.300000 - 0.030526. -->
   <joint name="laser_joint" type="fixed">
     <parent link="base_link"/>
     <child link="laser_link"/>
-    <origin xyz="0.175 0.0 0.24949" rpy="3.14159265 0 0"/>
+    <origin xyz="0.175 0.0 0.269474" rpy="3.14159265 0 0"/>
   </joint>
 
   <!-- ========================= -->
@@ -452,7 +454,7 @@
   </joint>
 
   <!-- ========================= -->
-  <!-- AI Camera Link (1.06m above base_link, pitched up 5 deg) -->
+  <!-- AI Camera Link (1.20 m above ground; 1.169474 m above base_link, pitched up 5 deg) -->
   <!-- ========================= -->
   <link name="ai_camera_link">
     <visual>
@@ -478,8 +480,10 @@
   <joint name="ai_camera_joint" type="fixed">
     <parent link="base_link"/>
     <child link="ai_camera_link"/>
-    <!-- +X forward; negative pitch tilts the camera optical axis upward by 5 deg (0.08726646 rad) -->
-    <origin xyz="0.25 0.0 1.06" rpy="0 -0.08726646 0"/>
+    <!-- Camera height: 1.200000 m above base_footprint (ground).
+         base_link height: 0.030526 m -> local z = 1.200000 - 0.030526.
+         +X forward; negative pitch tilts the camera optical axis upward by 5 deg (0.08726646 rad). -->
+    <origin xyz="0.25 0.0 1.169474" rpy="0 -0.08726646 0"/>
   </joint>
 
   <link name="ai_camera_depth_optical_frame"/>
