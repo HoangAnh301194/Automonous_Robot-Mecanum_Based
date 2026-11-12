@@ -86,7 +86,7 @@ class IsCustomerEncountered(Condition):
 class IsPatrolRequested(Condition):
     """Chế độ tuần tra mặc định."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        patrol_requested = blackboard.get('HMI_start_patrol', True)
+        patrol_requested = blackboard.get('HMI_start_patrol', False)
         return NodeStatus.SUCCESS if patrol_requested else NodeStatus.FAILURE
 
 
@@ -208,7 +208,8 @@ class ActionApproachWavingPerson(Action):
         self.nav2_client = None
         self.goal_handle = None
         self.is_navigating = False
-        self.standoff_distance = 0.90      # Đỗ cách người 90cm an toàn
+        self.standoff_distance = 1.20      # Đỗ cách người 1.20m an toàn (tránh kẹt costmap inflation)
+        self.enable_dynamic_replan = False # Snapshot 1-shot goal: chụp tọa độ map 1 lần và đi tới điểm đó
         self.min_replan_interval = 1.2    # Tối thiểu 1.2s mới cho replan 1 lần
         self.min_displacement = 0.40      # Người phải di chuyển > 40cm mới cập nhật
         self.freeze_distance = 1.40       # Dưới 1.4m thì khóa goal, giảm tốc đỗ xe
@@ -259,8 +260,16 @@ class ActionApproachWavingPerson(Action):
                 angle = math.atan2(y_base, x_base)
                 approach_dist = max(0.0, dist - self.standoff_distance)
 
+                depth_stamp = getattr(waving_person, 'depth_stamp', None)
+                has_depth_stamp = depth_stamp is not None and (
+                    getattr(depth_stamp, 'sec', 0) != 0 or getattr(depth_stamp, 'nanosec', 0) != 0
+                )
+
                 pose_base = PoseStamped()
-                pose_base.header.stamp = self.node.get_clock().now().to_msg()
+                if has_depth_stamp:
+                    pose_base.header.stamp = depth_stamp
+                elif self.node:
+                    pose_base.header.stamp = self.node.get_clock().now().to_msg()
                 pose_base.header.frame_id = 'base_footprint'
                 pose_base.pose.position.x = approach_dist * math.cos(angle)
                 pose_base.pose.position.y = approach_dist * math.sin(angle)
@@ -270,10 +279,21 @@ class ActionApproachWavingPerson(Action):
 
                 try:
                     if self.node and hasattr(self.node, 'tf_buffer'):
-                        transform = self.node.tf_buffer.lookup_transform(
-                            'map', 'base_footprint', rclpy.time.Time(),
-                            timeout=Duration(seconds=0.05)
-                        )
+                        transform = None
+                        if has_depth_stamp:
+                            try:
+                                transform = self.node.tf_buffer.lookup_transform(
+                                    'map', 'base_footprint',
+                                    rclpy.time.Time.from_msg(depth_stamp),
+                                    timeout=Duration(seconds=0.05)
+                                )
+                            except Exception:
+                                transform = None
+                        if transform is None:
+                            transform = self.node.tf_buffer.lookup_transform(
+                                'map', 'base_footprint', rclpy.time.Time(),
+                                timeout=Duration(seconds=0.05)
+                            )
                         import tf2_geometry_msgs
                         return tf2_geometry_msgs.do_transform_pose_stamped(pose_base, transform), dist
                 except Exception as e:
@@ -308,9 +328,9 @@ class ActionApproachWavingPerson(Action):
             self.status = NodeStatus.RUNNING
             return NodeStatus.RUNNING
 
-        # Dynamic Re-planning: Trong lúc đang di chuyển tiếp cận, cập nhật nếu người di chuyển
+        # Dynamic Re-planning (tắt mặc định trong chế độ Snapshot 1-shot goal)
         if self.is_navigating:
-            if (now - self.last_replan_time) >= self.min_replan_interval:
+            if self.enable_dynamic_replan and (now - self.last_replan_time) >= self.min_replan_interval:
                 new_pose_map, current_dist = self._resolve_target_pose_map(blackboard)
                 if new_pose_map is not None and current_dist > self.freeze_distance:
                     if self._is_significant_displacement(new_pose_map):

@@ -184,3 +184,128 @@ def test_dynamic_target_tracking_displacement_logic():
     pose_large.pose.position.x = 2.4
     pose_large.pose.position.y = 1.3
     assert action._is_significant_displacement(pose_large) is True
+
+
+def test_patrol_waits_for_explicit_start_request():
+    """Verify patrol stays idle by default and only activates after HMI_start_patrol is True."""
+    bb = Blackboard()
+    c_patrol = IsPatrolRequested("Cond_Patrol")
+
+    assert c_patrol.tick(bb) == NodeStatus.FAILURE
+
+    bb.set("HMI_start_patrol", False)
+    assert c_patrol.tick(bb) == NodeStatus.FAILURE
+
+    bb.set("HMI_start_patrol", True)
+    assert c_patrol.tick(bb) == NodeStatus.SUCCESS
+
+
+def test_snapshot_one_shot_approach_freezes_goal():
+    """Verify snapshot approach captures one goal at 1.20m standoff and ignores later target movement."""
+    from types import SimpleNamespace
+    from geometry_msgs.msg import PoseStamped
+    from robot_mission_control.bt_nodes import ActionApproachWavingPerson, Blackboard, NodeStatus
+
+    action = ActionApproachWavingPerson("TestSnapshotApproach", node=None)
+    assert action.standoff_distance == 1.20
+    assert action.enable_dynamic_replan is False
+
+    sent_goals = []
+    action.nav2_client = SimpleNamespace(server_is_ready=lambda: True)
+
+    def _fake_send(pose):
+        action.is_navigating = True
+        sent_goals.append((pose.pose.position.x, pose.pose.position.y))
+
+    action.send_nav2_goal = _fake_send
+
+    initial_pose = PoseStamped()
+    initial_pose.header.frame_id = "map"
+    initial_pose.pose.position.x = 2.0
+    initial_pose.pose.position.y = 1.0
+
+    bb = Blackboard()
+    bb.set("PERSON_PREVIEW_MAP_POSE", initial_pose)
+
+    assert action.tick(bb) == NodeStatus.RUNNING
+    assert len(sent_goals) == 1
+    assert sent_goals[0] == (2.0, 1.0)
+
+    # Simulate target moving far away and enough time elapsing for replan interval
+    moved_pose = PoseStamped()
+    moved_pose.header.frame_id = "map"
+    moved_pose.pose.position.x = 5.0
+    moved_pose.pose.position.y = -3.0
+    bb.set("PERSON_PREVIEW_MAP_POSE", moved_pose)
+    action.last_replan_time -= 5.0
+
+    assert action.tick(bb) == NodeStatus.RUNNING
+    assert len(sent_goals) == 1
+    assert action.last_goal_pose.pose.position.x == 2.0
+    assert action.last_goal_pose.pose.position.y == 1.0
+
+
+def test_resolve_target_pose_uses_depth_stamp_with_fallback():
+    """Verify _resolve_target_pose_map looks up TF at depth_stamp first and falls back to Time(0)."""
+    from types import SimpleNamespace
+    import pytest
+    import rclpy
+    from builtin_interfaces.msg import Time as TimeMsg
+    from geometry_msgs.msg import TransformStamped
+    from robot_mission_control.bt_nodes import ActionApproachWavingPerson, Blackboard
+
+    identity_tf = TransformStamped()
+    identity_tf.header.frame_id = "map"
+    identity_tf.child_frame_id = "base_footprint"
+    identity_tf.transform.rotation.w = 1.0
+
+    recorded_times = []
+
+    class FakeTfBuffer:
+        def __init__(self, fail_stamped=False):
+            self.fail_stamped = fail_stamped
+
+        def lookup_transform(self, target_frame, source_frame, stamp, timeout=None):
+            recorded_times.append(stamp.nanoseconds)
+            if self.fail_stamped and stamp.nanoseconds != 0:
+                raise RuntimeError("Extrapolation Error")
+            return identity_tf
+
+    fake_clock = SimpleNamespace(
+        now=lambda: rclpy.time.Time(seconds=100, nanoseconds=0)
+    )
+    fake_node = SimpleNamespace(
+        tf_buffer=FakeTfBuffer(fail_stamped=False),
+        get_clock=lambda: fake_clock,
+        get_logger=lambda: SimpleNamespace(warn=lambda msg: None),
+    )
+
+    depth_stamp = TimeMsg(sec=98, nanosec=500000000)
+    bb = Blackboard()
+    bb.set(
+        "WAVING_PERSON",
+        SimpleNamespace(
+            position=SimpleNamespace(x=3.20, y=0.0),
+            position_valid=True,
+            depth_stamp=depth_stamp,
+        ),
+    )
+
+    action = ActionApproachWavingPerson("TestStampedTF", node=None)
+    action.node = fake_node
+    pose_map, dist = action._resolve_target_pose_map(bb)
+
+    assert pose_map is not None
+    assert dist == pytest.approx(3.20)
+    assert pose_map.pose.position.x == pytest.approx(2.00)  # 3.20 - 1.20 standoff
+    assert recorded_times == [98 * 10**9 + 500000000]
+
+    # Now test fallback when stamped TF lookup fails
+    recorded_times.clear()
+    fake_node.tf_buffer = FakeTfBuffer(fail_stamped=True)
+    pose_map_fb, dist_fb = action._resolve_target_pose_map(bb)
+
+    assert pose_map_fb is not None
+    assert dist_fb == pytest.approx(3.20)
+    assert pose_map_fb.pose.position.x == pytest.approx(2.00)
+    assert recorded_times == [98 * 10**9 + 500000000, 0]

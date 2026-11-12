@@ -39,7 +39,7 @@ class MissionControllerNode(Node):
         self.blackboard.set('SYSTEM_battery_low', False)
         self.blackboard.set('SYSTEM_water_low', False)
 
-        self.blackboard.set('HMI_start_patrol', True)
+        self.blackboard.set('HMI_start_patrol', False)
         self.blackboard.set('HAND_WAVE_ACTIVE', False)
         self.blackboard.set('APPROACH_ACTIVE', False)
         self.blackboard.set('WAVING_PERSON', None)
