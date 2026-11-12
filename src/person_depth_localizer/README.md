@@ -57,19 +57,17 @@ ros2 launch yolo_bringup yolo.launch.py \
 ```
 
 ### Terminal 3: Khởi động Node Định Vị Người Đa Đối Tượng
-*(Chạy với TF giả định camera cao 1.2m nhìn thẳng phía trước để test)*
+*(Khi `robot_state_publisher` đang phát TF từ `src/mo_hinh/urdf/xe.urdf`, **không** bật `publish_test_tf`, vì sẽ tạo publisher trùng cho cùng frame camera. Camera AI cao 1,20 m so với mặt sàn, LiDAR cao 0,30 m trong URDF.)*
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/ros2_ws/install/setup.bash
 
 ros2 launch person_depth_localizer rough_person_preview.launch.py \
-  publish_test_tf:=true \
-  test_parent_frame:=base_footprint \
-  test_x:=0.0 \
-  test_y:=0.0 \
-  test_z:=1.5 \
+  publish_test_tf:=false \
   depth_frame:=ai_camera_depth_optical_frame
 ```
+
+`publish_test_tf:=true` chỉ dùng trong thí nghiệm **độc lập không chạy robot_state_publisher**, với `test_z:=1.2`. Không chạy đồng thời hai nguồn TF cho cùng child frame.
 
 ### Terminal 4 (Tùy chọn): Khởi động Nhận Diện Giơ Tay (RTMPose)
 ```bash
