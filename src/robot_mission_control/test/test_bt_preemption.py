@@ -309,3 +309,34 @@ def test_resolve_target_pose_uses_depth_stamp_with_fallback():
     assert dist_fb == pytest.approx(3.20)
     assert pose_map_fb.pose.position.x == pytest.approx(2.00)
     assert recorded_times == [98 * 10**9 + 500000000, 0]
+
+
+def test_serve_customer_resumes_interrupted_patrol_target():
+    """Verify finishing customer service resumes the interrupted patrol waypoint instead of skipping it."""
+    from robot_mission_control.bt_nodes import ActionPatrol, ActionServeCustomer, Blackboard, NodeStatus
+
+    patrol = ActionPatrol("TestPatrol", node=None)
+    patrol._route_loaded = True
+    patrol.patrol_points = ["A", "B"]
+    patrol.current_idx = 1  # Currently heading from A to B
+
+    sent_targets = []
+    patrol.send_next_goal = lambda: sent_targets.append(patrol.patrol_points[patrol.current_idx])
+
+    bb = Blackboard()
+    assert patrol.tick(bb) == NodeStatus.RUNNING
+    assert sent_targets == ["B"]
+
+    # Interrupted by customer service
+    patrol.halt(bb)
+    serve = ActionServeCustomer("TestServe", node=None)
+    assert serve.tick(bb) == NodeStatus.RUNNING
+
+    bb.set("FINISH_SERVING_REQUESTED", True)
+    assert serve.tick(bb) == NodeStatus.SUCCESS
+    assert bb.get("PATROL_ADVANCE_NEXT", False) is False
+
+    # Resuming patrol should continue to B, not wrap back to A
+    assert patrol.tick(bb) == NodeStatus.RUNNING
+    assert patrol.current_idx == 1
+    assert sent_targets == ["B", "B"]

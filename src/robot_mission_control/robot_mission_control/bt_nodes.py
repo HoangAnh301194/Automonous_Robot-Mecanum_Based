@@ -550,7 +550,6 @@ class ActionServeCustomer(Action):
             blackboard.set('FINISH_SERVING_REQUESTED', False)
             blackboard.set('HAND_WAVE_ACTIVE', False)
             blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', time.time() + 10.0)
-            blackboard.set('PATROL_ADVANCE_NEXT', True)
 
             self.start_time = None
             self.status = NodeStatus.SUCCESS
