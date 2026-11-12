@@ -22,28 +22,13 @@ from std_msgs.msg import Bool, Float32, String
 from visualization_msgs.msg import Marker, MarkerArray
 from yolo_msgs.msg import DetectionArray
 from tf2_ros import Buffer, TransformException, TransformListener
+from .geometry import backproject_depth_pixel, planar_xy, transform_xyz
 
 from robot_interfaces.msg import TrackedPerson, TrackedPersonArray
 
 
 def stamp_s(header):
     return header.stamp.sec + header.stamp.nanosec * 1e-9
-
-
-def transform_xyz(point, tf):
-    """Transform a numpy xyz using a unit quaternion from geometry_msgs."""
-    t = tf.transform.translation
-    q = tf.transform.rotation
-    xyz = np.asarray(point, dtype=np.float64)
-    qxyz = np.array([q.x, q.y, q.z], dtype=np.float64)
-    norm = math.sqrt(float(np.dot(qxyz, qxyz) + q.w * q.w))
-    if norm <= 1e-9:
-        raise ValueError("invalid TF quaternion")
-    qxyz /= norm
-    w = q.w / norm
-    uv = np.cross(qxyz, xyz)
-    uuv = np.cross(qxyz, uv)
-    return xyz + 2.0 * (w * uv + uuv) + np.array([t.x, t.y, t.z])
 
 
 class RoughPersonLocalizer(Node):
@@ -55,7 +40,7 @@ class RoughPersonLocalizer(Node):
         self.declare_parameter('min_depth_m', 0.45)
         self.declare_parameter('max_depth_m', 5.0)
         self.declare_parameter('min_samples', 4)
-        self.declare_parameter('base_frame', 'base_link')
+        self.declare_parameter('base_frame', 'base_footprint')
         self.declare_parameter('map_frame', 'map')
         self.declare_parameter('depth_frame_override', '')
         self.declare_parameter('fallback_hfov_deg', 58.0)
@@ -199,23 +184,28 @@ class RoughPersonLocalizer(Node):
             self.report('missing_depth_frame')
             return
 
+        # Use depth acquisition time for TF2, not an unrelated latest transform.
+        # Camera height (1.20 m) and LiDAR height (0.30 m) live in the
+        # robot URDF / TF tree. They must NEVER be added as offsets here.
         base_frame = str(self.get_parameter('base_frame').value)
         map_frame = str(self.get_parameter('map_frame').value)
+        sensor_time = rclpy.time.Time.from_msg(depth_stamp)
         try:
-            tf_base = self.tf_buffer.lookup_transform(
-                base_frame, source, rclpy.time.Time())
+            tf_base = self.tf_buffer.lookup_transform(base_frame, source, sensor_time)
         except (TransformException, ValueError) as exc:
-            self.report('tf_base_unavailable', source_frame=source, error=str(exc))
+            self.report('tf_base_unavailable', source_frame=source,
+                        target_frame=base_frame, error=str(exc))
             return
 
         map_available = False
         tf_map = None
-        try:
-            tf_map = self.tf_buffer.lookup_transform(
-                map_frame, base_frame, rclpy.time.Time())
-            map_available = True
-        except (TransformException, ValueError):
-            pass
+        if map_frame != base_frame:
+            try:
+                tf_map = self.tf_buffer.lookup_transform(
+                    map_frame, base_frame, rclpy.time.Time.from_msg(msg.header.stamp))
+                map_available = True
+            except (TransformException, ValueError):
+                pass
 
         now = self.get_clock().now().to_msg()
         lo = float(self.get_parameter('min_depth_m').value)
@@ -241,7 +231,8 @@ class RoughPersonLocalizer(Node):
             nw = max(0.0, min(1.0, bw / max(1.0, float(self.rgb_w))))
             nh = max(0.0, min(1.0, bh / max(1.0, float(self.rgb_h))))
 
-            ud, vd = int(round(nx * w)), int(round(ny * h))
+            ud = max(0, min(w - 1, int(round(nx * w))))
+            vd = max(0, min(h - 1, int(round(ny * h))))
             half_w = max(1, int(round(nw * w * 0.18)))
             half_h = max(1, int(round(nh * h * 0.18)))
             x0, x1 = max(0, ud - half_w), min(w, ud + half_w + 1)
@@ -261,15 +252,17 @@ class RoughPersonLocalizer(Node):
                 continue
 
             depth_m = float(np.median(foreground))
-            xyz = np.array([(ud - cx) * depth_m / fx,
-                            (vd - cy) * depth_m / fy, depth_m], dtype=np.float64)
-
             try:
-                point_base = transform_xyz(xyz, tf_base)
-            except Exception:
+                # Depth pixel -> 3D in depth optical frame (meters).
+                point_camera = backproject_depth_pixel(
+                    ud, vd, depth_m, fx, fy, cx, cy)
+                # Full 3D extrinsic transform: P_base = R_base_camera * P_camera + t.
+                point_base = transform_xyz(point_camera, tf_base)
+                # Keep (x,y) on the robot's horizontal plane (Z is not range).
+                # This is a body-point projection, NOT a calibrated foot location.
+                x_base, y_base, dist_xy = planar_xy(point_base)
+            except ValueError:
                 continue
-
-            dist_xy = math.hypot(point_base[0], point_base[1])
 
             # Stage 4: Check if this specific person is waving
             is_waving = False
@@ -283,7 +276,7 @@ class RoughPersonLocalizer(Node):
             # Populate TrackedPerson
             tp = TrackedPerson()
             tp.track_id = track_id
-            tp.position = Point(x=float(point_base[0]), y=float(point_base[1]), z=0.0)
+            tp.position = Point(x=x_base, y=y_base, z=0.0)
             tp.distance_xy_m = float(dist_xy)
             tp.depth_m = float(depth_m)
             tp.position_valid = True
@@ -376,6 +369,8 @@ class RoughPersonLocalizer(Node):
         arr_msg = TrackedPersonArray()
         arr_msg.header.stamp = msg.header.stamp
         arr_msg.header.frame_id = base_frame
+        # Intrinsics, RGB-depth registration and extrinsics are not yet
+        # verified against real measurements; never mark this navigable.
         arr_msg.geometry_calibrated = False
         arr_msg.people = tracked_people_list
         self.tracked_people_pub.publish(arr_msg)
@@ -388,7 +383,7 @@ class RoughPersonLocalizer(Node):
         # Backward compatibility for single-person preview topics
         if primary_person_data is not None:
             base_msg = PointStamped()
-            base_msg.header.stamp = now
+            base_msg.header.stamp = depth_stamp
             base_msg.header.frame_id = base_frame
             base_msg.point.x = float(primary_person_data['point_base'][0])
             base_msg.point.y = float(primary_person_data['point_base'][1])
@@ -400,7 +395,7 @@ class RoughPersonLocalizer(Node):
                 try:
                     point_map = transform_xyz(primary_person_data['point_base'], tf_map)
                     map_msg = PointStamped()
-                    map_msg.header.stamp = now
+                    map_msg.header.stamp = msg.header.stamp
                     map_msg.header.frame_id = map_frame
                     map_msg.point.x = float(point_map[0])
                     map_msg.point.y = float(point_map[1])
@@ -417,6 +412,11 @@ class RoughPersonLocalizer(Node):
                     people_detected=len(people),
                     map_available=map_available,
                     source_frame=source,
+                    target_frame=base_frame,
+                    geometry_projection='camera_3d_tf2_base_xy',
+                    point_is_ground_contact=False,
+                    intrinsics_estimated=intrinsics_estimated,
+                    rgb_depth_registered=False,
                     skew_s=round(skew, 3))
 
 
