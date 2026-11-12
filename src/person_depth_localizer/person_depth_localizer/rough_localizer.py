@@ -184,7 +184,7 @@ class RoughPersonLocalizer(Node):
             self.report('missing_depth_frame')
             return
 
-        # Use depth acquisition time for TF2, not an unrelated latest transform.
+        # Use the same depth acquisition time for camera->base and base->map TF2.
         # Camera height (1.20 m) and LiDAR height (0.30 m) live in the
         # robot URDF / TF tree. They must NEVER be added as offsets here.
         base_frame = str(self.get_parameter('base_frame').value)
@@ -202,7 +202,7 @@ class RoughPersonLocalizer(Node):
         if map_frame != base_frame:
             try:
                 tf_map = self.tf_buffer.lookup_transform(
-                    map_frame, base_frame, rclpy.time.Time.from_msg(msg.header.stamp))
+                    map_frame, base_frame, sensor_time)
                 map_available = True
             except (TransformException, ValueError):
                 pass
@@ -395,7 +395,7 @@ class RoughPersonLocalizer(Node):
                 try:
                     point_map = transform_xyz(primary_person_data['point_base'], tf_map)
                     map_msg = PointStamped()
-                    map_msg.header.stamp = msg.header.stamp
+                    map_msg.header.stamp = depth_stamp
                     map_msg.header.frame_id = map_frame
                     map_msg.point.x = float(point_map[0])
                     map_msg.point.y = float(point_map[1])
