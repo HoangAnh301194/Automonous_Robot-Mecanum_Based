@@ -1,0 +1,8 @@
+<class_libraries>
+  <library path="nav2_custom_backup_behavior">
+    <class name="nav2_custom_plugins/CustomBackUp" type="nav2_custom_plugins::CustomBackUp" base_class_type="nav2_core::Behavior">
+      <description>Custom safety-verified backup behavior distinguishing pre-existing shallow front overlap from trajectory hazards with continuous rear depth monitoring.</description>
+    </class>
+  </library>
+</class_libraries>
+

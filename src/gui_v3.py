@@ -30,6 +30,7 @@ from PyQt5.QtWidgets import (
 import rclpy
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
+from diagnostic_msgs.msg import KeyValue
 from geometry_msgs.msg import PoseStamped, Twist
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Odometry
@@ -226,7 +227,7 @@ def recompute_cyclic_waypoint_yaws(waypoints):
     return waypoints
 
 class RosInterface(Node):
-    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None, obstacle_scan_callback=None):
+    def __init__(self, log_callback=None, map_callback=None, pose_callback=None, scan_callback=None, dataenc_callback=None, nav_feedback_callback=None, nav_status_callback=None, human_callback=None, mission_log_callback=None, popup_cmd_callback=None, obstacle_scan_callback=None, operator_alert_callback=None):
         super().__init__("desktop_nav_gui_v3")
         self.log_callback = log_callback
         self.map_callback = map_callback
@@ -239,6 +240,7 @@ class RosInterface(Node):
         self.human_callback = human_callback
         self.mission_log_callback = mission_log_callback
         self.popup_cmd_callback = popup_cmd_callback
+        self.operator_alert_callback = operator_alert_callback
         self.current_goal_x = None
         self.current_goal_y = None
         self.initial_goal_dist = None
@@ -291,6 +293,7 @@ class RosInterface(Node):
         # Mission Control interfaces
         self.mission_log_sub = self.create_subscription(String, "/mission/status_log", self.on_mission_log_msg, 10)
         self.popup_cmd_sub = self.create_subscription(String, "/mission/service_popup_cmd", self.on_popup_cmd_msg, 10)
+        self.operator_alert_sub = self.create_subscription(KeyValue, "/navigation/operator_alert", self.on_operator_alert_msg, 10)
         self.serve_trigger_pub = self.create_publisher(Bool, "/mission/serve_trigger", 10)
         self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
         self.wave_detected_pub = self.create_publisher(Bool, "/pose/wave_detected", 10)
@@ -414,6 +417,10 @@ class RosInterface(Node):
     def on_popup_cmd_msg(self, msg):
         if self.popup_cmd_callback:
             self.popup_cmd_callback(msg.data)
+
+    def on_operator_alert_msg(self, msg):
+        if self.operator_alert_callback:
+            self.operator_alert_callback(str(msg.key), str(msg.value))
 
     def on_human_detected_msg(self, msg):
         if self.human_callback:
@@ -1090,6 +1097,7 @@ class MainWindow(QWidget):
     human_signal = pyqtSignal(bool)
     mission_log_signal = pyqtSignal(str)
     mission_popup_signal = pyqtSignal(str)
+    operator_alert_signal = pyqtSignal(str, str)
     LAYER1_REAL = "layer1_real"
     SLAM_MAPPING, SLAM_LOCALIZATION = "slam_mapping", "slam_localization"
     AMCL, NAV2 = "amcl", "nav2"
@@ -1130,6 +1138,7 @@ class MainWindow(QWidget):
         self.human_signal.connect(self._on_human_detected_ui)
         self.mission_log_signal.connect(self._on_mission_log_ui)
         self.mission_popup_signal.connect(self._on_mission_popup_ui)
+        self.operator_alert_signal.connect(self._on_operator_alert_ui)
         self.init_ui()
         self.load_patrol_config_from_yaml(silent=True)
         self.append_log("Đã tự động quét và dọn dẹp sạch sẽ các tiến trình ROS2 cũ trước khi khởi động.")
@@ -1304,35 +1313,14 @@ class MainWindow(QWidget):
         tab_log.setLayout(tab_log_layout)
         self.tabs_info.addTab(tab_log, "📜 Log Hệ Thống")
 
-        # TAB 2: Trạng thái & Suy nghĩ của Robot
+        # TAB 2: Chi tiết & Lịch sử điều hướng Nav2 (banner đã đưa lên thanh Não Robot chung phía trên)
         tab_mind = QWidget()
         tab_mind_layout = QVBoxLayout()
         tab_mind_layout.setContentsMargins(6, 6, 6, 6)
         tab_mind_layout.setSpacing(6)
 
-        # 1. Banner suy nghĩ hiện tại
-        self.mind_banner_frame = QFrame()
-        self.mind_banner_frame.setStyleSheet(
-            "QFrame { background-color: #ffffff; border: 2px solid #2563eb; border-radius: 6px; padding: 6px; }"
-        )
-        banner_layout = QVBoxLayout(self.mind_banner_frame)
-        banner_layout.setContentsMargins(6, 6, 6, 6)
-        banner_layout.setSpacing(4)
-        self.lbl_mind_title = QLabel("🤖 Robot đang nghĩ gì:")
-        self.lbl_mind_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #334155;")
-        self.lbl_mind_status = QLabel("Chưa có lệnh điều hướng")
-        self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #0f172a;")
-        self.lbl_mind_status.setWordWrap(True)
-        self.lbl_mind_desc = QLabel("Robot đang ở trạng thái chờ. Hãy click mục tiêu trên bản đồ để bắt đầu.")
-        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
-        self.lbl_mind_desc.setWordWrap(True)
-        banner_layout.addWidget(self.lbl_mind_title)
-        banner_layout.addWidget(self.lbl_mind_status)
-        banner_layout.addWidget(self.lbl_mind_desc)
-        tab_mind_layout.addWidget(self.mind_banner_frame)
-
-        # 2. Nhóm thông số lộ trình Nav2
-        nav_info_group = QGroupBox("Tiến trình điều hướng")
+        # 1. Nhóm thông số lộ trình Nav2
+        nav_info_group = QGroupBox("Tiến trình điều hướng Nav2")
         nav_info_layout = QGridLayout()
         nav_info_layout.setContentsMargins(6, 6, 6, 6)
         nav_info_layout.setSpacing(4)
@@ -1361,9 +1349,9 @@ class MainWindow(QWidget):
         nav_info_group.setLayout(nav_info_layout)
         tab_mind_layout.addWidget(nav_info_group)
 
-        # 3. Nhật ký suy nghĩ gần nhất
+        # 2. Nhật ký suy nghĩ & tự cứu gần nhất
         thought_hist_header = QHBoxLayout()
-        lbl_hist_title = QLabel("📝 Lịch sử phản ứng gần nhất:")
+        lbl_hist_title = QLabel("📝 Lịch sử phản ứng Nav2 & Tự cứu gần nhất:")
         lbl_hist_title.setStyleSheet("font-weight: bold; font-size: 11px; color: #334155;")
         self.btn_clear_thoughts = QPushButton("Xóa")
         self.btn_clear_thoughts.setFixedSize(45, 20)
@@ -1382,7 +1370,7 @@ class MainWindow(QWidget):
         )
         tab_mind_layout.addWidget(self.thought_history_box, stretch=1)
         tab_mind.setLayout(tab_mind_layout)
-        self.tabs_info.addTab(tab_mind, "🧠 Trạng Thái & Suy Nghĩ")
+        self.tabs_info.addTab(tab_mind, "🧭 Chi Tiết Nav2")
 
         # TAB 3: Debug Cảm biến, Camera, TF & Chuyển động
         tab_debug = QWidget()
@@ -1527,26 +1515,11 @@ class MainWindow(QWidget):
         wp_table_group.setLayout(wp_table_layout)
         mission_left.addWidget(wp_table_group, stretch=2)
 
-        # --- CỘT PHẢI TAB 2: GIÁM SÁT FSM, ĐIỀU KHIỂN & SANDBOX ---
+        # --- CỘT PHẢI TAB 2: ĐIỀU KHIỂN MISSION, LỘ TRÌNH & SANDBOX ---
         mission_right_widget = QWidget()
         mission_right = QVBoxLayout(mission_right_widget)
         mission_right.setContentsMargins(0, 0, 0, 0)
         mission_right.setSpacing(8)
-
-        self.fsm_banner_frame = QFrame()
-        self.fsm_banner_frame.setStyleSheet(
-            "QFrame { background-color: #ffffff; border: 2px solid #2563eb; border-radius: 8px; padding: 10px; }"
-        )
-        fsm_banner_layout = QVBoxLayout(self.fsm_banner_frame)
-        self.lbl_fsm_state = QLabel("🤖 TRẠNG THÁI: CHỜ LỆNH / ĐANG KHỞI ĐỘNG")
-        self.lbl_fsm_state.setStyleSheet("font-size: 17px; font-weight: bold; color: #1d4ed8;")
-        self.lbl_fsm_state.setWordWrap(True)
-        self.lbl_fsm_detail = QLabel("Kết nối với mission_controller_node để xem hành vi thời gian thực của Behavior Tree.")
-        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #0f172a;")
-        self.lbl_fsm_detail.setWordWrap(True)
-        fsm_banner_layout.addWidget(self.lbl_fsm_state)
-        fsm_banner_layout.addWidget(self.lbl_fsm_detail)
-        mission_right.addWidget(self.fsm_banner_frame)
 
         ctrl_mission_group = QGroupBox("🎮 Điều khiển Nhiệm vụ Tuần Tra")
         ctrl_mission_layout = QHBoxLayout()
@@ -1620,6 +1593,61 @@ class MainWindow(QWidget):
         self.tab_mission.setFrameShape(QFrame.NoFrame)
         self.tab_mission.setWidget(mission_container)
 
+        # === THANH "NÃO ROBOT" HỢP NHẤT (LUÔN HIỂN THỊ Ở CẢ 2 TAB LỚN) ===
+        brain_bar = QHBoxLayout()
+        brain_bar.setContentsMargins(0, 0, 0, 2)
+        brain_bar.setSpacing(6)
+
+        # Ô trái: Trạng thái Mission / Phục vụ (BT cấp cao)
+        self.fsm_banner_frame = QFrame()
+        self.fsm_banner_frame.setStyleSheet(
+            "QFrame { background-color: #ffffff; border: 2px solid #2563eb; border-radius: 6px; padding: 5px 8px; }"
+        )
+        fsm_banner_layout = QVBoxLayout(self.fsm_banner_frame)
+        fsm_banner_layout.setContentsMargins(2, 2, 2, 2)
+        fsm_banner_layout.setSpacing(2)
+        self.lbl_fsm_title = QLabel("🎯 NHIỆM VỤ & PHỤC VỤ (MISSION)")
+        self.lbl_fsm_title.setStyleSheet("font-weight: bold; font-size: 10px; color: #475569; letter-spacing: 0.4px;")
+        self.lbl_fsm_state = QLabel("CHỜ LỆNH / ĐANG KHỞI ĐỘNG")
+        self.lbl_fsm_state.setStyleSheet("font-size: 13px; font-weight: bold; color: #1d4ed8;")
+        self.lbl_fsm_state.setWordWrap(True)
+        self.lbl_fsm_detail = QLabel("Kết nối với mission_controller_node để xem hành vi tuần tra & phục vụ.")
+        self.lbl_fsm_detail.setStyleSheet("font-size: 11px; color: #0f172a;")
+        self.lbl_fsm_detail.setWordWrap(True)
+        fsm_banner_layout.addWidget(self.lbl_fsm_title)
+        fsm_banner_layout.addWidget(self.lbl_fsm_state)
+        fsm_banner_layout.addWidget(self.lbl_fsm_detail)
+
+        # Ô phải: Suy nghĩ & Tự cứu Nav2 (MPPI / CustomBackUp)
+        self.mind_banner_frame = QFrame()
+        self.mind_banner_frame.setStyleSheet(
+            "QFrame { background-color: #ffffff; border: 2px solid #0f766e; border-radius: 6px; padding: 5px 8px; }"
+        )
+        mind_banner_layout = QVBoxLayout(self.mind_banner_frame)
+        mind_banner_layout.setContentsMargins(2, 2, 2, 2)
+        mind_banner_layout.setSpacing(2)
+        mind_hdr_row = QHBoxLayout()
+        mind_hdr_row.setContentsMargins(0, 0, 0, 0)
+        self.lbl_mind_title = QLabel("🧭 ĐIỀU HƯỚNG & TỰ CỨU (NAV2)")
+        self.lbl_mind_title.setStyleSheet("font-weight: bold; font-size: 10px; color: #475569; letter-spacing: 0.4px;")
+        self.lbl_top_nav_metrics = QLabel("📏 -- m | 🔄 Recovery: 0 lần")
+        self.lbl_top_nav_metrics.setStyleSheet("font-size: 10px; font-weight: bold; color: #334155;")
+        mind_hdr_row.addWidget(self.lbl_mind_title)
+        mind_hdr_row.addStretch()
+        mind_hdr_row.addWidget(self.lbl_top_nav_metrics)
+        self.lbl_mind_status = QLabel("Chưa có lệnh điều hướng")
+        self.lbl_mind_status.setStyleSheet("font-weight: bold; font-size: 13px; color: #0f172a;")
+        self.lbl_mind_status.setWordWrap(True)
+        self.lbl_mind_desc = QLabel("Robot đang ở trạng thái chờ. Click mục tiêu trên bản đồ hoặc Bắt đầu tuần tra.")
+        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a;")
+        self.lbl_mind_desc.setWordWrap(True)
+        mind_banner_layout.addLayout(mind_hdr_row)
+        mind_banner_layout.addWidget(self.lbl_mind_status)
+        mind_banner_layout.addWidget(self.lbl_mind_desc)
+
+        brain_bar.addWidget(self.fsm_banner_frame, stretch=1)
+        brain_bar.addWidget(self.mind_banner_frame, stretch=1)
+
         # === THANH TAB LỚN TOÀN CỬA SỔ ===
         self.main_tabs = QTabWidget()
         self.main_tabs.setStyleSheet(
@@ -1631,7 +1659,9 @@ class MainWindow(QWidget):
 
         root_layout = QVBoxLayout()
         root_layout.setContentsMargins(4, 4, 4, 4)
-        root_layout.addWidget(self.main_tabs)
+        root_layout.setSpacing(4)
+        root_layout.addLayout(brain_bar)
+        root_layout.addWidget(self.main_tabs, stretch=1)
         self.setLayout(root_layout)
         self.on_operation_mode_changed(); self.on_odom_source_changed(); self.refresh_batch_waypoint_views(); self.refresh_serial_ports()
 
@@ -1650,6 +1680,7 @@ class MainWindow(QWidget):
             human_callback=self.on_human_detected,
             mission_log_callback=self.on_mission_log,
             popup_cmd_callback=self.on_popup_cmd,
+            operator_alert_callback=self.on_operator_alert,
         )
         self.ros_spin_thread = threading.Thread(target=self.spin_ros, daemon=True); self.ros_spin_thread.start()
         self.append_log("ROS2 node v3 đã khởi động.")
@@ -1703,6 +1734,23 @@ class MainWindow(QWidget):
     def on_new_nav_status(self, title, desc, color):
         self.nav_thought_signal.emit(str(title), str(desc), str(color))
 
+    def on_operator_alert(self, code: str, message: str):
+        self.operator_alert_signal.emit(str(code), str(message))
+
+    def _on_operator_alert_ui(self, code: str, message: str):
+        c = code.strip().upper()
+        if c == "PRE_BACKUP":
+            title, color = "⏪ CHUẨN BỊ LÙI TỰ CỨU (CustomBackUp)", "#a855f7"
+        elif c == "BACKUP_WAIT":
+            title, color = "🛑 TẠM DỪNG LÙI (CHỜ AN TOÀN PHÍA SAU)", "#f59e0b"
+        elif c == "REPLANNING":
+            title, color = "🔄 ĐÃ LÙI XONG — ĐANG TÍNH LẠI ĐƯỜNG", "#2563eb"
+        elif c == "WAITING":
+            title, color = "⏳ SỰ CỐ ĐIỀU HƯỚNG — ĐANG CHỜ XỬ LÝ", "#f97316"
+        else:
+            title, color = f"⚠️ CẢNH BÁO TỰ CỨU ({c or 'NAV2'})", "#ea580c"
+        self._on_nav_thought_ui(title, message, color)
+
     def clear_thought_history(self):
         self.thought_history_box.clear()
 
@@ -1710,6 +1758,8 @@ class MainWindow(QWidget):
         self.lbl_mind_dist.setText(f"📏 Còn lại: {dist:.2f} m")
         self.lbl_mind_time.setText(f"⏱ Đi: {int(nav_sec)}s | Dự kiến: {int(est_sec)}s")
         self.lbl_mind_recovery.setText(f"🔄 Tự cứu (Recovery): {recov} lần")
+        if hasattr(self, "lbl_top_nav_metrics"):
+            self.lbl_top_nav_metrics.setText(f"📏 {dist:.2f} m | 🔄 Recovery: {recov} lần")
         if total_dist > 0.05:
             progress = max(0, min(100, int((1.0 - (dist / total_dist)) * 100)))
             self.pbar_nav.setValue(progress)
@@ -1718,9 +1768,9 @@ class MainWindow(QWidget):
         self.lbl_mind_status.setText(title)
         self.lbl_mind_status.setStyleSheet(f"font-weight: bold; font-size: 13px; color: {color};")
         self.lbl_mind_desc.setText(desc)
-        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a; line-height: 1.3;")
+        self.lbl_mind_desc.setStyleSheet("font-size: 11px; color: #0f172a;")
         self.mind_banner_frame.setStyleSheet(
-            f"QFrame {{ background-color: #ffffff; border: 2px solid {color}; border-radius: 6px; padding: 6px; }}"
+            f"QFrame {{ background-color: #ffffff; border: 2px solid {color}; border-radius: 6px; padding: 5px 8px; }}"
         )
         now_str = time.strftime("%H:%M:%S")
         self.thought_history_box.append(f"<span style='color: #64748b;'>[{now_str}]</span> <b style='color: {color};'>{title}</b>: {desc}")
@@ -1734,7 +1784,23 @@ class MainWindow(QWidget):
         desc = None
         color = "#3b82f6"
 
-        if "controller failed to compute command velocity" in lower or "failed to make progress" in lower:
+        if "[custom_backup] safety_stop" in lower:
+            title = "🛑 DỪNG LÙI KHẨN (CẢM BIẾN PHÍA SAU)"
+            desc = "CustomBackUp dừng lùi để đảm bảo an toàn (vật cản/mất tín hiệu phía sau)."
+            color = "#dc2626"
+        elif "[custom_backup] partial_success" in lower:
+            title = "✅ LÙI MỘT PHẦN ĐẠT YÊU CẦU (PARTIAL SUCCESS)"
+            desc = "Đã lùi được khoảng an toàn tối thiểu trước khi gặp vật cản sau, chuyển sang tính lại đường."
+            color = "#0d9488"
+        elif "[custom_backup] start" in lower:
+            title = "⏪ ĐANG LÙI TỰ CỨU CÓ GIÁM SÁT (CustomBackUp)"
+            desc = "Đang lùi chậm kết hợp quét camera sau và local costmap."
+            color = "#a855f7"
+        elif "checkrearsafety:" in lower and "safe" not in lower:
+            title = "🚫 KHÔNG ĐỦ AN TOÀN ĐỂ LÙI (CheckRearSafety)"
+            desc = "Phía sau có vật cản hoặc thiếu dữ liệu camera sau (/rear_scan_obstacle)."
+            color = "#f59e0b"
+        elif "controller failed to compute command velocity" in lower or "failed to make progress" in lower:
             title = "⚠️ ĐANG DỪNG TRÁNH VẬT CẢN (MPPI)"
             desc = "Bộ điều khiển MPPI phát hiện vật cản quá sát thân xe. Robot đang phanh dừng an toàn để chờ đường mở hoặc tính đường lách."
             color = "#f97316"
@@ -2054,11 +2120,11 @@ class MainWindow(QWidget):
         if not hasattr(self, "fsm_banner_frame"):
             return
         self.lbl_fsm_state.setText(title)
-        self.lbl_fsm_state.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {border_color};")
+        self.lbl_fsm_state.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {border_color};")
         self.lbl_fsm_detail.setText(detail)
-        self.lbl_fsm_detail.setStyleSheet("font-size: 12px; color: #0f172a;")
+        self.lbl_fsm_detail.setStyleSheet("font-size: 11px; color: #0f172a;")
         self.fsm_banner_frame.setStyleSheet(
-            f"QFrame {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 8px; padding: 10px; }}"
+            f"QFrame {{ background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 6px; padding: 5px 8px; }}"
         )
 
     def on_mission_log(self, text: str):
@@ -2284,77 +2350,27 @@ class MainWindow(QWidget):
                 return [_fix_user_paths(v) for v in obj]
             elif isinstance(obj, str):
                 import re
-                return re.sub(r"/home/[^/]+/ros2_ws", WS_ROOT, obj)
+                return re.sub(r"/home/[^/]+/(?:ros2_ws|robot_ws)", WS_ROOT, obj)
             return obj
 
         data = _fix_user_paths(data)
 
-        if "bt_navigator" in data and "ros__parameters" in data["bt_navigator"]:
-            bt_params = data["bt_navigator"]["ros__parameters"]
-            # Su dung Behavior Tree va Recovery chuan goc cua ROS 2 Humble
-            bt_params.pop("default_nav_to_pose_bt_xml", None)
-            bt_params.pop("default_nav_through_poses_bt_xml", None)
-            bt_params.pop("navigators", None)
-            bt_params.pop("navigate_to_pose", None)
-            bt_params["plugin_lib_names"] = [
-                "nav2_compute_path_to_pose_action_bt_node",
-                "nav2_compute_path_through_poses_action_bt_node",
-                "nav2_smooth_path_action_bt_node",
-                "nav2_follow_path_action_bt_node",
-                "nav2_spin_action_bt_node",
-                "nav2_wait_action_bt_node",
-                "nav2_assisted_teleop_action_bt_node",
-                "nav2_back_up_action_bt_node",
-                "nav2_drive_on_heading_bt_node",
-                "nav2_clear_costmap_service_bt_node",
-                "nav2_is_stuck_condition_bt_node",
-                "nav2_goal_reached_condition_bt_node",
-                "nav2_goal_updated_condition_bt_node",
-                "nav2_globally_updated_goal_condition_bt_node",
-                "nav2_is_path_valid_condition_bt_node",
-                "nav2_initial_pose_received_condition_bt_node",
-                "nav2_reinitialize_global_localization_service_bt_node",
-                "nav2_rate_controller_bt_node",
-                "nav2_distance_controller_bt_node",
-                "nav2_speed_controller_bt_node",
-                "nav2_truncate_path_action_bt_node",
-                "nav2_truncate_path_local_action_bt_node",
-                "nav2_goal_updater_node_bt_node",
-                "nav2_recovery_node_bt_node",
-                "nav2_pipeline_sequence_bt_node",
-                "nav2_round_robin_node_bt_node",
-                "nav2_transform_available_condition_bt_node",
-                "nav2_time_expired_condition_bt_node",
-                "nav2_path_expiring_timer_condition",
-                "nav2_distance_traveled_condition_bt_node",
-                "nav2_single_trigger_bt_node",
-                "nav2_goal_updated_controller_bt_node",
-                "nav2_is_battery_low_condition_bt_node",
-                "nav2_navigate_through_poses_action_bt_node",
-                "nav2_navigate_to_pose_action_bt_node",
-                "nav2_remove_passed_goals_action_bt_node",
-                "nav2_planner_selector_bt_node",
-                "nav2_controller_selector_bt_node",
-                "nav2_goal_checker_selector_bt_node",
-                "nav2_controller_cancel_bt_node",
-                "nav2_path_longer_on_approach_bt_node",
-                "nav2_wait_cancel_bt_node",
-                "nav2_spin_cancel_bt_node",
-                "nav2_back_up_cancel_bt_node",
-                "nav2_assisted_teleop_cancel_bt_node",
-            ]
-
         if "behavior_server" in data and "ros__parameters" in data["behavior_server"]:
             bs_params = data["behavior_server"]["ros__parameters"]
-            bs_params["behavior_plugins"] = ["spin", "backup", "drive_on_heading", "assisted_teleop", "wait"]
-            bs_params["spin"] = {"plugin": "nav2_behaviors/Spin"}
-            bs_params["backup"] = {"plugin": "nav2_behaviors/BackUp"}
-            bs_params["drive_on_heading"] = {"plugin": "nav2_behaviors/DriveOnHeading"}
-            bs_params["wait"] = {"plugin": "nav2_behaviors/Wait"}
-            bs_params["assisted_teleop"] = {"plugin": "nav2_behaviors/AssistedTeleop"}
+            bs_params.setdefault(
+                "behavior_plugins",
+                ["spin", "backup", "custom_backup", "drive_on_heading", "assisted_teleop", "wait"],
+            )
+            bs_params.setdefault("spin", {"plugin": "nav2_behaviors/Spin"})
+            bs_params.setdefault("backup", {"plugin": "nav2_behaviors/BackUp"})
+            if "custom_backup" in bs_params.get("behavior_plugins", []):
+                bs_params.setdefault("custom_backup", {"plugin": "nav2_custom_plugins/CustomBackUp"})
+            bs_params.setdefault("drive_on_heading", {"plugin": "nav2_behaviors/DriveOnHeading"})
+            bs_params.setdefault("wait", {"plugin": "nav2_behaviors/Wait"})
+            bs_params.setdefault("assisted_teleop", {"plugin": "nav2_behaviors/AssistedTeleop"})
 
         temp_path = self._write_temp_yaml(data, "nav2_gui_v3_")
-        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, chuẩn Nav2 Humble gốc)")
+        self.append_log(f"Tạo params Nav2 tạm: {temp_path} (odom_topic='{topic}', cập nhật {changed} vị trí, giữ cấu hình BT/Recovery từ YAML)")
         return temp_path
     def build_slam_mapping_params(self):
         data = self._load_yaml(SLAM_MAPPING_PARAMS_BASE)

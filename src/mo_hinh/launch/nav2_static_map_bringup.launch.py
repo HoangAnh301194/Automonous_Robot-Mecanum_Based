@@ -91,7 +91,7 @@ def generate_launch_description():
 
     default_map_yaml = resolve_path('maps', 'my_map.yaml')
     default_nav2_params = resolve_path('config', 'nav2_params.yaml')
-    default_bt_xml = resolve_path('config', 'navigate_to_pose_smart_recovery.xml')
+    default_bt_xml = resolve_path('config', 'navigate_to_pose_custom_recovery.xml')
     default_rviz_config = resolve_path('config', 'rviz.rviz')
     urdf_file = resolve_path('urdf', 'xe.urdf')
     scan_filter_config = resolve_path('config', 'scan_filter.yaml')

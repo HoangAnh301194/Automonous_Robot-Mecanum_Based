@@ -21,7 +21,7 @@ def generate_launch_description():
     default_map_yaml = resolve_path('maps', 'my_map.yaml')
     default_map_graph = resolve_path('maps', 'my_slam_graph')
     default_nav2_params = resolve_path('config', 'nav2_params.yaml')
-    default_bt_xml = resolve_path('config', 'navigate_to_pose_smart_recovery.xml')
+    default_bt_xml = resolve_path('config', 'navigate_to_pose_custom_recovery.xml')
     default_slam_loc_params = resolve_path('config', 'slam_localization.yaml')
     default_rviz_config = resolve_path('config', 'rviz.rviz')
 
