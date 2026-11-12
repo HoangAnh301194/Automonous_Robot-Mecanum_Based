@@ -35,6 +35,15 @@ class CameraRobotGeometryTests(unittest.TestCase):
         self.assertAlmostEqual(y, 0.0)
         self.assertAlmostEqual(distance, 0.25)
 
+    def test_optical_frame_forward_ray_points_along_robot_x(self):
+        # URDF optical rotation: roll=-90 deg, pitch=0, yaw=-90 deg.
+        # Optical +Z (depth forward) becomes robot +X; sensor Z is 1.20m.
+        camera_xyz = backproject_depth_pixel(320, 240, 2.0, 500, 500, 320, 240)
+        robot_xyz = transform_xyz(
+            camera_xyz, tf(tx=0.25, tz=1.20, qx=-0.5, qy=0.5, qz=-0.5, qw=0.5))
+        np.testing.assert_allclose(robot_xyz, [2.25, 0.0, 1.20], atol=1e-10)
+        self.assertAlmostEqual(planar_xy(robot_xyz)[2], 2.25)
+
     def test_rotation_then_translation(self):
         # 90-degree rotation about robot Z followed by a 0.5m X offset.
         q = math.sqrt(0.5)
