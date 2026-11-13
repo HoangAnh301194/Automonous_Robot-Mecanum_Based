@@ -19,18 +19,10 @@ from pathlib import Path
 
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "keywords.json"
 
-# Fallback definitions for backward-compatibility with tests & direct imports
-MODEL_DIRS = {
-    "vi_maica": "vosk-model-small-vn-0.4",
-    "en_maica": "vosk-model-small-en-us-0.15",
-    "ja_maica": "vosk-model-small-ja-0.22",
-}
-
-ALIASES = {
-    "vi_maica": ["maica", "maica ơi", "mai ca", "mai ca ơi", "chào maica", "chào mai ca"],
-    "en_maica": ["maica", "hey maica", "hi maica", "hello maica", "mica", "hey mica"],
-    "ja_maica": ["まいか", "マイカ", "まいかちゃん", "マイカちゃん", "まいかさん", "マイカさん"],
-}
+# Vietnamese-only detector; pronunciation alternatives remain configurable in JSON.
+KEYWORD_ID = "vi_maica"
+MODEL_DIRS = {KEYWORD_ID: "vosk-model-small-vn-0.4"}
+ALIASES = {KEYWORD_ID: ["maica", "maica ơi", "mai ca", "mai ca ơi", "chào maica", "chào mai ca"]}
 
 
 def load_config(config_path: Path | None = None) -> dict:
@@ -46,13 +38,23 @@ def load_config(config_path: Path | None = None) -> dict:
     if "keywords" not in data or not isinstance(data["keywords"], dict):
         raise ValueError("Config must have a top-level 'keywords' object")
 
-    for kw_id, kw_cfg in data["keywords"].items():
-        for field in ("language", "display_name", "model", "aliases", "enabled"):
-            if field not in kw_cfg:
-                raise ValueError(f"Keyword '{kw_id}' missing required field: {field}")
-        if not isinstance(kw_cfg["aliases"], list) or not kw_cfg["aliases"]:
-            raise ValueError(f"Keyword '{kw_id}' aliases must be a non-empty list")
-
+    # Keep one Vietnamese recognizer; callers can still customize its aliases/model.
+    if set(data["keywords"]) != {KEYWORD_ID}:
+        raise ValueError(f"Only {KEYWORD_ID} is supported in this package")
+    kw_cfg = data["keywords"][KEYWORD_ID]
+    for field in ("language", "display_name", "model", "aliases", "enabled"):
+        if field not in kw_cfg:
+            raise ValueError(f"Keyword '{KEYWORD_ID}' missing required field: {field}")
+    if kw_cfg["language"] != "vi":
+        raise ValueError("Only Vietnamese wake-word recognition is supported")
+    if not isinstance(kw_cfg["model"], str) or not kw_cfg["model"].strip():
+        raise ValueError("Vietnamese model name must be a non-empty string")
+    if not isinstance(kw_cfg["aliases"], list) or not kw_cfg["aliases"] or not all(
+        isinstance(item, str) and item.strip() for item in kw_cfg["aliases"]
+    ):
+        raise ValueError("Vietnamese aliases must be a non-empty list of strings")
+    if not isinstance(kw_cfg["enabled"], bool):
+        raise ValueError("enabled must be a boolean")
     return data
 
 
@@ -61,17 +63,11 @@ def get_active_keywords(config: dict) -> dict:
     return {k: v for k, v in config.get("keywords", {}).items() if v.get("enabled", True)}
 
 
-def normalize(text: str, language_or_label: str) -> str:
-    """Normalize text with Unicode NFKC, casefolding, and Japanese kana conversion."""
-    text = unicodedata.normalize("NFKC", text).casefold()
-    if language_or_label == "ja" or language_or_label.startswith("ja_"):
-        # Convert Katakana to Hiragana (U+30A1 - U+30F6 -> U+3041 - U+3096)
-        text = "".join(
-            chr(ord(c) - 0x60) if 0x30A1 <= ord(c) <= 0x30F6 else c
-            for c in text
-        )
-        return "".join(c for c in text if c.isalnum())
-    return " ".join(re.findall(r"[^\W_]+", text, re.UNICODE))
+def normalize(text: str, language_or_label: str = "vi") -> str:
+    """Normalize Unicode, case and punctuation for Vietnamese keyword matching."""
+    return " ".join(
+        re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", text).casefold(), re.UNICODE)
+    )
 
 
 def match_wake_phrase(text: str, label: str, aliases: dict | None = None) -> bool:
@@ -82,12 +78,7 @@ def match_wake_phrase(text: str, label: str, aliases: dict | None = None) -> boo
         phrase = normalize(variant, label)
         if not phrase:
             continue
-        if label.startswith("ja_") or label == "ja":
-            # Match Japanese phrases while blocking false triggers with prolonged sound mark (e.g. マイカー)
-            pattern = re.escape(phrase) + r"(?!ー)"
-            if re.search(pattern, normalized):
-                return True
-        elif re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", normalized):
+        if re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", normalized):
             return True
     return False
 
@@ -100,7 +91,7 @@ def load_aliases(path: str | None, base_aliases: dict | None = None) -> dict:
         if not isinstance(loaded, dict):
             raise ValueError("Aliases must be a JSON object keyed by wake-word ID")
         for label, variants in loaded.items():
-            if label not in aliases and label not in MODEL_DIRS:
+            if label not in aliases:
                 raise ValueError(f"Invalid alias entry: {label}")
             if not isinstance(variants, list) or not all(isinstance(v, str) and v.strip() for v in variants):
                 raise ValueError(f"Empty or non-string alias for {label}")
@@ -109,14 +100,12 @@ def load_aliases(path: str | None, base_aliases: dict | None = None) -> dict:
 
 
 def load_models(models_dir: Path, active_keywords: dict | None = None):
-    """Load Vosk library and active language models."""
+    """Load the configured Vietnamese Vosk model."""
     try:
         import vosk
     except ImportError as exc:
         raise SystemExit(
-            "Missing vosk library. Please run:\n"
-            "  bash install.sh\n"
-            "or: pip install -r requirements.txt"
+            "Missing Vosk library; install src/robot_wakeword/requirements.txt"
         ) from exc
 
     vosk.SetLogLevel(-1)
@@ -130,7 +119,7 @@ def load_models(models_dir: Path, active_keywords: dict | None = None):
         if not folder.is_dir():
             raise SystemExit(
                 f"Missing model folder for {kw_id}: {folder}\n"
-                f"Please download it via: python download_models.py --models-dir {models_dir}"
+                f"Please download it via: ros2 run robot_wakeword wakeword_download_models --models-dir {models_dir}"
             )
         models[kw_id] = vosk.Model(str(folder))
     return vosk, models
@@ -146,7 +135,7 @@ def open_wav(path: Path):
 
 
 def recognize_file(path: Path, vosk_module, models: dict) -> tuple[dict, float, float]:
-    """Recognize a single WAV file across all models."""
+    """Recognize a mono PCM WAV file with the configured model."""
     recognizers = {name: vosk_module.KaldiRecognizer(model, 16000) for name, model in models.items()}
     start = time.monotonic()
     segments = {name: [] for name in models}
@@ -253,7 +242,7 @@ def record_sample(path: Path, duration: float, source: str):
 
 def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: float,
                debug_transcripts: bool = False, debug_partials: bool = False):
-    """One parec capture feeding all recognizers concurrently."""
+    """Stream PCM samples to the configured Vietnamese Vosk recognizer."""
     recognizers = {name: vosk_module.KaldiRecognizer(model, 16000) for name, model in models.items()}
     process = subprocess.Popen(capture_cmd(source), stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, bufsize=0)
@@ -348,14 +337,11 @@ def main(argv=None) -> int:
         record_sample(args.output, args.duration, args.source)
         return 0
 
-    if args.config.is_file():
-        config = load_config(args.config)
-        active = get_active_keywords(config)
-        base_aliases = {k: v["aliases"] for k, v in active.items()}
-    else:
-        active = {k: {"model": m} for k, m in MODEL_DIRS.items()}
-        base_aliases = ALIASES
-
+    config = load_config(args.config)
+    active = get_active_keywords(config)
+    if not active:
+        parser.error("The Vietnamese wake-word detector is disabled")
+    base_aliases = {k: v["aliases"] for k, v in active.items()}
     aliases = load_aliases(args.aliases, base_aliases)
     models_dir = args.models_dir.expanduser().resolve()
     vosk_module, models = load_models(models_dir, active)

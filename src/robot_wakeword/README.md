@@ -1,96 +1,68 @@
-# robot_wakeword — standalone ROS 2 package (Phase 1)
+# robot_wakeword — Vietnamese-only Wake Word (Maica)
 
-This is a **standalone ament_python ROS 2 package** containing the existing
-Vosk ASR + keyword matching prototype. The default profile runs **Vietnamese only** (Maica); English and Japanese recognizers remain configured but disabled.
-It is deliberately **not integrated** into Kiosk, Behavior Tree, or other
-robot services yet. It does **not** publish or subscribe to ROS 2 topics.
+Standalone ROS 2 `ament_python` package for offline Vietnamese Wake Word detection.
+Uses **one** Vosk ASR model (`vosk-model-small-vn-0.4`) and matches transcript
+aliases for **Maica / Mai Ca**. It is not a specially trained KWS model.
 
-The historical prototype in `src/robot_ui/wakeupword/` remains untouched
-to avoid modifying the existing Kiosk workflow; this package is the
-standalone candidate for future integration. Do not maintain two divergent
-configurations when the future migration is performed.
+**Scope:** The package currently has no Kiosk, Behavior Tree, ROS topic, or
+service integration. The old prototype under `src/robot_ui/wakeupword/` is
+left untouched while the Kiosk migration is deferred.
 
-## Files
+## Structure
 
-- `robot_wakeword/probe.py`: `live`, `record`, `evaluate` commands.
-- `robot_wakeword/config/keywords.json`: model names, language and aliases.
-- `robot_wakeword/download_models.py`: downloads the configured Vosk models.
-- `launch/wakeword_probe.launch.py`: optional process launcher (not a ROS node).
-- `test/`: keyword/config tests and optional model-load smoke test.
+- `robot_wakeword/probe.py`: standalone `live`, `record`, `evaluate` commands.
+- `robot_wakeword/config/keywords.json`: one Vietnamese detector and its aliases.
+- `robot_wakeword/download_models.py`: downloads **only** the configured Vietnamese model.
+- `launch/wakeword_probe.launch.py`: process launcher, no ROS node or publishers.
+- `test/`: offline tests; optional model-load smoke test.
 
-## Install on Jetson Orin Nano / Ubuntu 22.04 / ROS 2 Humble
+## Build (Jetson Orin Nano, Ubuntu 22.04, ROS 2 Humble)
 
 ```bash
 cd ~/ros2_ws
 git switch simulator_interface
 git pull --ff-only origin simulator_interface
 sudo apt-get install -y pulseaudio-utils python3-pip
-# Use the same Python environment used to run ROS 2 console scripts.
 python3 -m pip install --user -r src/robot_wakeword/requirements.txt
 source /opt/ros/humble/setup.bash
 colcon build --packages-select robot_wakeword --symlink-install
 source install/setup.bash
-python3 -c 'import vosk; print("Vosk import OK")'
 ```
 
-Vosk models are not committed to Git or embedded in the ROS 2 package.
-Download them separately (requires network once):
+Download the Vietnamese Vosk model once (outside Git, stored in `~/vosk-models`):
 
 ```bash
 ros2 run robot_wakeword wakeword_download_models
 ```
 
-Default model directory: `~/vosk-models`. The downloader only retrieves models with `enabled: true` in the keyword config. With the default settings, only `vosk-model-small-vn-0.4` is downloaded.
-
-## Standalone commands (no Kiosk required)
+## Standalone operation
 
 ```bash
-# Listen from the default microphone. Prints JSON wake_detected events.
 ros2 run robot_wakeword wakeword_probe live
-# Inspect raw ASR segments for debugging (contains potentially private speech).
 ros2 run robot_wakeword wakeword_probe live --debug-transcripts --debug-partials
-# Record one test utterance.
 ros2 run robot_wakeword wakeword_probe record --output /tmp/maica.wav --duration 4
-# Evaluate offline. Manifest CSV has columns: file,expected
-ros2 run robot_wakeword wakeword_probe evaluate --manifest /tmp/manifest.csv --report /tmp/wakeword_report.json
+ros2 run robot_wakeword wakeword_probe evaluate --manifest /tmp/manifest.csv --report /tmp/report.json
+ros2 launch robot_wakeword wakeword_probe.launch.py
 ```
 
-Optional ROS launch wrapper (process only, no rclpy node/topics):
+An evaluate manifest has columns `file,expected`, with expected values
+`vi_maica` or `none`. Recorded WAV must use PCM S16LE mono 16 kHz.
 
-```bash
-ros2 launch robot_wakeword wakeword_probe.launch.py \
-  mic_source:=@DEFAULT_SOURCE@ models_dir:=$HOME/vosk-models
-```
-
-To override the package config without editing the installed file:
+To customize Vietnamese aliases, copy the JSON and pass a new `--config`
+path to `wakeword_probe` and `wakeword_download_models`. The JSON accepts
+**only** `vi_maica` and Vietnamese `language: vi`.
 
 ```bash
 cp src/robot_wakeword/robot_wakeword/config/keywords.json ~/wakeword_keywords.json
-# Edit the copy to enable/disable models or customize aliases.
-# If you enable another model, download it using this same config:
-ros2 run robot_wakeword wakeword_download_models --config ~/wakeword_keywords.json
 ros2 run robot_wakeword wakeword_probe live --config ~/wakeword_keywords.json
 ```
 
-Model names are in `keywords.json`; `download_models.py` retrieves the
-matching pretrained Vosk model archives. Replacing Vosk with another engine
-will require a different inference adapter, not just changing `model`.
-
-## Tests
+## Tests (no microphone or model required)
 
 ```bash
-# From workspace root; these offline tests do not require a microphone or models.
 PYTHONPATH=src/robot_wakeword python3 -m unittest discover -s src/robot_wakeword/test -p 'test_*.py' -v
-
-# Optional pretrained-model load check; skips if models are not installed.
-PYTHONPATH=src/robot_wakeword python3 -m unittest discover -s src/robot_wakeword/test -p 'test_smoke_models.py' -v
 ```
 
-## Current constraints
-
-- Uses one Vietnamese general ASR recognizer by default, **not** a custom trained KWS model. English and Japanese can be re-enabled using the configuration.
-- Detection is based on completed ASR segments, so wake latency depends on speech segmentation.
-- `wake_detected` JSON currently contains canonical keyword `maica`.
-- Existing Kiosk WakeWordWorker is not changed. Its old path/package mismatch
-  is **not fixed** as part of this packaging-only change.
-- No ROS 2 node, topic, service, parameter or IPC interface is introduced here.
+The optional model smoke test skips if the model/Vosk is not installed.
+Wake detection uses final ASR segments, so the latency and false-trigger rate
+must be measured on the physical microphone before production deployment.

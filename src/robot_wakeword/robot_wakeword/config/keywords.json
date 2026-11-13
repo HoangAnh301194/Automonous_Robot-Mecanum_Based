@@ -13,34 +13,6 @@
         "chào mai ca"
       ],
       "enabled": true
-    },
-    "en_maica": {
-      "language": "en",
-      "display_name": "Maica",
-      "model": "vosk-model-small-en-us-0.15",
-      "aliases": [
-        "maica",
-        "hey maica",
-        "hi maica",
-        "hello maica",
-        "mica",
-        "hey mica"
-      ],
-      "enabled": false
-    },
-    "ja_maica": {
-      "language": "ja",
-      "display_name": "Maica",
-      "model": "vosk-model-small-ja-0.22",
-      "aliases": [
-        "まいか",
-        "マイカ",
-        "まいかちゃん",
-        "マイカちゃん",
-        "まいかさん",
-        "マイカさん"
-      ],
-      "enabled": false
     }
   }
 }

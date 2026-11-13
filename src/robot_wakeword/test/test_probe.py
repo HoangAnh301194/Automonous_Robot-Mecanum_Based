@@ -1,7 +1,6 @@
 """Comprehensive offline unit tests for Wake Word Phase 1."""
 from __future__ import annotations
 
-import argparse
 import json
 import tempfile
 import unittest
@@ -24,50 +23,33 @@ from robot_wakeword.probe import (
 
 class WakeWordMatchingTests(unittest.TestCase):
     def setUp(self):
-        self.config = load_config(DEFAULT_CONFIG_PATH)
-        self.aliases = {k: v["aliases"] for k, v in self.config["keywords"].items()}
+        cfg = load_config(DEFAULT_CONFIG_PATH)
+        self.aliases = {key: item["aliases"] for key, item in cfg["keywords"].items()}
 
-    def test_vietnamese_trigger(self):
-        self.assertTrue(match_wake_phrase("Maica, giới thiệu về PTIT", "vi_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("Maica!", "vi_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("mai ca ơi", "vi_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("chào maica", "vi_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("Mai là một cái tên", "vi_maica", self.aliases))
+    def test_vietnamese_maica_aliases(self):
+        for speech in ("Maica!", "Maica, giới thiệu về PTIT",
+                       "mai ca ơi", "chào maica"):
+            with self.subTest(speech=speech):
+                self.assertTrue(match_wake_phrase(speech, "vi_maica", self.aliases))
 
-    def test_english_trigger_and_boundaries(self):
-        self.assertTrue(match_wake_phrase("Maica! How are you?", "en_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("maica", "en_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("hey maica", "en_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("hey mica", "en_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("maicabee", "en_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("hey somebody", "en_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("my god", "en_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("my car", "en_maica", self.aliases))
-
-    def test_japanese_variants_and_kana(self):
-        self.assertTrue(match_wake_phrase("まいか、こんにちは", "ja_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("マイカ", "ja_maica", self.aliases))
-        self.assertTrue(match_wake_phrase("まいかちゃん", "ja_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("そうだね", "ja_maica", self.aliases))
-        # Anti-noise: ensure "my car" (マイカー / マイ カー) is rejected
-        self.assertFalse(match_wake_phrase("マイカー", "ja_maica", self.aliases))
-        self.assertFalse(match_wake_phrase("マイ カー", "ja_maica", self.aliases))
+    def test_reject_non_wake_phrases_and_word_boundaries(self):
+        for speech in ("Mai là một cái tên", "maicabee", "my car",
+                       "hôm nay thời tiết đẹp"):
+            with self.subTest(speech=speech):
+                self.assertFalse(match_wake_phrase(speech, "vi_maica", self.aliases))
 
     def test_unicode_normalization(self):
-        self.assertEqual(normalize("  Ｍａｉｃａ！", "en_maica"), "maica")
-        self.assertEqual(normalize("マイカ", "ja_maica"), "まいか")
-        self.assertEqual(normalize("Ｍａｉｃａ", "vi_maica"), "maica")
+        self.assertEqual(normalize("  Ｍａｉｃａ！", "vi_maica"), "maica")
 
-    def test_alias_overrides_are_explicit(self):
+    def test_alias_overrides(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "aliases.json"
             path.write_text('{"vi_maica": ["maika"]}', encoding="utf-8")
             changed = load_aliases(str(path), self.aliases)
             self.assertTrue(match_wake_phrase("maika", "vi_maica", changed))
             self.assertFalse(match_wake_phrase("maica", "vi_maica", changed))
-            self.assertEqual(changed["ja_maica"], self.aliases["ja_maica"])
 
-    def test_rejects_invalid_alias_structure(self):
+    def test_reject_invalid_alias_structure(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "aliases.json"
             path.write_text('{"unknown": ["foo"]}', encoding="utf-8")
@@ -76,57 +58,55 @@ class WakeWordMatchingTests(unittest.TestCase):
 
 
 class ConfigurationTests(unittest.TestCase):
-    def test_valid_default_config(self):
+    def test_only_vietnamese_configured(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
-        self.assertIn("keywords", cfg)
-        for kw_id in ("vi_maica", "en_maica", "ja_maica"):
-            self.assertIn(kw_id, cfg["keywords"])
+        self.assertEqual(list(cfg["keywords"]), ["vi_maica"])
         self.assertEqual(set(get_active_keywords(cfg)), {"vi_maica"})
+        self.assertEqual(cfg["keywords"]["vi_maica"]["language"], "vi")
 
-    def test_downloader_only_fetches_enabled_models(self):
+    def test_only_vietnamese_model_downloaded(self):
         names = get_models_from_config(DEFAULT_CONFIG_PATH)
         self.assertEqual(set(names), {"vosk-model-small-vn-0.4"})
 
-    def test_downloader_can_enable_another_language(self):
+    def test_rejects_extra_language_configuration(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
-        cfg["keywords"]["en_maica"]["enabled"] = True
+        cfg["keywords"]["en_maica"] = {
+            "language": "en", "display_name": "Maica",
+            "model": "vosk-model-small-en-us-0.15",
+            "aliases": ["maica"], "enabled": True
+        }
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
             json.dump(cfg, f)
             f.flush()
-            names = get_models_from_config(Path(f.name))
-        self.assertEqual(
-            set(names),
-            {"vosk-model-small-vn-0.4", "vosk-model-small-en-us-0.15"},
-        )
+            with self.assertRaises(ValueError):
+                load_config(Path(f.name))
 
-    def test_rejects_missing_file(self):
+    def test_missing_file(self):
         with self.assertRaises(FileNotFoundError):
             load_config(Path("/non/existent/path/keywords.json"))
 
-    def test_rejects_malformed_json(self):
+    def test_malformed_json(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
             f.write("{invalid_json:")
             f.flush()
             with self.assertRaises(ValueError):
                 load_config(Path(f.name))
 
-    def test_rejects_invalid_schema(self):
+    def test_reject_invalid_schema(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
-            f.write(json.dumps({"keywords": {"test": {"language": "vi"}}}))
+            f.write(json.dumps({"keywords": {"vi_maica": {"language": "vi"}}}))
             f.flush()
             with self.assertRaises(ValueError):
                 load_config(Path(f.name))
 
     def test_disabled_keyword_filtering(self):
-        cfg = {
-            "keywords": {
-                "kw1": {"language": "vi", "display_name": "K1", "model": "m1", "aliases": ["a"], "enabled": False},
-                "kw2": {"language": "en", "display_name": "K2", "model": "m2", "aliases": ["b"], "enabled": True},
-            }
-        }
-        active = get_active_keywords(cfg)
-        self.assertNotIn("kw1", active)
-        self.assertIn("kw2", active)
+        cfg = load_config(DEFAULT_CONFIG_PATH)
+        cfg["keywords"]["vi_maica"]["enabled"] = False
+        self.assertFalse(get_active_keywords(cfg))
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
+            json.dump(cfg, f)
+            f.flush()
+            self.assertEqual(get_models_from_config(Path(f.name)), {})
 
 
 class DummyRecognizer:
@@ -139,10 +119,10 @@ class DummyRecognizer:
         return self.calls == 2
 
     def Result(self):
-        return json.dumps({"text": "maica" if self.model == "en" else ""})
+        return json.dumps({"text": "maica" if self.model == "vi" else ""})
 
     def FinalResult(self):
-        return json.dumps({"text": "please" if self.model == "en" else ""})
+        return json.dumps({"text": "cho tôi hỏi" if self.model == "vi" else ""})
 
 
 class DummyVosk:
@@ -166,10 +146,9 @@ class AudioPipelineTests(unittest.TestCase):
             wav = Path(d) / "sample.wav"
             self._make_wav(wav)
             transcripts, elapsed, duration = recognize_file(
-                wav, DummyVosk, {"en_maica": "en", "vi_maica": "vi"}
+                wav, DummyVosk, {"vi_maica": "vi"}
             )
-            self.assertEqual(transcripts["en_maica"], "maica please")
-            self.assertEqual(transcripts["vi_maica"], "")
+            self.assertEqual(transcripts, {"vi_maica": "maica cho tôi hỏi"})
             self.assertAlmostEqual(duration, 1.0)
             self.assertGreaterEqual(elapsed, 0)
 

@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
-import os
-import shutil
 import sys
 import time
 import urllib.error
@@ -15,8 +12,6 @@ from pathlib import Path
 
 DEFAULT_MODELS = {
     "vosk-model-small-vn-0.4": "https://alphacephei.com/vosk/models/vosk-model-small-vn-0.4.zip",
-    "vosk-model-small-en-us-0.15": "https://alphacephei.com/vosk/models/vosk-model-small-en-us-0.15.zip",
-    "vosk-model-small-ja-0.22": "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip",
 }
 
 
@@ -90,25 +85,15 @@ def safe_extract_zip(zip_path: Path, target_dir: Path) -> bool:
 
 
 def get_models_from_config(config_path: Path | None) -> dict[str, str]:
-    if config_path and config_path.is_file():
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-            models = {}
-            for kw in data.get("keywords", {}).values():
-                # Only download models used by enabled wake-word detectors.
-                if not kw.get("enabled", True):
-                    continue
-                name = kw.get("model")
-                if name in DEFAULT_MODELS:
-                    models[name] = DEFAULT_MODELS[name]
-                else:
-                    models[name] = f"https://alphacephei.com/vosk/models/{name}.zip"
-            return models
-        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
-            raise ValueError(f"Could not read wake-word model config: {config_path}") from exc
-    if config_path is not None:
-        raise FileNotFoundError(f"Wake-word config not found: {config_path}")
-    return DEFAULT_MODELS
+    """Download the single Vietnamese model declared in the package configuration."""
+    from robot_wakeword.probe import DEFAULT_CONFIG_PATH, get_active_keywords, load_config
+
+    config = load_config(config_path or DEFAULT_CONFIG_PATH)
+    active = get_active_keywords(config)
+    if not active:
+        return {}
+    name = active["vi_maica"]["model"]
+    return {name: DEFAULT_MODELS.get(name, f"https://alphacephei.com/vosk/models/{name}.zip")}
 
 
 def main(argv=None) -> int:
