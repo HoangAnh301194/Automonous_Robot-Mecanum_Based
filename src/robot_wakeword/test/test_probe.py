@@ -68,12 +68,11 @@ class ConfigurationTests(unittest.TestCase):
         names = get_models_from_config(DEFAULT_CONFIG_PATH)
         self.assertEqual(set(names), {"vosk-model-small-vn-0.4"})
 
-    def test_rejects_extra_language_configuration(self):
+    def test_rejects_extra_detector_configuration(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
-        cfg["keywords"]["en_maica"] = {
-            "language": "en", "display_name": "Maica",
-            "model": "vosk-model-small-en-us-0.15",
-            "aliases": ["maica"], "enabled": True
+        cfg["keywords"]["unknown_detector"] = {
+            "language": "vi", "display_name": "Unknown",
+            "model": "invalid-model", "aliases": ["unknown"], "enabled": True
         }
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
             json.dump(cfg, f)
