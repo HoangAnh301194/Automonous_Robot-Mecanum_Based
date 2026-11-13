@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -306,9 +307,11 @@ def synthesize_speech_9router(
     base_url: str = DEFAULT_TTS_BASE_URL,
     api_key: str | None = None,
     timeout: float = 15.0,
+    max_retries: int = 2,
+    retry_delay: float = 0.5,
 ) -> bytes:
     """
-    Synthesize speech using 9Router Edge-TTS endpoint.
+    Synthesize speech using 9Router Edge-TTS endpoint with automatic retry on transient errors.
     Returns raw audio bytes (MP3/WAV).
     """
     key = api_key or os.getenv("LLM_API_KEY", "")
@@ -322,23 +325,50 @@ def synthesize_speech_9router(
         "model": voice,
         "input": processed_text,
     }
-    req = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}",
-        },
-        method="POST",
-    )
+    encoded_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
 
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as response:
-            audio_bytes = response.read()
-            return audio_bytes
-    except urllib.error.HTTPError as exc:
-        LOG.error("TTS HTTP Error %d: %s", exc.code, exc.reason)
-        raise RuntimeError(f"TTS trả lỗi HTTP {exc.code}.") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        LOG.error("TTS Connection Error: %s", exc)
-        raise RuntimeError("Không thể kết nối dịch vụ TTS.") from exc
+    last_error: Exception | None = None
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            endpoint,
+            data=encoded_data,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                audio_bytes = response.read()
+                if attempt > 0:
+                    LOG.info("TTS tổng hợp thành công ở lần thử lại thứ %d.", attempt)
+                return audio_bytes
+        except urllib.error.HTTPError as exc:
+            last_error = exc
+            # Retry on transient server/gateway errors: 500, 502, 503, 504
+            if exc.code in {500, 502, 503, 504} and attempt < max_retries:
+                LOG.warning(
+                    "TTS HTTP %d (%s). Thử lại lần %d/%d sau %.1fs...",
+                    exc.code, exc.reason, attempt + 1, max_retries, retry_delay
+                )
+                time.sleep(retry_delay)
+                continue
+            LOG.error("TTS HTTP Error %d: %s", exc.code, exc.reason)
+            raise RuntimeError(f"TTS trả lỗi HTTP {exc.code}.") from exc
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_error = exc
+            if attempt < max_retries:
+                LOG.warning(
+                    "TTS kết nối lỗi (%s). Thử lại lần %d/%d sau %.1fs...",
+                    exc, attempt + 1, max_retries, retry_delay
+                )
+                time.sleep(retry_delay)
+                continue
+            LOG.error("TTS Connection Error: %s", exc)
+            raise RuntimeError("Không thể kết nối dịch vụ TTS.") from exc
+
+    if last_error is not None:
+        raise last_error
+    return b""
