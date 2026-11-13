@@ -1,0 +1,2 @@
+# Runtime dependency installed into the Python interpreter used by ros2 run
+vosk==0.3.45
