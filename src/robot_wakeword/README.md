@@ -1,7 +1,7 @@
 # robot_wakeword — standalone ROS 2 package (Phase 1)
 
 This is a **standalone ament_python ROS 2 package** containing the existing
-Vosk ASR + keyword matching prototype (Vietnamese, English and Japanese).
+Vosk ASR + keyword matching prototype. The default profile runs **Vietnamese only** (Maica); English and Japanese recognizers remain configured but disabled.
 It is deliberately **not integrated** into Kiosk, Behavior Tree, or other
 robot services yet. It does **not** publish or subscribe to ROS 2 topics.
 
@@ -40,7 +40,7 @@ Download them separately (requires network once):
 ros2 run robot_wakeword wakeword_download_models
 ```
 
-Default model directory: `~/vosk-models`.
+Default model directory: `~/vosk-models`. The downloader only retrieves models with `enabled: true` in the keyword config. With the default settings, only `vosk-model-small-vn-0.4` is downloaded.
 
 ## Standalone commands (no Kiosk required)
 
@@ -67,6 +67,8 @@ To override the package config without editing the installed file:
 ```bash
 cp src/robot_wakeword/robot_wakeword/config/keywords.json ~/wakeword_keywords.json
 # Edit the copy to enable/disable models or customize aliases.
+# If you enable another model, download it using this same config:
+ros2 run robot_wakeword wakeword_download_models --config ~/wakeword_keywords.json
 ros2 run robot_wakeword wakeword_probe live --config ~/wakeword_keywords.json
 ```
 
@@ -86,7 +88,7 @@ PYTHONPATH=src/robot_wakeword python3 -m unittest discover -s src/robot_wakeword
 
 ## Current constraints
 
-- Uses three general ASR recognizers, **not** a custom trained KWS model.
+- Uses one Vietnamese general ASR recognizer by default, **not** a custom trained KWS model. English and Japanese can be re-enabled using the configuration.
 - Detection is based on completed ASR segments, so wake latency depends on speech segmentation.
 - `wake_detected` JSON currently contains canonical keyword `maica`.
 - Existing Kiosk WakeWordWorker is not changed. Its old path/package mismatch

@@ -8,6 +8,7 @@ import unittest
 import wave
 from pathlib import Path
 
+from robot_wakeword.download_models import get_models_from_config
 from robot_wakeword.probe import (
     DEFAULT_CONFIG_PATH,
     get_active_keywords,
@@ -80,7 +81,23 @@ class ConfigurationTests(unittest.TestCase):
         self.assertIn("keywords", cfg)
         for kw_id in ("vi_maica", "en_maica", "ja_maica"):
             self.assertIn(kw_id, cfg["keywords"])
-            self.assertTrue(cfg["keywords"][kw_id]["enabled"])
+        self.assertEqual(set(get_active_keywords(cfg)), {"vi_maica"})
+
+    def test_downloader_only_fetches_enabled_models(self):
+        names = get_models_from_config(DEFAULT_CONFIG_PATH)
+        self.assertEqual(set(names), {"vosk-model-small-vn-0.4"})
+
+    def test_downloader_can_enable_another_language(self):
+        cfg = load_config(DEFAULT_CONFIG_PATH)
+        cfg["keywords"]["en_maica"]["enabled"] = True
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
+            json.dump(cfg, f)
+            f.flush()
+            names = get_models_from_config(Path(f.name))
+        self.assertEqual(
+            set(names),
+            {"vosk-model-small-vn-0.4", "vosk-model-small-en-us-0.15"},
+        )
 
     def test_rejects_missing_file(self):
         with self.assertRaises(FileNotFoundError):

@@ -95,14 +95,19 @@ def get_models_from_config(config_path: Path | None) -> dict[str, str]:
             data = json.loads(config_path.read_text(encoding="utf-8"))
             models = {}
             for kw in data.get("keywords", {}).values():
+                # Only download models used by enabled wake-word detectors.
+                if not kw.get("enabled", True):
+                    continue
                 name = kw.get("model")
                 if name in DEFAULT_MODELS:
                     models[name] = DEFAULT_MODELS[name]
                 else:
                     models[name] = f"https://alphacephei.com/vosk/models/{name}.zip"
             return models
-        except Exception:
-            pass
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            raise ValueError(f"Could not read wake-word model config: {config_path}") from exc
+    if config_path is not None:
+        raise FileNotFoundError(f"Wake-word config not found: {config_path}")
     return DEFAULT_MODELS
 
 
@@ -118,6 +123,9 @@ def main(argv=None) -> int:
     models_dir = args.models_dir.expanduser().resolve()
     models_dir.mkdir(parents=True, exist_ok=True)
     models = get_models_from_config(args.config)
+    if not models:
+        print("[ERROR] No enabled models found in wake-word configuration.", file=sys.stderr)
+        return 1
 
     print(f"Target models directory: {models_dir}")
     all_success = True
