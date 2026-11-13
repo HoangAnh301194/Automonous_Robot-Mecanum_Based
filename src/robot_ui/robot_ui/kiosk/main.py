@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 import threading
@@ -48,6 +49,14 @@ def parse_args(arguments: list[str]) -> argparse.Namespace:
         help="Hide the mouse pointer for the deployed touchscreen.",
     )
     parser.add_argument(
+        "--debug",
+        type=boolean_argument,
+        nargs="?",
+        const=True,
+        default=False,
+        help="Enable DEBUG level logging across all robot_ui modules.",
+    )
+    parser.add_argument(
         "--llm-env-file",
         default=os.environ.get(
             "KIOSK_LLM_ENV_FILE",
@@ -78,6 +87,22 @@ def main(args: list[str] | None = None) -> int:
     raw_args = list(sys.argv if args is None else args)
     app_args = remove_ros_args(args=raw_args)
     options = parse_args(app_args)
+
+    os.environ["PYTHONUNBUFFERED"] = "1"
+    log_level = (
+        logging.DEBUG
+        if options.debug or os.environ.get("ROBOT_UI_DEBUG") in {"1", "true", "True"}
+        else logging.INFO
+    )
+    logging.basicConfig(
+        level=log_level,
+        format="[%(asctime)s] [%(levelname)s] [%(name)s]: %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    logger = logging.getLogger("robot_ui")
+    logger.info("Khởi động Kiosk UI (log_level=%s, windowed=%s, debug=%s)",
+                logging.getLevelName(log_level), options.windowed, options.debug)
 
     # Must happen before importing KioskWindow -> llm_client, whose defaults
     # are taken from the environment at module import time.

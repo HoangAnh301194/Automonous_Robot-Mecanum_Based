@@ -13,6 +13,7 @@ def generate_launch_description() -> LaunchDescription:
     llm_env_file = LaunchConfiguration("llm_env_file")
     auto_start_9router = LaunchConfiguration("auto_start_9router")
     router_command = LaunchConfiguration("router_command")
+    debug = LaunchConfiguration("debug")
 
     return LaunchDescription(
         [
@@ -25,6 +26,11 @@ def generate_launch_description() -> LaunchDescription:
                 "hide_cursor",
                 default_value="true",
                 description="Hide the pointer on the touchscreen.",
+            ),
+            DeclareLaunchArgument(
+                "debug",
+                default_value="false",
+                description="Enable verbose debug logging in robot_ui.",
             ),
             DeclareLaunchArgument(
                 "use_sim_time",
@@ -56,11 +62,14 @@ def generate_launch_description() -> LaunchDescription:
                 executable="robot_ui_kiosk",
                 name="robot_ui_kiosk_process",
                 output="screen",
+                emulate_tty=True,
                 arguments=[
                     "--windowed",
                     windowed,
                     "--hide-cursor",
                     hide_cursor,
+                    "--debug",
+                    debug,
                     "--llm-env-file",
                     llm_env_file,
                     "--auto-start-9router",

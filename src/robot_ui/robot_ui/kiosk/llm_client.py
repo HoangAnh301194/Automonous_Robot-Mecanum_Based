@@ -319,14 +319,17 @@ class LLMWorker:
             self._generation_id += 1
             self._active_context = None
 
-        if ctx and self._on_stream_interrupted:
-            try:
-                self._on_stream_interrupted(ctx)
-            except Exception as exc:
-                LOG.warning("Error in on_stream_interrupted callback: %s", exc)
+        if ctx:
+            LOG.info("[LLM Worker] Hủy request đang xử lý (turn=%d, session=%d)", ctx.turn_id, ctx.session_id)
+            if self._on_stream_interrupted:
+                try:
+                    self._on_stream_interrupted(ctx)
+                except Exception as exc:
+                    LOG.warning("Error in on_stream_interrupted callback: %s", exc)
 
     def reset_session(self) -> None:
         """Wipe session history and abort any in-flight requests (e.g. idle timeout)."""
+        LOG.info("[LLM Worker] Reset phiên hội thoại.")
         self.cancel_current_request()
         with self._lock:
             self._session += 1
@@ -341,6 +344,7 @@ class LLMWorker:
     ) -> bool:
         with self._lock:
             if self._active_context is not None:
+                LOG.warning("[LLM Worker] Từ chối request mới vì đang bận xử lý turn=%d", self._active_context.turn_id)
                 return False
             self._turn_id += 1
             self._generation_id += 1
@@ -349,6 +353,8 @@ class LLMWorker:
             self._cancel_event.clear()
             history = [item.copy() for item in self._history]
 
+        LOG.info("[LLM Worker] Bắt đầu xử lý (turn=%d, session=%d): '%s'",
+                 ctx.turn_id, ctx.session_id, message)
         threading.Thread(
             target=self._run_streaming,
             args=(ctx, message, dict(robot_status or {}), status_updated_at, history),
@@ -407,6 +413,8 @@ class LLMWorker:
                 self._history = self._history[-self._max_turns * 2:]
                 self._active_context = None
 
+            LOG.info("[LLM Worker] Hoàn tất streaming (turn=%d, %d chunks, %d ký tự)",
+                     ctx.turn_id, len(chunks), len(full_text))
             if self._on_stream_completed:
                 self._on_stream_completed(ctx, full_text)
             else:

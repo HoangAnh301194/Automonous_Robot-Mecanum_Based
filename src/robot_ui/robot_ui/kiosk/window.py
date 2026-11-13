@@ -676,6 +676,8 @@ class KioskWindow(QMainWindow):
             self.get_logger_or_warning("Blocked unauthorized admin navigation")
             return
 
+        LOG.info("[UI Navigate] Chuyển trang: '%s' -> '%s'", self._active_page, page_id)
+
         if self._active_page == "chat" and page_id != "chat":
             self.chat_page.stop_speaking()
             self._voice_controller.stop_speaking()
@@ -746,11 +748,14 @@ class KioskWindow(QMainWindow):
         if dialog.exec_() == AdminPinDialog.Accepted:
             self._admin_authenticated = True
             self._last_activity_at = time.monotonic()
+            LOG.info("[UI Admin] Đăng nhập quản trị viên thành công.")
             self.show_page("admin")
         else:
+            LOG.info("[UI Admin] Đã đóng hoặc hủy đăng nhập quản trị viên.")
             self.bottom_navigation.set_active("home")
 
     def _logout_admin(self) -> None:
+        LOG.info("[UI Admin] Đăng xuất quản trị viên.")
         self._admin_authenticated = False
         self.show_page("home")
 
@@ -758,6 +763,7 @@ class KioskWindow(QMainWindow):
         self.show_page("service")
 
     def _on_service_mode_selected(self, mode: str) -> None:
+        LOG.info("[UI Service] Người dùng chọn chế độ phục vụ: '%s'", mode)
         if mode == "wait":
             print("[robot_ui] SERVICE: Kích hoạt chế độ CHỜ PHỤC VỤ (IS_SERVING = True)", flush=True)
             self.ros_node.request_serve()
@@ -769,6 +775,7 @@ class KioskWindow(QMainWindow):
             QTimer.singleShot(1500, lambda: self.show_page("home"))
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
+        LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
         if cmd in ("SHOW_SERVING", "SHOW_5S_INVITE"):
             if hasattr(self, "service_page"):
                 self.service_page.select_mode_programmatically("wait")
@@ -785,7 +792,7 @@ class KioskWindow(QMainWindow):
         self.show_page("home", track_history=False)
 
     def _on_emergency_stop(self) -> None:
-        print("[robot_ui] EMERGENCY STOP TRIGGERED!", flush=True)
+        LOG.warn("🚨 [UI Emergency] Kích hoạt DỪNG KHẨN CẤP từ giao diện người dùng!")
         # 1. Ngắt ngay toàn bộ âm thanh / giọng nói / LLM
         if hasattr(self, "chat_page"):
             self.chat_page.stop_speaking()
@@ -806,16 +813,20 @@ class KioskWindow(QMainWindow):
         self.show_page("navigation")
 
     def _on_admin_stop_nav(self) -> None:
+        LOG.info("[UI Admin] Dừng điều hướng từ trang Admin.")
         self.ros_node.cancel_navigation()
         self.admin_page.status_banner.setText("Điều hướng: Đã gửi lệnh dừng")
 
     def _on_admin_slam(self) -> None:
+        LOG.info("[UI Admin] Khởi tạo SLAM từ trang Admin.")
         self.admin_page.status_banner.setText("SLAM: Đang sẵn sàng khởi tạo")
 
     def _on_admin_detection(self) -> None:
+        LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
         self.admin_page.status_banner.setText("Detection Debug: Kênh /yolo/detections đang mở")
 
     def _on_admin_system_status(self) -> None:
+        LOG.info("[UI Admin] Kiểm tra System Status từ trang Admin.")
         self.admin_page.status_banner.setText("System Status: CPU, Cảm biến & Vi điều khiển bình thường")
 
     def _on_connection(self, connected: bool) -> None:
@@ -839,6 +850,8 @@ class KioskWindow(QMainWindow):
 
     def _on_chat_submitted(self, message: str) -> None:
         """Nhận tin nhắn từ ChatPage và gửi cho LLM worker."""
+        LOG.info("[UI Chat] Người dùng gửi tin nhắn (session=%d): '%s'",
+                 self._llm_worker.session_id, message)
         self._voice_controller.notify_llm_processing(session_id=self._llm_worker.session_id)
         self.signals.llm_status_changed.emit("●  LLM: ĐANG XỬ LÝ...")
         sent = self._llm_worker.send(
@@ -846,9 +859,11 @@ class KioskWindow(QMainWindow):
             status_updated_at=self._robot_status_received_at,
         )
         if not sent:
+            LOG.warn("[UI Chat] Không gửi được câu hỏi vì LLM đang bận xử lý câu trước.")
             self.chat_page.receive_response("Robot đang xử lý một câu hỏi khác.")
 
     def _on_voice_state_changed(self, state_str: str, msg: str) -> None:
+        LOG.info("[UI Voice] Trạng thái Mic: %s (%s)", state_str, msg)
         try:
             self.chat_page.set_mic_state(MicState(state_str))
         except ValueError:
@@ -859,6 +874,8 @@ class KioskWindow(QMainWindow):
     def _on_voice_transcript_ready(self, session_id: int, turn_id: int, text: str) -> None:
         if session_id != self._llm_worker.session_id:
             return
+        LOG.info("[UI Voice] Nhận transcript STT (session=%d, turn=%d): '%s'",
+                 session_id, turn_id, text)
         self.chat_page.submit_voice_transcript(text)
 
     def _on_llm_stream_delta(self, session_id: int, turn_id: int, delta: str) -> None:
@@ -871,12 +888,16 @@ class KioskWindow(QMainWindow):
     def _on_llm_stream_completed(self, session_id: int, turn_id: int, full_text: str) -> None:
         if session_id != self._llm_worker.session_id:
             return
+        preview = (full_text[:80] + "...") if len(full_text) > 80 else full_text
+        LOG.info("[UI Chat] LLM phản hồi hoàn tất (turn=%d, %d ký tự): '%s'",
+                 turn_id, len(full_text), preview)
         self.chat_page.finalize_stream(session_id, turn_id, full_text, interrupted=False)
         self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
         ctx = TurnContext(session_id, turn_id, self._voice_controller.generation_id)
         self._voice_controller.handle_stream_completed(ctx, full_text)
 
     def _on_llm_stream_interrupted(self, session_id: int, turn_id: int) -> None:
+        LOG.warn("[UI Chat] LLM streaming bị gián đoạn (turn=%d)", turn_id)
         self.chat_page.finalize_stream(session_id, turn_id, "", interrupted=True)
         ctx = TurnContext(session_id, turn_id, self._voice_controller.generation_id)
         self._voice_controller.handle_stream_interrupted(ctx)
