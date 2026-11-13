@@ -1,0 +1,10 @@
+# Private voice recordings and generated training products must not enter Git.
+data/
+runs/
+*.onnx
+*.pt
+*.npz
+*.wav
+__pycache__/
+.pytest_cache/
+.venv/

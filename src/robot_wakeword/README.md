@@ -76,3 +76,10 @@ Vietnamese recognizer actually transcribes the sound as one of the configured
 aliases. Test local utterances of **Sô ta** and **Souta** with
 `wakeword_probe live --debug-transcripts` and adjust aliases if necessary.
 Do not assume reliable detection before testing on the physical microphone.
+
+## Experimental custom training (separate from current Vosk runtime)
+
+See [training/README.md](training/README.md) for a speaker-disjoint, real-recording
+Souta KWS pipeline: capture, augment, frozen openWakeWord features, PyTorch
+head, ONNX export, threshold calibration and streaming test. This pipeline
+is not connected to Kiosk and produces no trained weights until recordings exist.

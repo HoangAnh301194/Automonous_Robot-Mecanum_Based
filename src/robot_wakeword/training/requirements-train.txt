@@ -1,0 +1,7 @@
+# Install in a separate Python virtual environment on a development PC.
+# openWakeWord supplies frozen ONNX mel + speech-embedding front-end.
+openwakeword==0.6.0
+numpy>=1.24,<3
+torch>=2.1,<3
+onnx>=1.15
+onnxruntime>=1.16
