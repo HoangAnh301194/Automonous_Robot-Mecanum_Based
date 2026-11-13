@@ -812,3 +812,48 @@ converts semantic locations into `NavigateToPose` goals for Nav2.
 
 Avoid hard-coded workspace paths such as `/home/orin/ros2_ws`. Use `$WS`,
 ROS package-share lookup, or paths relative to the owning configuration file.
+
+## 10) Process Management & Emergency Stop / Kill All Tasks
+
+### 10.1 Quick One-Liner to Kill All Tasks
+To immediately terminate all running ROS 2 nodes, launch wrappers, UI kiosks, AI models, cameras, and background processes:
+
+```bash
+killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router 2>/dev/null || true
+pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard)" 2>/dev/null || true
+ros2 daemon stop && ros2 daemon start
+```
+
+### 10.2 Emergency Stop for Motors & Motion
+If the robot is moving and needs an immediate velocity stop without killing nodes:
+
+```bash
+ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+ros2 service call /mission/emergency_stop std_srvs/srv/Trigger "{}"
+```
+
+### 10.3 Component-Specific Kill Commands
+- **Kill UI & Voice Chat only:**
+  ```bash
+  pkill -9 -f "(robot_ui_kiosk|9router)"
+  ```
+- **Kill Navigation & SLAM only:**
+  ```bash
+  pkill -9 -f "(nav2|slam_toolbox|amcl|controller_server|planner_server|bt_navigator)"
+  ```
+- **Kill Camera & Sensor Drivers only:**
+  ```bash
+  pkill -9 -f "(astra_camera|sllidar|obstacle_detector|usb_cam|depthimage_to_laserscan)"
+  ```
+- **Kill Mission Controller & Backend only:**
+  ```bash
+  pkill -9 -f "(robot_mission_control|robot_navigation_manager|robot_config_manager|robot_system_monitor)"
+  ```
+
+### 10.4 Convenient Shell Alias (Optional)
+Add this alias to `~/.bashrc` on both PC and Orin for instant shutdown via `killrobot`:
+
+```bash
+alias killrobot='killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router 2>/dev/null; pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard)" 2>/dev/null; ros2 daemon stop; ros2 daemon start; echo "All robot tasks terminated."'
+```
+
