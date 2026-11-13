@@ -1,8 +1,10 @@
-# robot_wakeword — Vietnamese-only Wake Word (Maica)
+# robot_wakeword — Vietnamese-only Wake Word (Souta)
 
 Standalone ROS 2 `ament_python` package for offline Vietnamese Wake Word detection.
 Uses **one** Vosk ASR model (`vosk-model-small-vn-0.4`) and matches transcript
-aliases for **Maica / Mai Ca**. It is not a specially trained KWS model.
+aliases for **Souta / Sô ta**. The emitted JSON event uses
+`{"event":"wake_detected","keyword":"souta","detector":"vi_souta"}`
+(with an additional timestamp). It is not a specially trained KWS model.
 
 **Scope:** The package currently has no Kiosk, Behavior Tree, ROS topic, or
 service integration. The old prototype under `src/robot_ui/wakeupword/` is
@@ -40,17 +42,17 @@ ros2 run robot_wakeword wakeword_download_models
 ```bash
 ros2 run robot_wakeword wakeword_probe live
 ros2 run robot_wakeword wakeword_probe live --debug-transcripts --debug-partials
-ros2 run robot_wakeword wakeword_probe record --output /tmp/maica.wav --duration 4
+ros2 run robot_wakeword wakeword_probe record --output /tmp/souta.wav --duration 4
 ros2 run robot_wakeword wakeword_probe evaluate --manifest /tmp/manifest.csv --report /tmp/report.json
 ros2 launch robot_wakeword wakeword_probe.launch.py
 ```
 
 An evaluate manifest has columns `file,expected`, with expected values
-`vi_maica` or `none`. Recorded WAV must use PCM S16LE mono 16 kHz.
+`vi_souta` or `none`. Recorded WAV must use PCM S16LE mono 16 kHz.
 
 To customize Vietnamese aliases, copy the JSON and pass a new `--config`
 path to `wakeword_probe` and `wakeword_download_models`. The JSON accepts
-**only** `vi_maica` and Vietnamese `language: vi`.
+**only** `vi_souta` and Vietnamese `language: vi`.
 
 ```bash
 cp src/robot_wakeword/robot_wakeword/config/keywords.json ~/wakeword_keywords.json
@@ -66,3 +68,11 @@ PYTHONPATH=src/robot_wakeword python3 -m unittest discover -s src/robot_wakeword
 The optional model smoke test skips if the model/Vosk is not installed.
 Wake detection uses final ASR segments, so the latency and false-trigger rate
 must be measured on the physical microphone before production deployment.
+
+## Pronunciation verification
+
+This is Vosk general ASR with keyword matching, so it will only trigger if the
+Vietnamese recognizer actually transcribes the sound as one of the configured
+aliases. Test local utterances of **Sô ta** and **Souta** with
+`wakeword_probe live --debug-transcripts` and adjust aliases if necessary.
+Do not assume reliable detection before testing on the physical microphone.

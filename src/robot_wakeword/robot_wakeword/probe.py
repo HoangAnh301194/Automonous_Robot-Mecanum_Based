@@ -20,9 +20,12 @@ from pathlib import Path
 DEFAULT_CONFIG_PATH = Path(__file__).parent / "config" / "keywords.json"
 
 # Vietnamese-only detector; pronunciation alternatives remain configurable in JSON.
-KEYWORD_ID = "vi_maica"
+KEYWORD_ID = "vi_souta"
+CANONICAL_WAKEWORD = "souta"
 MODEL_DIRS = {KEYWORD_ID: "vosk-model-small-vn-0.4"}
-ALIASES = {KEYWORD_ID: ["maica", "maica ơi", "mai ca", "mai ca ơi", "chào maica", "chào mai ca"]}
+ALIASES = {KEYWORD_ID: [
+    "souta", "souta ơi", "sô ta", "sô ta ơi", "chào souta", "chào sô ta"
+]}
 
 
 def load_config(config_path: Path | None = None) -> dict:
@@ -281,7 +284,7 @@ def live_probe(vosk_module, models: dict, aliases: dict, source: str, cooldown: 
                         }, ensure_ascii=False), flush=True)
                     if time.monotonic() >= next_allowed and match_wake_phrase(transcript, name, aliases):
                         print(json.dumps({
-                            "event": "wake_detected", "keyword": "maica", "detector": name,
+                            "event": "wake_detected", "keyword": CANONICAL_WAKEWORD, "detector": name,
                             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         }), flush=True)
                         next_allowed = time.monotonic() + cooldown

@@ -22,8 +22,8 @@ class PretrainedModelSmokeTest(unittest.TestCase):
         active = get_active_keywords(config)
         vosk_module, models = load_models(models_dir, active)
 
-        self.assertEqual(set(models), {"vi_maica"})
-        self.assertIsNotNone(models["vi_maica"])
+        self.assertEqual(set(models), {"vi_souta"})
+        self.assertIsNotNone(models["vi_souta"])
         print(f"\n[SmokeTest] Successfully loaded Vietnamese Vosk model from {models_dir}")
 
 

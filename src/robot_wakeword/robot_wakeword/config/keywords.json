@@ -1,16 +1,16 @@
 {
   "keywords": {
-    "vi_maica": {
+    "vi_souta": {
       "language": "vi",
-      "display_name": "Maica",
+      "display_name": "Souta",
       "model": "vosk-model-small-vn-0.4",
       "aliases": [
-        "maica",
-        "maica ơi",
-        "mai ca",
-        "mai ca ơi",
-        "chào maica",
-        "chào mai ca"
+        "souta",
+        "souta ơi",
+        "sô ta",
+        "sô ta ơi",
+        "chào souta",
+        "chào sô ta"
       ],
       "enabled": true
     }

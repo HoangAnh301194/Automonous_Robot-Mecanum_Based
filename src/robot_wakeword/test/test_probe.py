@@ -26,28 +26,31 @@ class WakeWordMatchingTests(unittest.TestCase):
         cfg = load_config(DEFAULT_CONFIG_PATH)
         self.aliases = {key: item["aliases"] for key, item in cfg["keywords"].items()}
 
-    def test_vietnamese_maica_aliases(self):
-        for speech in ("Maica!", "Maica, giới thiệu về PTIT",
-                       "mai ca ơi", "chào maica"):
+    def test_vietnamese_souta_aliases(self):
+        for speech in (
+            "Souta!", "Souta, giới thiệu về PTIT", "souta ơi",
+            "Sô ta", "Sô ta ơi", "Sô-ta ơi", "chào souta", "chào sô ta",
+        ):
             with self.subTest(speech=speech):
-                self.assertTrue(match_wake_phrase(speech, "vi_maica", self.aliases))
+                self.assertTrue(match_wake_phrase(speech, "vi_souta", self.aliases))
 
     def test_reject_non_wake_phrases_and_word_boundaries(self):
-        for speech in ("Mai là một cái tên", "maicabee", "my car",
-                       "hôm nay thời tiết đẹp"):
+        for speech in ("Mai là một cái tên", "soutabee", "sô tài",
+                       "hôm nay thời tiết đẹp", "maica", "mai ca"):
             with self.subTest(speech=speech):
-                self.assertFalse(match_wake_phrase(speech, "vi_maica", self.aliases))
+                self.assertFalse(match_wake_phrase(speech, "vi_souta", self.aliases))
 
     def test_unicode_normalization(self):
-        self.assertEqual(normalize("  Ｍａｉｃａ！", "vi_maica"), "maica")
+        self.assertEqual(normalize("  Ｓｏｕｔａ！", "vi_souta"), "souta")
+        self.assertEqual(normalize("Sô-ta!", "vi_souta"), "sô ta")
 
     def test_alias_overrides(self):
         with tempfile.TemporaryDirectory() as d:
             path = Path(d) / "aliases.json"
-            path.write_text('{"vi_maica": ["maika"]}', encoding="utf-8")
+            path.write_text('{"vi_souta": ["tên riêng biệt"]}', encoding="utf-8")
             changed = load_aliases(str(path), self.aliases)
-            self.assertTrue(match_wake_phrase("maika", "vi_maica", changed))
-            self.assertFalse(match_wake_phrase("maica", "vi_maica", changed))
+            self.assertTrue(match_wake_phrase("tên riêng biệt", "vi_souta", changed))
+            self.assertFalse(match_wake_phrase("souta", "vi_souta", changed))
 
     def test_reject_invalid_alias_structure(self):
         with tempfile.TemporaryDirectory() as d:
@@ -60,9 +63,9 @@ class WakeWordMatchingTests(unittest.TestCase):
 class ConfigurationTests(unittest.TestCase):
     def test_only_vietnamese_configured(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
-        self.assertEqual(list(cfg["keywords"]), ["vi_maica"])
-        self.assertEqual(set(get_active_keywords(cfg)), {"vi_maica"})
-        self.assertEqual(cfg["keywords"]["vi_maica"]["language"], "vi")
+        self.assertEqual(list(cfg["keywords"]), ["vi_souta"])
+        self.assertEqual(set(get_active_keywords(cfg)), {"vi_souta"})
+        self.assertEqual(cfg["keywords"]["vi_souta"]["language"], "vi")
 
     def test_only_vietnamese_model_downloaded(self):
         names = get_models_from_config(DEFAULT_CONFIG_PATH)
@@ -93,14 +96,14 @@ class ConfigurationTests(unittest.TestCase):
 
     def test_reject_invalid_schema(self):
         with tempfile.NamedTemporaryFile("w", suffix=".json") as f:
-            f.write(json.dumps({"keywords": {"vi_maica": {"language": "vi"}}}))
+            f.write(json.dumps({"keywords": {"vi_souta": {"language": "vi"}}}))
             f.flush()
             with self.assertRaises(ValueError):
                 load_config(Path(f.name))
 
     def test_disabled_keyword_filtering(self):
         cfg = load_config(DEFAULT_CONFIG_PATH)
-        cfg["keywords"]["vi_maica"]["enabled"] = False
+        cfg["keywords"]["vi_souta"]["enabled"] = False
         self.assertFalse(get_active_keywords(cfg))
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json") as f:
             json.dump(cfg, f)
@@ -118,7 +121,7 @@ class DummyRecognizer:
         return self.calls == 2
 
     def Result(self):
-        return json.dumps({"text": "maica" if self.model == "vi" else ""})
+        return json.dumps({"text": "sô ta" if self.model == "vi" else ""})
 
     def FinalResult(self):
         return json.dumps({"text": "cho tôi hỏi" if self.model == "vi" else ""})
@@ -145,9 +148,9 @@ class AudioPipelineTests(unittest.TestCase):
             wav = Path(d) / "sample.wav"
             self._make_wav(wav)
             transcripts, elapsed, duration = recognize_file(
-                wav, DummyVosk, {"vi_maica": "vi"}
+                wav, DummyVosk, {"vi_souta": "vi"}
             )
-            self.assertEqual(transcripts, {"vi_maica": "maica cho tôi hỏi"})
+            self.assertEqual(transcripts, {"vi_souta": "sô ta cho tôi hỏi"})
             self.assertAlmostEqual(duration, 1.0)
             self.assertGreaterEqual(elapsed, 0)
 
@@ -161,7 +164,7 @@ class AudioPipelineTests(unittest.TestCase):
 
     def test_missing_model_directory_exits(self):
         with tempfile.TemporaryDirectory() as d:
-            active = {"vi_maica": {"model": "non_existent_folder"}}
+            active = {"vi_souta": {"model": "non_existent_folder"}}
             with self.assertRaises(SystemExit):
                 load_models(Path(d), active)
 

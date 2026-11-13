@@ -92,7 +92,7 @@ def get_models_from_config(config_path: Path | None) -> dict[str, str]:
     active = get_active_keywords(config)
     if not active:
         return {}
-    name = active["vi_maica"]["model"]
+    name = active["vi_souta"]["model"]
     return {name: DEFAULT_MODELS.get(name, f"https://alphacephei.com/vosk/models/{name}.zip")}
 
 
