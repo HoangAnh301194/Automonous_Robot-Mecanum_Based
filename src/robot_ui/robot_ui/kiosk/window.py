@@ -421,28 +421,6 @@ QLabel#bubbleText {
     color: #ededed;
     font-size: 16px;
 }
-QFrame#windowControlsBar {
-    background: rgba(18, 18, 18, 0.85);
-    border: 1px solid #333333;
-    border-radius: 9px;
-}
-QPushButton#windowMinBtn, QPushButton#windowFullBtn {
-    color: #cccccc;
-    background: transparent;
-    border: none;
-    font-size: 13px;
-    font-weight: 700;
-    border-radius: 6px;
-    padding: 0;
-}
-QPushButton#windowMinBtn:hover, QPushButton#windowFullBtn:hover {
-    color: #ffb32c;
-    background: #2a2a2a;
-}
-QPushButton#windowMinBtn:pressed, QPushButton#windowFullBtn:pressed {
-    color: #ffffff;
-    background: #3a3a3a;
-}
 """
 
 
@@ -570,29 +548,6 @@ class KioskWindow(QMainWindow):
         )
         self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
-
-        # Window Controls overlay (Minimize to taskbar and Toggle Fullscreen / Windowed)
-        self.window_controls = QFrame(central)
-        self.window_controls.setObjectName("windowControlsBar")
-        win_ctrl_layout = QHBoxLayout(self.window_controls)
-        win_ctrl_layout.setContentsMargins(4, 2, 4, 2)
-        win_ctrl_layout.setSpacing(4)
-
-        self._min_btn = QPushButton("—")
-        self._min_btn.setObjectName("windowMinBtn")
-        self._min_btn.setToolTip("Thu nhỏ cửa sổ xuống Taskbar (Ctrl+M)")
-        self._min_btn.setFixedSize(30, 26)
-        self._min_btn.setCursor(Qt.PointingHandCursor)
-        self._min_btn.clicked.connect(self.showMinimized)
-        win_ctrl_layout.addWidget(self._min_btn)
-
-        self._fullscreen_btn = QPushButton("🗗")
-        self._fullscreen_btn.setObjectName("windowFullBtn")
-        self._fullscreen_btn.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
-        self._fullscreen_btn.setFixedSize(30, 26)
-        self._fullscreen_btn.setCursor(Qt.PointingHandCursor)
-        self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
-        win_ctrl_layout.addWidget(self._fullscreen_btn)
         self.home_page.service_requested.connect(self._on_service_requested)
         self.home_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.service_page.home_requested.connect(self.return_to_home)
@@ -612,6 +567,7 @@ class KioskWindow(QMainWindow):
         self.admin_page.slam_requested.connect(self._on_admin_slam)
         self.admin_page.detection_debug_requested.connect(self._on_admin_detection)
         self.admin_page.system_status_requested.connect(self._on_admin_system_status)
+        self.admin_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.navigation_page.home_requested.connect(self.return_to_home)
         self.navigation_page.back_requested.connect(self.go_back)
         self.navigation_page.emergency_stop_requested.connect(self._on_emergency_stop)
@@ -722,17 +678,6 @@ class KioskWindow(QMainWindow):
         )
         if self.bottom_navigation.isVisible():
             self.bottom_navigation.raise_()
-
-        # Position window control buttons at top right corner
-        ctrl_w = 76
-        ctrl_h = 32
-        self.window_controls.setGeometry(
-            central.width() - ctrl_w - 12,
-            10,
-            ctrl_w,
-            ctrl_h,
-        )
-        self.window_controls.raise_()
         super().resizeEvent(event)
 
     def show_page(self, page_id: str, track_history: bool = True) -> None:
@@ -783,6 +728,8 @@ class KioskWindow(QMainWindow):
                 self._wakeword_worker.pause_listening()
         if page_id == "navigation":
             self.ros_node.request_locations()
+        elif page_id == "admin":
+            self._update_fullscreen_ui()
 
     def go_back(self) -> None:
         """Navigate back to the previous screen."""
@@ -1023,15 +970,10 @@ class KioskWindow(QMainWindow):
             self._update_fullscreen_ui(is_full=True)
 
     def _update_fullscreen_ui(self, is_full: bool | None = None) -> None:
-        if not hasattr(self, "_fullscreen_btn"):
+        if not hasattr(self, "admin_page"):
             return
         full = self.isFullScreen() if is_full is None else is_full
-        if full:
-            self._fullscreen_btn.setText("🗗")
-            self._fullscreen_btn.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
-        else:
-            self._fullscreen_btn.setText("🗖")
-            self._fullscreen_btn.setToolTip("Toàn màn hình (F11)")
+        self.admin_page.update_fullscreen_button(full)
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.WindowStateChange:

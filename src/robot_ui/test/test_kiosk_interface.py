@@ -174,10 +174,26 @@ def test_kiosk_window_fullscreen_toggle_and_window_controls(app):
     win = KioskWindow(node, signals)
     win.show()
     try:
-        assert hasattr(win, "window_controls")
-        assert win.window_controls is not None
-        assert win._min_btn is not None
-        assert win._fullscreen_btn is not None
+        # Floating window controls removed from global window
+        assert not hasattr(win, "window_controls")
+        assert not hasattr(win, "_min_btn")
+
+        # Fullscreen button ONLY exists on AdminPage, not on motion (idle) or home
+        assert not hasattr(win.idle_page, "fullscreen_button")
+        assert not hasattr(win.home_page, "fullscreen_button")
+        assert hasattr(win.admin_page, "fullscreen_button")
+        assert win.admin_page.fullscreen_button is not None
+        assert win.admin_page.fullscreen_button.objectName() == "adminFullscreenButton"
+
+        # Check initial state (windowed)
+        win._update_fullscreen_ui(is_full=False)
+        assert win.admin_page.fullscreen_button.text() == "🗖"
+        assert "Toàn màn hình" in win.admin_page.fullscreen_button.toolTip()
+
+        # Check fullscreen state
+        win._update_fullscreen_ui(is_full=True)
+        assert win.admin_page.fullscreen_button.text() == "🗗"
+        assert "Thoát toàn màn hình" in win.admin_page.fullscreen_button.toolTip()
 
         # Test toggle_fullscreen
         win.toggle_fullscreen()

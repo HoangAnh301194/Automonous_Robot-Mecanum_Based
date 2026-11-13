@@ -238,6 +238,7 @@ class AdminPage(QWidget):
     start_nav_requested = pyqtSignal()
     stop_nav_requested = pyqtSignal()
     system_status_requested = pyqtSignal()
+    fullscreen_toggle_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -369,6 +370,15 @@ class AdminPage(QWidget):
         battery_layout.addWidget(self.battery_icon_label)
         battery_layout.addWidget(self.battery_text_label)
         status_bar.addWidget(self.battery_widget)
+
+        # Single Fullscreen / Windowed toggle button (only on AdminPage)
+        self.fullscreen_button = QPushButton()
+        self.fullscreen_button.setObjectName("adminFullscreenButton")
+        self.fullscreen_button.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_button.setFixedSize(46, 46)
+        self.fullscreen_button.clicked.connect(self.fullscreen_toggle_requested.emit)
+        self.update_fullscreen_button(is_fullscreen=True)
+        status_bar.addWidget(self.fullscreen_button)
 
         header.addLayout(status_bar)
         root.addLayout(header)
@@ -507,6 +517,24 @@ class AdminPage(QWidget):
                 background: #1c2738;
                 border: 2px solid #f6c16a;
             }
+            QPushButton#adminFullscreenButton {
+                background: #0f141a;
+                border: 1px solid #232e3d;
+                border-radius: 12px;
+                color: #e0e0e0;
+                font-size: 18px;
+                font-weight: 700;
+            }
+            QPushButton#adminFullscreenButton:hover {
+                background: #17202c;
+                border-color: #3b4e64;
+                color: #f6c16a;
+            }
+            QPushButton#adminFullscreenButton:pressed {
+                background: #1c2738;
+                border: 2px solid #f6c16a;
+                color: #ffffff;
+            }
             QPushButton#adminDetectionButton,
             QPushButton#adminSlamButton,
             QPushButton#adminNavButton,
@@ -544,6 +572,15 @@ class AdminPage(QWidget):
 
         self.update_wifi()
         self.set_battery(None)
+
+    def update_fullscreen_button(self, is_fullscreen: bool) -> None:
+        """Update single button icon and tooltip alternating between fullscreen and windowed mode."""
+        if is_fullscreen:
+            self.fullscreen_button.setText("🗗")
+            self.fullscreen_button.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
+        else:
+            self.fullscreen_button.setText("🗖")
+            self.fullscreen_button.setToolTip("Toàn màn hình (F11)")
 
     def update_wifi(self) -> None:
         self.set_wifi(check_wifi_connected())
