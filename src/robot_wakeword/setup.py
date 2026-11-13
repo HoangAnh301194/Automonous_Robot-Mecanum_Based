@@ -18,7 +18,7 @@ setup(
     ],
     package_data={package_name: ["config/*.json"]},
     include_package_data=True,
-    install_requires=["setuptools"],
+    install_requires=["setuptools", "vosk==0.3.45"],
     zip_safe=False,
     maintainer="orin",
     maintainer_email="orin@todo.todo",
