@@ -26,5 +26,11 @@ def generate_launch_description():
             executable='mission_controller_node',
             name='mission_controller_node',
             output='screen'
+        ),
+        Node(
+            package='mo_hinh',
+            executable='audio_player_node.py',
+            name='audio_player_node',
+            output='screen'
         )
     ])

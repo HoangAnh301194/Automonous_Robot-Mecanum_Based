@@ -48,9 +48,17 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install audio sound files
+install(
+  DIRECTORY audio
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install scripts
 install(
-  PROGRAMS scripts/dummy_unpause.py
+  PROGRAMS
+    scripts/dummy_unpause.py
+    scripts/audio_player_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
