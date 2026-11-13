@@ -331,9 +331,10 @@ def train(args):
               f" val_loss={val_loss:.4f} val_recall@0.5={recall:.3f}")
         if val_loss < best_loss - 1e-4:
             best_loss, best_epoch, patience = val_loss, epoch, 0
-            torch.save({"state_dict": model.cpu().state_dict(), "epoch": epoch,
+            frozen = {name: tensor.detach().cpu().clone()
+                      for name, tensor in model.state_dict().items()}
+            torch.save({"state_dict": frozen, "epoch": epoch,
                         "input_shape": [16, 96]}, destination / "best.pt")
-            model.to(device)
         else:
             patience += 1
             if patience >= args.patience:
@@ -343,7 +344,8 @@ def train(args):
                                      weights_only=True)["state_dict"])
     model.eval()
     export = destination / "souta.onnx"
-    torch.onnx.export(model, torch.zeros(1, 16, 96), str(export), opset_version=13,
+    torch.onnx.export(model, torch.zeros(1, 16, 96), str(export),
+                      opset_version=13, dynamo=False,
                       input_names=["features"], output_names=["probability"],
                       dynamic_axes={"features": {0: "batch"}, "probability": {0: "batch"}})
     import onnx
