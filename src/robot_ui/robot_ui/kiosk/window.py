@@ -7,7 +7,15 @@ import time
 
 from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QMainWindow,
+    QPushButton,
+    QStackedWidget,
+    QWidget,
+)
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.audio_worker import VoiceController, VoiceState
@@ -413,6 +421,28 @@ QLabel#bubbleText {
     color: #ededed;
     font-size: 16px;
 }
+QFrame#windowControlsBar {
+    background: rgba(18, 18, 18, 0.85);
+    border: 1px solid #333333;
+    border-radius: 9px;
+}
+QPushButton#windowMinBtn, QPushButton#windowFullBtn {
+    color: #cccccc;
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 6px;
+    padding: 0;
+}
+QPushButton#windowMinBtn:hover, QPushButton#windowFullBtn:hover {
+    color: #ffb32c;
+    background: #2a2a2a;
+}
+QPushButton#windowMinBtn:pressed, QPushButton#windowFullBtn:pressed {
+    color: #ffffff;
+    background: #3a3a3a;
+}
 """
 
 
@@ -540,6 +570,29 @@ class KioskWindow(QMainWindow):
         )
         self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
+
+        # Window Controls overlay (Minimize to taskbar and Toggle Fullscreen / Windowed)
+        self.window_controls = QFrame(central)
+        self.window_controls.setObjectName("windowControlsBar")
+        win_ctrl_layout = QHBoxLayout(self.window_controls)
+        win_ctrl_layout.setContentsMargins(4, 2, 4, 2)
+        win_ctrl_layout.setSpacing(4)
+
+        self._min_btn = QPushButton("—")
+        self._min_btn.setObjectName("windowMinBtn")
+        self._min_btn.setToolTip("Thu nhỏ cửa sổ xuống Taskbar (Ctrl+M)")
+        self._min_btn.setFixedSize(30, 26)
+        self._min_btn.setCursor(Qt.PointingHandCursor)
+        self._min_btn.clicked.connect(self.showMinimized)
+        win_ctrl_layout.addWidget(self._min_btn)
+
+        self._fullscreen_btn = QPushButton("🗗")
+        self._fullscreen_btn.setObjectName("windowFullBtn")
+        self._fullscreen_btn.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
+        self._fullscreen_btn.setFixedSize(30, 26)
+        self._fullscreen_btn.setCursor(Qt.PointingHandCursor)
+        self._fullscreen_btn.clicked.connect(self.toggle_fullscreen)
+        win_ctrl_layout.addWidget(self._fullscreen_btn)
         self.home_page.service_requested.connect(self._on_service_requested)
         self.home_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.service_page.home_requested.connect(self.return_to_home)
@@ -669,6 +722,17 @@ class KioskWindow(QMainWindow):
         )
         if self.bottom_navigation.isVisible():
             self.bottom_navigation.raise_()
+
+        # Position window control buttons at top right corner
+        ctrl_w = 76
+        ctrl_h = 32
+        self.window_controls.setGeometry(
+            central.width() - ctrl_w - 12,
+            10,
+            ctrl_w,
+            ctrl_h,
+        )
+        self.window_controls.raise_()
         super().resizeEvent(event)
 
     def show_page(self, page_id: str, track_history: bool = True) -> None:
@@ -948,6 +1012,32 @@ class KioskWindow(QMainWindow):
             if self._voice_controller.is_speaker_enabled():
                 self._voice_controller.handle_llm_response(self._llm_worker.session_id, greeting)
 
+    def toggle_fullscreen(self) -> None:
+        """Toggle between Fullscreen and Windowed mode (1024x600)."""
+        if self.isFullScreen():
+            self.showNormal()
+            self.resize(1024, 600)
+            self._update_fullscreen_ui(is_full=False)
+        else:
+            self.showFullScreen()
+            self._update_fullscreen_ui(is_full=True)
+
+    def _update_fullscreen_ui(self, is_full: bool | None = None) -> None:
+        if not hasattr(self, "_fullscreen_btn"):
+            return
+        full = self.isFullScreen() if is_full is None else is_full
+        if full:
+            self._fullscreen_btn.setText("🗗")
+            self._fullscreen_btn.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
+        else:
+            self._fullscreen_btn.setText("🗖")
+            self._fullscreen_btn.setToolTip("Toàn màn hình (F11)")
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.WindowStateChange:
+            self._update_fullscreen_ui()
+        super().changeEvent(event)
+
     def eventFilter(self, watched: Any, event: QEvent) -> bool:
         input_events = (
             QEvent.MouseButtonPress, QEvent.KeyPress,
@@ -964,6 +1054,19 @@ class KioskWindow(QMainWindow):
                 ):
                     self.show_page("home")
                     return True
+
+        # Catch Escape / F11 / Ctrl+M / Ctrl+Q globally across all child widgets
+        if event.type() == QEvent.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() in (Qt.Key_Escape, Qt.Key_F11):
+                self.toggle_fullscreen()
+                return True
+            if event.key() == Qt.Key_M and (event.modifiers() & Qt.ControlModifier):
+                self.showMinimized()
+                return True
+            if event.key() == Qt.Key_Q and (event.modifiers() & Qt.ControlModifier):
+                self.close()
+                return True
+
         return super().eventFilter(watched, event)
 
     def _expire_idle_session(self) -> None:
@@ -1015,7 +1118,13 @@ class KioskWindow(QMainWindow):
         self.idle_page.video.set_video(self.emotions.path(emotion))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Escape:
+        if event.key() in (Qt.Key_Escape, Qt.Key_F11):
+            self.toggle_fullscreen()
+            return
+        if event.key() == Qt.Key_M and (event.modifiers() & Qt.ControlModifier):
+            self.showMinimized()
+            return
+        if event.key() == Qt.Key_Q and (event.modifiers() & Qt.ControlModifier):
             self.close()
             return
         super().keyPressEvent(event)

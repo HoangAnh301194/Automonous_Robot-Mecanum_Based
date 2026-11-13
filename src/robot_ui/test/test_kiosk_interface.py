@@ -11,6 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
+from PyQt5.QtCore import QEvent, Qt
+from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton
 
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
@@ -157,6 +159,37 @@ def test_kiosk_window_dock_hidden_on_idle_and_shown_on_home(app):
         assert win.bottom_navigation.isHidden()
     finally:
         win.close()
+
+
+def test_kiosk_window_fullscreen_toggle_and_window_controls(app):
+    from unittest.mock import MagicMock
+    try:
+        from robot_ui.kiosk.signals import KioskSignals
+        from robot_ui.kiosk.window import KioskWindow
+    except ImportError:
+        pytest.skip("KioskWindow dependencies not in environment")
+
+    node = MagicMock()
+    signals = KioskSignals()
+    win = KioskWindow(node, signals)
+    win.show()
+    try:
+        assert hasattr(win, "window_controls")
+        assert win.window_controls is not None
+        assert win._min_btn is not None
+        assert win._fullscreen_btn is not None
+
+        # Test toggle_fullscreen
+        win.toggle_fullscreen()
+
+        # Test keyPressEvent with Key_Escape (toggles fullscreen instead of closing window)
+        key_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+        win.keyPressEvent(key_event)
+        # Window is still active / not closed
+        assert win.isVisible()
+    finally:
+        win.close()
+
 
 
 def test_chat_page_widgets_and_object_names(app):
