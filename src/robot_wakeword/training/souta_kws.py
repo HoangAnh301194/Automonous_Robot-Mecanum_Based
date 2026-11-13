@@ -239,9 +239,11 @@ def extract(args):
             category = row["label"]
             # Long negative and ambient recordings contribute many windows.
             if split == "train":
-                repeats = (args.augment if category == "positive" else
-                           max(2, args.augment // 2) if category == "hard_negative" else
-                           max(2, args.augment))
+                if category == "positive":
+                    repeats = args.augment
+                else:
+                    # Sample a wider variety of locations from long negative streams.
+                    repeats = min(100, max(2, args.augment, len(audio) // WINDOW))
             else:
                 repeats = 1 if category == "positive" else max(1, min(10, len(audio) // WINDOW))
             for i in range(repeats):

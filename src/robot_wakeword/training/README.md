@@ -75,6 +75,7 @@ add groups rather than silently accepting an invalid evaluation.
       --output runs/features --augment 4 --batch 16
 
 Train-only augmentation: random offset, gain, additive ambient noise/SNR.
+Long negative recordings contribute up to 100 random 2-second windows per recording.
 Validation/test receive no training augmentation. Background noise is drawn
 only from TRAIN ambient sessions. The script creates train/val/test .npz
 embedding matrices. It checks each feature has shape (16,96).
