@@ -177,7 +177,9 @@ class MissionControllerNode(Node):
 
             if pos_valid:
                 dist = math.hypot(p.position.x, p.position.y)
-                if 0.30 <= dist <= 1.80 and abs(p.position.y) <= 0.65:
+                # Chỉ coi là chắn lối mời nước khi người đứng trực diện trước đầu xe:
+                # Cự ly 0.4m - 1.2m, lệch ngang trong luồng thân xe <= 0.35m
+                if 0.40 <= dist <= 1.20 and abs(p.position.y) <= 0.35:
                     has_blocking = True
 
         now_mono = time.monotonic()
@@ -207,7 +209,7 @@ class MissionControllerNode(Node):
         if has_blocking:
             if self._person_in_front_since is None:
                 self._person_in_front_since = now
-            elif (now - self._person_in_front_since) >= 0.8:
+            elif (now - self._person_in_front_since) >= 1.5:
                 self.blackboard.set('PERSON_IN_PATH', True)
         else:
             self._person_in_front_since = None
