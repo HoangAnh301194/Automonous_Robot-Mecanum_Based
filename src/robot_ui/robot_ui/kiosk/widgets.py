@@ -1070,33 +1070,41 @@ class ChatPage(QWidget):
         conversation_layout.addWidget(self.messages)
         root.addWidget(conversation, 1)
 
-        # C. Input Bar (72-84px)
+        # C1. Centered Microphone Button (enlarged 3x: icon 84x84, circular button 100x100)
+        mic_row = QHBoxLayout()
+        mic_row.setContentsMargins(0, 2, 0, 2)
+        mic_row.addStretch(1)
+
+        self.mic_btn = QPushButton()
+        self.mic_btn.setObjectName("chatMicButton")
+        self.mic_btn.setFixedSize(100, 100)
+        self.mic_btn.setIconSize(QSize(84, 84))
+        self.mic_btn.setCursor(Qt.PointingHandCursor)
+        self.mic_btn.clicked.connect(self._on_mic_clicked)
+        mic_row.addWidget(self.mic_btn)
+
+        mic_row.addStretch(1)
+        root.addLayout(mic_row)
+
+        # C2. Input Bar (64-74px)
         input_bar = QFrame()
         input_bar.setObjectName("chatInputBar")
-        input_bar.setMinimumHeight(72)
-        input_bar.setMaximumHeight(84)
+        input_bar.setMinimumHeight(64)
+        input_bar.setMaximumHeight(74)
         input_row = QHBoxLayout(input_bar)
-        input_row.setContentsMargins(10, 10, 10, 10)
+        input_row.setContentsMargins(10, 8, 10, 8)
         input_row.setSpacing(10)
 
         self.input = QLineEdit()
         self.input.setObjectName("chatInput")
         self.input.setPlaceholderText("Nhập câu hỏi của bạn...")
-        self.input.setMinimumHeight(52)
+        self.input.setMinimumHeight(48)
         self.input.returnPressed.connect(self._on_send)
         input_row.addWidget(self.input, 1)
 
-        self.mic_btn = QPushButton()
-        self.mic_btn.setObjectName("chatMicButton")
-        self.mic_btn.setFixedSize(54, 52)
-        self.mic_btn.setIconSize(QSize(28, 28))
-        self.mic_btn.setCursor(Qt.PointingHandCursor)
-        self.mic_btn.clicked.connect(self._on_mic_clicked)
-        input_row.addWidget(self.mic_btn)
-
         self._send_btn = QPushButton("Gửi")
         self._send_btn.setObjectName("chatSendButton")
-        self._send_btn.setFixedSize(76, 52)
+        self._send_btn.setFixedSize(76, 48)
         self._send_btn.setCursor(Qt.PointingHandCursor)
         self._send_btn.clicked.connect(self._on_send)
         input_row.addWidget(self._send_btn)
@@ -1238,7 +1246,9 @@ class ChatPage(QWidget):
     def _animate_listening_pulse(self) -> None:
         self._pulse_state = not self._pulse_state
         border = "#ff4d4d" if self._pulse_state else "#ffb32c"
-        self.mic_btn.setStyleSheet(f"#chatMicButton {{ border: 2px solid {border}; background-color: rgba(255, 77, 77, 0.25); }}")
+        self.mic_btn.setStyleSheet(
+            f"#chatMicButton {{ border: 3px solid {border}; border-radius: 50px; background-color: rgba(255, 77, 77, 0.25); }}"
+        )
 
     def submit_voice_transcript(self, text: str) -> None:
         """Submit voice transcript as user message and trigger LLM processing."""

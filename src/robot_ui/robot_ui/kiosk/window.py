@@ -320,20 +320,26 @@ QLabel#typingText {
     font-style: italic;
 }
 QPushButton#chatMicButton {
-    background: #171717;
-    border: 1px solid #3a3a3a;
-    border-radius: 12px;
+    background: #181818;
+    border: 2px solid #3a3a3a;
+    border-radius: 50px;
+}
+QPushButton#chatMicButton:hover {
+    background: #282828;
+    border-color: #ffb32c;
 }
 QPushButton#chatMicButton:pressed {
-    background: #2b2b2b;
+    background: #333333;
 }
 QPushButton#chatMicButton[listening="true"] {
     background: #2b1c09;
-    border: 1px solid #ffb32c;
+    border: 3px solid #ffb32c;
+    border-radius: 50px;
 }
 QPushButton#chatMicButton:disabled {
     background: #101010;
     border-color: #222222;
+    border-radius: 50px;
 }
 QPushButton#chatSendButton {
     color: #151515;
