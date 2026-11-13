@@ -831,8 +831,8 @@ cd ~/ros2_ws && ./kill_all.sh
 
 **Cách 2: Lệnh 1 dòng copy-paste trực tiếp:**
 ```bash
-killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router 2>/dev/null || true
-pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard|person_depth|gui_v3)" 2>/dev/null || true
+killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router astra_camera_node usb_cam_node_exe static_transform_publisher 2>/dev/null || true
+pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra|usb_cam|sllidar|hoverboard|person_depth|gui_v3|yolo|transform_publisher|depthimage|laser_odometry)" 2>/dev/null || true
 ros2 daemon stop && ros2 daemon start
 ```
 
