@@ -135,18 +135,36 @@ def resolve_voice_and_text(text: str, language_hint: str | None = None) -> tuple
 
 
 class SentenceSegmenter:
-    """Incremental sentence splitter with safety checks for titles, decimals, and abbreviations."""
+    """
+    Incremental sentence splitter with safety checks for titles, decimals, abbreviations,
+    URLs, and times. Supports early clause dispatch (: ; — \n and long commas) for low-latency TTS.
+    """
 
-    _SENTENCE_END_RE = re.compile(r'([.!?]+(?:\s+|\n+)|[。！？])')
+    _SENTENCE_END_RE = re.compile(r'([.!?]+["\'”’\)\]\}]*(?:\s+|\n+)|[。！？])')
+    _CLAUSE_END_RE = re.compile(r'([:;—]+["\'”’]*(?:\s+|\n+)|[：；])')
+    _COMMA_RE = re.compile(r'(,["\'”’]*(?:\s+)|\uff0c)')
+    _NEWLINE_RE = re.compile(r'(\n+)')
+
     _TITLE_PREFIX_RE = re.compile(
         r'(?:\b(?:TS|T\.S|ThS|Th\.S|PGS|P\.GS|GS|G\.S|Dr|Mr|Mrs|Ms|Prof|v\.v|etc|approx|e\.g|i\.e)\.)$',
         re.IGNORECASE,
     )
-    _DECIMAL_RE = re.compile(r'\b\d+\.$')
+    _LIST_NUM_RE = re.compile(r'(?:^|\n)\s*\d+\.$')
+    _NUMBER_COMMA_RE = re.compile(r'\b\d+,$')
+    _TIME_COLON_RE = re.compile(r'\b\d{1,2}:(?:\d{2})?$')
+    _URL_SCHEME_RE = re.compile(r'(?:https?|ftp|file|ws|wss):$', re.IGNORECASE)
 
-    def __init__(self, min_sentence_chars: int = 5) -> None:
+    def __init__(
+        self,
+        min_sentence_chars: int = 5,
+        min_clause_chars: int = 10,
+        min_comma_chars: int = 35,
+    ) -> None:
         self.min_chars = min_sentence_chars
+        self.min_clause_chars = min_clause_chars
+        self.min_comma_chars = min_comma_chars
         self._buffer = ""
+        self._segment_count = 0
 
     def push_delta(self, delta: str) -> list[str]:
         """Push a new text delta and return any newly completed sentences."""
@@ -160,36 +178,67 @@ class SentenceSegmenter:
         remaining = self._buffer.strip()
         self._buffer = ""
         if remaining:
+            self._segment_count += 1
             return [remaining]
         return []
 
     def _extract_sentences(self) -> list[str]:
         completed: list[str] = []
         while True:
+            candidates: list[tuple[int, int]] = []
+
+            # 1. Double-newline paragraph break
             dnl = self._buffer.find("\n\n")
             if dnl != -1 and dnl >= self.min_chars:
-                candidate = self._buffer[:dnl].strip()
-                self._buffer = self._buffer[dnl + 2:]
-                if candidate:
-                    completed.append(candidate)
-                continue
+                candidates.append((dnl, dnl + 2))
 
-            match = None
+            # 2. Standard sentence end (. ! ? etc.) with optional closing quotes/brackets
             for m in self._SENTENCE_END_RE.finditer(self._buffer):
                 prefix = self._buffer[:m.end()].strip()
-                if self._TITLE_PREFIX_RE.search(prefix) or self._DECIMAL_RE.search(prefix):
+                if self._TITLE_PREFIX_RE.search(prefix) or self._LIST_NUM_RE.search(prefix):
                     continue
-                match = m
+                # If dot is immediately followed by a digit (decimal), don't split
+                if re.match(r'^\d', self._buffer[m.end():]):
+                    continue
+                candidates.append((m.start(), m.end()))
                 break
 
-            if not match:
+            # 3. Clause end (: ; — etc.) if clause length >= min_clause_chars
+            for cm in self._CLAUSE_END_RE.finditer(self._buffer):
+                prefix = self._buffer[:cm.start() + 1].strip()
+                if self._TIME_COLON_RE.search(prefix) or self._URL_SCHEME_RE.search(prefix):
+                    continue
+                if cm.start() >= self.min_clause_chars:
+                    candidates.append((cm.start(), cm.end()))
+                    break
+
+            # 4. Single newline (\n) if prefix length >= min_clause_chars
+            for nm in self._NEWLINE_RE.finditer(self._buffer):
+                if nm.start() >= self.min_clause_chars:
+                    candidates.append((nm.start(), nm.end()))
+                    break
+
+            # 5. Long comma break if clause length >= min_comma_chars
+            for com in self._COMMA_RE.finditer(self._buffer):
+                prefix = self._buffer[:com.start() + 1].strip()
+                if self._NUMBER_COMMA_RE.search(prefix):
+                    continue
+                if com.start() >= self.min_comma_chars:
+                    candidates.append((com.start(), com.end()))
+                    break
+
+            if not candidates:
                 break
 
-            split_pos = match.end()
-            candidate = self._buffer[:split_pos].strip()
-            self._buffer = self._buffer[split_pos:]
+            # Select earliest boundary in stream order
+            candidates.sort(key=lambda x: x[0])
+            start_pos, end_pos = candidates[0]
+
+            candidate = self._buffer[:end_pos].strip()
+            self._buffer = self._buffer[end_pos:]
 
             if len(candidate) >= self.min_chars:
+                self._segment_count += 1
                 completed.append(candidate)
             elif candidate:
                 self._buffer = candidate + " " + self._buffer

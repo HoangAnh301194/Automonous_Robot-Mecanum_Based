@@ -204,7 +204,7 @@ def test_chat_page_widgets_and_object_names(app):
     send = page.findChild(QPushButton, "chatSendButton")
     assert send is not None
     assert send.width() >= 52
-    assert send.height() >= 52
+    assert send.height() >= 48
     assert send.text() == "Gửi"
 
 

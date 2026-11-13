@@ -2,22 +2,28 @@
 
 ## 0) Build & Source Workspace
 
-Run these commands from any directory inside the cloned repository. Repeat the
-workspace export and source commands in every new terminal before using packages
-from this workspace.
+### A. Chuẩn trên Jetson Orin (`~/ros2_ws`):
+Mở terminal trên Jetson Orin và thực hiện:
 
 ```bash
-export WS="$(git rev-parse --show-toplevel)"
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Với mỗi terminal mới mở trên Jetson Orin, chỉ cần:
+```bash
+cd ~/ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
+```
+
+### B. Trên máy tính phát triển (PC / Laptop):
+```bash
+export WS="$(git rev-parse --show-toplevel 2>/dev/null || echo $PWD)"
 cd "$WS"
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source "$WS/install/setup.bash"
-```
-
-For a source archive without Git metadata, open the workspace root and use:
-
-```bash
-export WS="$PWD"
 ```
 
 Rebuild and source the workspace after moving it. Do not reuse `build/`,
@@ -815,45 +821,51 @@ ROS package-share lookup, or paths relative to the owning configuration file.
 
 ## 10) Process Management & Emergency Stop / Kill All Tasks
 
-### 10.1 Quick One-Liner to Kill All Tasks
-To immediately terminate all running ROS 2 nodes, launch wrappers, UI kiosks, AI models, cameras, and background processes:
+### 10.1 Dọn dẹp & Tắt sạch toàn bộ tiến trình (Kill All Tasks)
+Để dừng tức thì toàn bộ các node ROS 2, launch wrappers, giao diện Kiosk UI, tiến trình 9router, camera và cảm biến:
 
+**Cách 1: Dùng script có sẵn tại thư mục gốc (Khuyên dùng trên Jetson Orin):**
+```bash
+cd ~/ros2_ws && ./kill_all.sh
+```
+
+**Cách 2: Lệnh 1 dòng copy-paste trực tiếp:**
 ```bash
 killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router 2>/dev/null || true
-pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard)" 2>/dev/null || true
+pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard|person_depth|gui_v3)" 2>/dev/null || true
 ros2 daemon stop && ros2 daemon start
 ```
 
-### 10.2 Emergency Stop for Motors & Motion
-If the robot is moving and needs an immediate velocity stop without killing nodes:
+### 10.2 Phanh dừng khẩn cấp bánh xe (Emergency Stop)
+Nếu robot đang di chuyển và muốn phanh dừng khẩn cấp ngay lập tức mà không tắt các node:
 
 ```bash
 ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
 ros2 service call /mission/emergency_stop std_srvs/srv/Trigger "{}"
 ```
 
-### 10.3 Component-Specific Kill Commands
-- **Kill UI & Voice Chat only:**
+### 10.3 Lệnh tắt riêng từng cụm thành phần
+- **Chỉ tắt giao diện Kiosk & Voice Chat:**
   ```bash
   pkill -9 -f "(robot_ui_kiosk|9router)"
   ```
-- **Kill Navigation & SLAM only:**
+- **Chỉ tắt Điều hướng Nav2 & SLAM:**
   ```bash
   pkill -9 -f "(nav2|slam_toolbox|amcl|controller_server|planner_server|bt_navigator)"
   ```
-- **Kill Camera & Sensor Drivers only:**
+- **Chỉ tắt Driver Camera & Cảm biến phần cứng:**
   ```bash
   pkill -9 -f "(astra_camera|sllidar|obstacle_detector|usb_cam|depthimage_to_laserscan)"
   ```
-- **Kill Mission Controller & Backend only:**
+- **Chỉ tắt Mission Controller & Backend:**
   ```bash
   pkill -9 -f "(robot_mission_control|robot_navigation_manager|robot_config_manager|robot_system_monitor)"
   ```
 
-### 10.4 Convenient Shell Alias (Optional)
-Add this alias to `~/.bashrc` on both PC and Orin for instant shutdown via `killrobot`:
+### 10.4 Cấu hình Alias tiện lợi trên Jetson Orin (Tùy chọn)
+Thêm alias này vào file `~/.bashrc` trên Jetson Orin để chỉ cần gõ `killrobot` ở bất kỳ terminal nào:
 
 ```bash
-alias killrobot='killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router 2>/dev/null; pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra_camera|sllidar|hoverboard)" 2>/dev/null; ros2 daemon stop; ros2 daemon start; echo "All robot tasks terminated."'
+alias killrobot='cd ~/ros2_ws && ./kill_all.sh'
 ```
 

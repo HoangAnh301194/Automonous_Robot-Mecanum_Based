@@ -62,6 +62,43 @@ def test_sentence_segmenter_asian_punctuations():
     assert out[2] == "何かご用でしょうか？"
 
 
+def test_sentence_segmenter_early_clause_and_bullets():
+    segmenter = SentenceSegmenter(min_sentence_chars=5, min_clause_chars=10)
+    deltas = [
+        "Tôi có thể ", "thử hát một câu ngắn ", "cho bạn nghe:  \n\n",
+        "“Bầu trời rộng mở, ", "ước mơ bay xa\n",
+        "Học viện Bưu chính, ", "vững bước vươn ra”.",
+    ]
+    extracted = []
+    for d in deltas:
+        extracted.extend(segmenter.push_delta(d))
+    extracted.extend(segmenter.flush())
+
+    assert len(extracted) == 3
+    # Colon introductory clause dispatched early
+    assert extracted[0] == "Tôi có thể thử hát một câu ngắn cho bạn nghe:"
+    # Poem/lyric line ending with \n dispatched early
+    assert extracted[1] == "“Bầu trời rộng mở, ước mơ bay xa"
+    assert "vững bước vươn ra”." in extracted[2]
+
+
+def test_sentence_segmenter_time_url_and_number_safety():
+    segmenter = SentenceSegmenter(min_sentence_chars=5)
+    # Colons in time or URLs, and commas in numbers should NOT be split prematurely
+    text = (
+        "Lớp học bắt đầu lúc 08:30 sáng mai tại phòng 201. "
+        "Truy cập https://ptit.edu.vn để nộp học phí 25,000,000 VNĐ."
+    )
+    out = segmenter.push_delta(text)
+    out.extend(segmenter.flush())
+
+    assert len(out) == 2
+    assert "08:30" in out[0]
+    assert "https://ptit.edu.vn" in out[1]
+    assert "25,000,000" in out[1]
+
+
+
 # ----------------------------------------------------------------------
 # F2. SSE Parser and UTF-8 Chunking Tests
 # ----------------------------------------------------------------------
