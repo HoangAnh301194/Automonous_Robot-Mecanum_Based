@@ -432,10 +432,84 @@ def test_nav_button_1_25x_dimensions(app):
     from robot_ui.kiosk.widgets import NavButton
     missing = Path("/nonexistent-kiosk-test-asset")
     btn = NavButton("Trang chủ", missing, "home")
-    assert btn.iconSize().width() == 31
-    assert btn.iconSize().height() == 31
-    assert btn.width() == 88
-    assert btn.height() == 65
+    assert btn.iconSize().width() == 39
+    assert btn.iconSize().height() == 39
+    assert btn.width() == 110
+    assert btn.height() == 81
+
+
+def test_top_left_home_and_emergency_buttons_on_pages(app):
+    """Verify that all main pages provide top-left Home and Emergency Stop buttons."""
+    from robot_ui.kiosk.widgets import ChatPage, NavigationPage
+    from robot_ui.kiosk.pages import WelcomePage, ServicePage, AdminPage
+
+    missing = Path("/nonexistent-kiosk-test-asset")
+
+    # 1. ChatPage
+    chat_page = ChatPage(chat_icon=missing, back_icon=missing, home_icon=missing, emergency_icon=missing)
+    chat_home_seen, chat_emg_seen = [], []
+    chat_page.home_requested.connect(lambda: chat_home_seen.append(True))
+    chat_page.emergency_stop_requested.connect(lambda: chat_emg_seen.append(True))
+    chat_home_btn = chat_page.findChild(QPushButton, "navHomeButton")
+    chat_emg_btn = chat_page.findChild(QPushButton, "navEmergencyButton")
+    assert chat_home_btn is not None
+    assert chat_emg_btn is not None
+    chat_home_btn.click()
+    chat_emg_btn.click()
+    assert chat_home_seen == [True]
+    assert chat_emg_seen == [True]
+
+    # 2. ServicePage
+    service_page = ServicePage(back_icon=missing, home_icon=missing, emergency_icon=missing)
+    srv_home_seen, srv_emg_seen = [], []
+    service_page.home_requested.connect(lambda: srv_home_seen.append(True))
+    service_page.emergency_stop_requested.connect(lambda: srv_emg_seen.append(True))
+    assert service_page.home_button is not None
+    assert service_page.emergency_button is not None
+    service_page.home_button.click()
+    service_page.emergency_button.click()
+    assert srv_home_seen == [True]
+    assert srv_emg_seen == [True]
+
+    # 3. AdminPage
+    admin_page = AdminPage(
+        nav_icon=missing, slam_icon=missing, back_icon=missing, home_icon=missing, emergency_icon=missing
+    )
+    admin_home_seen, admin_emg_seen = [], []
+    admin_page.home_requested.connect(lambda: admin_home_seen.append(True))
+    admin_page.emergency_stop_requested.connect(lambda: admin_emg_seen.append(True))
+    assert admin_page.home_button is not None
+    assert admin_page.emergency_button is not None
+    admin_page.home_button.click()
+    admin_page.emergency_button.click()
+    assert admin_home_seen == [True]
+    assert admin_emg_seen == [True]
+
+    # 4. NavigationPage
+    nav_page = NavigationPage({
+        "home": missing,
+        "back": missing,
+        "emergency": missing,
+        "goal": missing,
+        "click_goal": missing,
+        "start": missing,
+        "stop": missing,
+    })
+    nav_home_seen, nav_emg_seen = [], []
+    nav_page.home_requested.connect(lambda: nav_home_seen.append(True))
+    nav_page.emergency_stop_requested.connect(lambda: nav_emg_seen.append(True))
+    nav_home = nav_page.findChild(QPushButton, "navHomeButton")
+    nav_emg = nav_page.findChild(QPushButton, "navEmergencyButton")
+    assert nav_home is not None
+    assert nav_emg is not None
+    nav_home.click()
+    nav_emg.click()
+    assert nav_home_seen == [True]
+    assert nav_emg_seen == [True]
+
+    # 5. WelcomePage (uses bottom dock for emergency stop, no duplicate button on top)
+    welcome_page = WelcomePage(background=missing, ptit=missing, faculty=missing, emergency_icon=missing)
+    assert welcome_page.findChild(QPushButton, "welcomeEmergencyButton") is None
 
 
 

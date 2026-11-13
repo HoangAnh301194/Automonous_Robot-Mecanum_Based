@@ -17,6 +17,9 @@ from .bt_core import NodeStatus, Condition, Action, Blackboard
 
 class IsEmergency(Condition):
     def tick(self, blackboard: Blackboard) -> NodeStatus:
+        if blackboard.get('EMERGENCY_STOP', False):
+            return NodeStatus.SUCCESS
+
         lidar_ok = blackboard.get('SYSTEM_lidar_ok', True)
         odom_ok = blackboard.get('SYSTEM_odom_ok', True)
         localization_ok = blackboard.get('SYSTEM_localization_ok', True)
@@ -111,8 +114,12 @@ class StopRobot(Action):
 
         if self.node and (now - self._last_log_time >= 5.0):
             self._last_log_time = now
-            self.node.get_logger().error("EMERGENCY STOP! Canceling all navigation.")
-            self.node.publish_log("[KHẨN CẤP] Cảm biến gặp sự cố! Dừng xe ngay lập tức.")
+            if blackboard.get('EMERGENCY_STOP', False):
+                self.node.get_logger().error("EMERGENCY STOP (HMI Triggered)! Dừng xe và ngắt mọi hành vi.")
+                self.node.publish_log("[KHẨN CẤP] Đã kích hoạt Dừng khẩn cấp từ HMI! Xe dừng hoàn toàn.")
+            else:
+                self.node.get_logger().error("EMERGENCY STOP! Canceling all navigation.")
+                self.node.publish_log("[KHẨN CẤP] Cảm biến gặp sự cố! Dừng xe ngay lập tức.")
         return NodeStatus.RUNNING
 
     def halt(self, blackboard: Blackboard = None) -> None:

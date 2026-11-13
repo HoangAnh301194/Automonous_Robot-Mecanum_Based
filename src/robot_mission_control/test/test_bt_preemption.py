@@ -340,3 +340,21 @@ def test_serve_customer_resumes_interrupted_patrol_target():
     assert patrol.tick(bb) == NodeStatus.RUNNING
     assert patrol.current_idx == 1
     assert sent_targets == ["B", "B"]
+
+
+def test_emergency_stop_blackboard_triggers_p0_preemption():
+    """Verify setting EMERGENCY_STOP on blackboard triggers IsEmergency immediately."""
+    cond = IsEmergency("TestEmergency")
+    bb = Blackboard()
+
+    # Normal state: sensors OK, no emergency stop
+    bb.set("EMERGENCY_STOP", False)
+    bb.set("SYSTEM_lidar_ok", True)
+    bb.set("SYSTEM_odom_ok", True)
+    bb.set("SYSTEM_localization_ok", True)
+    assert cond.tick(bb) == NodeStatus.FAILURE
+
+    # HMI Emergency stop triggered
+    bb.set("EMERGENCY_STOP", True)
+    assert cond.tick(bb) == NodeStatus.SUCCESS
+

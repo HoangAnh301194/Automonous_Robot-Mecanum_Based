@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import Enum
 import math
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -441,6 +442,8 @@ class MapWidget(QWidget):
 
 class NavigationPage(QWidget):
     home_requested = pyqtSignal()
+    back_requested = pyqtSignal()
+    emergency_stop_requested = pyqtSignal()
     start_requested = pyqtSignal(float, float, float)
     cancel_requested = pyqtSignal()
 
@@ -456,22 +459,56 @@ class NavigationPage(QWidget):
 
         top_layout = QHBoxLayout()
         top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(8)
 
+        # 1. Nút Home (Về thẳng màn hình chính)
         home = QPushButton()
         home.setObjectName("navHomeButton")
-        home.setToolTip("Quay lại")
-        home.setAccessibleName("Quay lại")
+        home.setToolTip("Về màn hình chính")
+        home.setAccessibleName("Về màn hình chính")
+        home.setFixedSize(46, 46)
+        home_icon = icons.get("home")
+        if home_icon and Path(home_icon).is_file():
+            home.setIcon(QIcon(str(home_icon)))
+            home.setIconSize(QSize(28, 28))
+        else:
+            home.setText("🏠")
+            home.setStyleSheet("font-size: 22px;")
+        home.clicked.connect(self.home_requested.emit)
+        top_layout.addWidget(home)
+
+        # 2. Nút Dừng khẩn cấp (Emergency Stop)
+        emergency = QPushButton()
+        emergency.setObjectName("navEmergencyButton")
+        emergency.setToolTip("DỪNG KHẨN CẤP")
+        emergency.setAccessibleName("Dừng khẩn cấp")
+        emergency.setFixedSize(46, 46)
+        emergency_icon = icons.get("emergency")
+        if emergency_icon and Path(emergency_icon).is_file():
+            emergency.setIcon(QIcon(str(emergency_icon)))
+            emergency.setIconSize(QSize(36, 36))
+        else:
+            emergency.setText("🛑")
+            emergency.setStyleSheet("font-size: 24px;")
+        emergency.clicked.connect(self.emergency_stop_requested.emit)
+        top_layout.addWidget(emergency)
+
+        # 3. Nút Back (Quay lại trang trước)
+        back = QPushButton()
+        back.setObjectName("navBackButton")
+        back.setToolTip("Quay lại")
+        back.setAccessibleName("Quay lại")
+        back.setFixedSize(46, 46)
         back_icon = icons.get("back")
         if back_icon and Path(back_icon).is_file():
-            home.setIcon(QIcon(str(back_icon)))
-            home.setIconSize(QSize(28, 28))
-            home.setFixedSize(42, 42)
+            back.setIcon(QIcon(str(back_icon)))
+            back.setIconSize(QSize(28, 28))
         else:
-            home.setIcon(monochrome_icon(icons.get("home", ""), QColor("#ffb32c")))
-            home.setIconSize(QSize(22, 22))
-            home.setFixedSize(34, 34)
-        home.clicked.connect(self.home_requested)
-        top_layout.addWidget(home)
+            back.setText("‹")
+            back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
+        back.clicked.connect(self.back_requested.emit)
+        top_layout.addWidget(back)
+
         top_layout.addStretch(1)
 
         self.time_label = QLabel()
@@ -620,8 +657,10 @@ def strip_emojis(text: str) -> str:
 
 
 class SpeakerButton(QPushButton):
-    """Nút loa hỗ trợ: Bấm nhanh = Mute toggle; Bấm giữ + Kéo = Điều chỉnh âm lượng."""
+    """Nút loa hỗ trợ: Bấm đơn = Mute/Unmute; Bấm 2 lần = Mở thanh âm lượng; Bấm giữ + Kéo = Trượt âm lượng."""
 
+    single_clicked = pyqtSignal()
+    double_clicked = pyqtSignal()
     long_press_started = pyqtSignal()
     drag_moved = pyqtSignal(int, int)  # (global_x, global_y)
     drag_finished = pyqtSignal()
@@ -636,13 +675,26 @@ class SpeakerButton(QPushButton):
         self._long_timer.setInterval(250)
         self._long_timer.timeout.connect(self._on_long_press_timeout)
 
+        self._from_mouse = False
+        self._pending_single_click = False
+        self._last_click_time = 0.0
+        self._last_double_click_time = 0.0
+        self._click_timer = QTimer(self)
+        self._click_timer.setSingleShot(True)
+        self._click_timer.setInterval(320)
+        self._click_timer.timeout.connect(self._on_click_timeout)
+        self.clicked.connect(self._handle_clicked)
+
     def _on_long_press_timeout(self) -> None:
         self._is_long_press = True
         self._drag_active = True
+        self._pending_single_click = False
+        self._click_timer.stop()
         self.long_press_started.emit()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.LeftButton:
+            self._from_mouse = True
             self._press_pos = event.globalPos()
             self._is_long_press = False
             self._drag_active = False
@@ -661,11 +713,52 @@ class SpeakerButton(QPushButton):
         self._long_timer.stop()
         if self._drag_active or self._is_long_press:
             self._drag_active = False
+            self._pending_single_click = False
+            self._click_timer.stop()
             self.drag_finished.emit()
             self.setDown(False)
             event.accept()
+            self._from_mouse = False
             return
         super().mouseReleaseEvent(event)
+        self._from_mouse = False
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            now = time.monotonic()
+            self._long_timer.stop()
+            self._drag_active = False
+            self._click_timer.stop()
+            self._pending_single_click = False
+            self._last_double_click_time = now
+            self.double_clicked.emit()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _handle_clicked(self) -> None:
+        now = time.monotonic()
+        if not self._from_mouse:
+            # Programmatic click (e.g. from unit tests)
+            self.single_clicked.emit()
+            return
+        if now - self._last_double_click_time < 0.35:
+            # Already triggered by mouseDoubleClickEvent
+            return
+        if self._pending_single_click and (now - self._last_click_time) <= 0.38:
+            self._click_timer.stop()
+            self._pending_single_click = False
+            self._last_double_click_time = now
+            self.double_clicked.emit()
+        else:
+            self._pending_single_click = True
+            self._last_click_time = now
+            self._click_timer.start(320)
+
+    def _on_click_timeout(self) -> None:
+        if self._pending_single_click:
+            self._pending_single_click = False
+            self.single_clicked.emit()
 
 
 class VolumeSliderWidget(QFrame):
@@ -678,8 +771,8 @@ class VolumeSliderWidget(QFrame):
         self.setObjectName("volumeSliderWidget")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setFixedHeight(44)
-        self.setMinimumWidth(150)
-        self.setMaximumWidth(185)
+        self.setMinimumWidth(160)
+        self.setMaximumWidth(200)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(10, 4, 10, 4)
@@ -702,7 +795,7 @@ class VolumeSliderWidget(QFrame):
 
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
-        self._hide_timer.setInterval(2500)
+        self._hide_timer.setInterval(3500)
         self._hide_timer.timeout.connect(self.hide)
 
         self.setStyleSheet("""
@@ -717,21 +810,21 @@ class VolumeSliderWidget(QFrame):
                 font-weight: 700;
             }
             QSlider#volumeSlider::groove:horizontal {
-                height: 6px;
+                height: 8px;
                 background: #2b2b2b;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QSlider#volumeSlider::sub-page:horizontal {
                 background: #ffb32c;
-                border-radius: 3px;
+                border-radius: 4px;
             }
             QSlider#volumeSlider::handle:horizontal {
                 background: #ffffff;
                 border: 2px solid #ffb32c;
-                width: 18px;
-                height: 18px;
-                margin: -6px 0;
-                border-radius: 9px;
+                width: 22px;
+                height: 22px;
+                margin: -7px 0;
+                border-radius: 11px;
             }
         """)
 
@@ -753,8 +846,17 @@ class VolumeSliderWidget(QFrame):
         self.raise_()
         self._hide_timer.stop()
 
+    def toggle_slider(self) -> None:
+        """Bật/tắt hiển thị thanh trượt âm lượng (dùng khi double-click nút loa)."""
+        if self.isVisible():
+            self._hide_timer.stop()
+            self.hide()
+        else:
+            self.show_slider()
+            self.start_hide_timer()
+
     def start_hide_timer(self) -> None:
-        self._hide_timer.start(2500)
+        self._hide_timer.start(3500)
 
     def update_from_global_point(self, gx: int, gy: int) -> None:
         self.show_slider()
@@ -768,12 +870,14 @@ class VolumeSliderWidget(QFrame):
     def _on_slider_value_changed(self, value: int) -> None:
         self._label.setText(f"{value}%")
         self.volume_changed.emit(value)
-        self._hide_timer.start(2500)
+        self._hide_timer.start(3500)
 
 
 class ChatPage(QWidget):
     chat_submitted = pyqtSignal(str)  # emitted khi user nhấn Gửi
     home_requested = pyqtSignal()
+    back_requested = pyqtSignal()
+    emergency_stop_requested = pyqtSignal()
     mic_clicked = pyqtSignal()
     speaker_toggled = pyqtSignal(bool)
     stop_speaking_requested = pyqtSignal()
@@ -791,6 +895,8 @@ class ChatPage(QWidget):
         chat_icon: Path,
         parent: QWidget | None = None,
         back_icon: Path | None = None,
+        home_icon: Path | None = None,
+        emergency_icon: Path | None = None,
         voice_icons: dict[str, Path] | None = None,
     ) -> None:
         super().__init__(parent)
@@ -831,10 +937,41 @@ class ChatPage(QWidget):
         header.setMaximumHeight(72)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 8, 12, 8)
-        header_layout.setSpacing(10)
+        header_layout.setSpacing(8)
 
+        # 1. Nút Home (Về thẳng màn hình chính)
+        home = QPushButton()
+        home.setObjectName("navHomeButton")
+        home.setToolTip("Về màn hình chính")
+        home.setAccessibleName("Về màn hình chính")
+        home.setFixedSize(46, 46)
+        if home_icon and Path(home_icon).is_file():
+            home.setIcon(QIcon(str(home_icon)))
+            home.setIconSize(QSize(28, 28))
+        else:
+            home.setText("🏠")
+            home.setStyleSheet("font-size: 22px;")
+        home.clicked.connect(self.home_requested.emit)
+        header_layout.addWidget(home)
+
+        # 2. Nút Dừng khẩn cấp
+        emergency = QPushButton()
+        emergency.setObjectName("navEmergencyButton")
+        emergency.setToolTip("DỪNG KHẨN CẤP")
+        emergency.setAccessibleName("Dừng khẩn cấp")
+        emergency.setFixedSize(46, 46)
+        if emergency_icon and Path(emergency_icon).is_file():
+            emergency.setIcon(QIcon(str(emergency_icon)))
+            emergency.setIconSize(QSize(36, 36))
+        else:
+            emergency.setText("🛑")
+            emergency.setStyleSheet("font-size: 24px;")
+        emergency.clicked.connect(self.emergency_stop_requested.emit)
+        header_layout.addWidget(emergency)
+
+        # 3. Nút Quay lại (Back)
         back = QPushButton()
-        back.setObjectName("navHomeButton")
+        back.setObjectName("navBackButton")
         back.setToolTip("Quay lại")
         back.setAccessibleName("Quay lại")
         back.setFixedSize(46, 46)
@@ -844,7 +981,7 @@ class ChatPage(QWidget):
         else:
             back.setText("‹")
             back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
-        back.clicked.connect(self.home_requested)
+        back.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(back)
 
         icon_label = QLabel()
@@ -897,7 +1034,8 @@ class ChatPage(QWidget):
         self._speaker_btn.setFixedSize(48, 48)
         self._speaker_btn.setIconSize(QSize(26, 26))
         self._speaker_btn.setCursor(Qt.PointingHandCursor)
-        self._speaker_btn.clicked.connect(self._toggle_speaker)
+        self._speaker_btn.single_clicked.connect(self._toggle_speaker)
+        self._speaker_btn.double_clicked.connect(self._on_speaker_double_clicked)
         self._speaker_btn.long_press_started.connect(self._on_speaker_long_pressed)
         self._speaker_btn.drag_moved.connect(self._on_speaker_drag_moved)
         self._speaker_btn.drag_finished.connect(self._on_speaker_drag_finished)
@@ -1204,6 +1342,9 @@ class ChatPage(QWidget):
                 else None,
             )
 
+    def _on_speaker_double_clicked(self) -> None:
+        self._volume_widget.toggle_slider()
+
     def _on_speaker_long_pressed(self) -> None:
         self._volume_widget.show_slider()
 
@@ -1239,7 +1380,12 @@ class ChatPage(QWidget):
     def _update_speaker_ui(self) -> None:
         icon_name = "speaker_on" if self._speaker_enabled else "speaker_off"
         self._speaker_btn.setIcon(self._get_icon(icon_name))
-        self._speaker_btn.setToolTip("Bật âm thanh" if not self._speaker_enabled else "Tắt âm thanh")
+        tooltip = (
+            "Bật âm thanh (Chạm 2 lần để chỉnh âm lượng)"
+            if not self._speaker_enabled
+            else "Tắt âm thanh (Chạm 2 lần để chỉnh âm lượng)"
+        )
+        self._speaker_btn.setToolTip(tooltip)
 
     def set_speaker_speaking(self, is_speaking: bool) -> None:
         self._is_speaking = is_speaking
@@ -1457,8 +1603,8 @@ class NavButton(QPushButton):
         self.setToolTip(text)
         self.setAccessibleName(text)
         self.setCheckable(True)
-        self.setIconSize(QSize(31, 31))
-        self.setFixedSize(88, 65)
+        self.setIconSize(QSize(39, 39))
+        self.setFixedSize(110, 81)
 
     def refresh_appearance(self, dark_background: bool, active: bool) -> None:
         self.setProperty("dark", dark_background)
@@ -1484,8 +1630,8 @@ class BottomNavigation(QFrame):
         self._buttons: dict[str, NavButton] = {}
         self._dark_background = True
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 7, 10, 7)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setSpacing(10)
         labels = {
             "home": "Trang chủ",
             "chat": "Trò chuyện",

@@ -33,6 +33,7 @@ class MissionControllerNode(Node):
 
         # 1. Blackboard chia sẻ dữ liệu giữa các node BT
         self.blackboard = Blackboard()
+        self.blackboard.set('EMERGENCY_STOP', False)
         self.blackboard.set('SYSTEM_lidar_ok', True)
         self.blackboard.set('SYSTEM_odom_ok', True)
         self.blackboard.set('SYSTEM_localization_ok', True)
@@ -60,9 +61,10 @@ class MissionControllerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # 3. Action Client & Cancel Client tới Nav2 + khóa /cmd_vel
+        # 3. Action Client & Cancel Client tới Nav2 và DirectGo + khóa /cmd_vel
         self.nav2_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.cancel_nav2_client = self.create_client(CancelGoal, '/navigate_to_pose/_action/cancel_goal')
+        self.cancel_direct_go_client = self.create_client(CancelGoal, '/navigation/direct_go/_action/cancel_goal')
 
         # 4. Publishers
         self.pub_log = self.create_publisher(String, '/mission/status_log', 10)
@@ -106,6 +108,12 @@ class MissionControllerNode(Node):
         self.srv_pause_patrol = self.create_service(
             Trigger, '/mission/pause_patrol', self.cb_pause_patrol
         )
+        self.srv_emergency_stop = self.create_service(
+            Trigger, '/mission/emergency_stop', self.cb_emergency_stop
+        )
+        self.srv_reset_emergency = self.create_service(
+            Trigger, '/mission/reset_emergency', self.cb_reset_emergency
+        )
         self.srv_trigger_serve = self.create_service(
             Trigger, '/mission/trigger_serve', self.cb_srv_trigger_serve
         )
@@ -129,13 +137,19 @@ class MissionControllerNode(Node):
         self.pub_cmd_vel.publish(Twist())
 
     def stop_robot_motion(self, cancel_nav2: bool = True):
-        """Immediately zero /cmd_vel and cancel any active Nav2 NavigateToPose goal."""
+        """Immediately zero /cmd_vel and cancel any active Nav2 NavigateToPose or DirectGo goal."""
         self.publish_zero_vel()
-        if cancel_nav2 and self.cancel_nav2_client.service_is_ready():
-            try:
-                self.cancel_nav2_client.call_async(CancelGoal.Request())
-            except Exception as exc:
-                self.get_logger().warn(f"Lỗi gọi cancel Nav2: {exc}")
+        if cancel_nav2:
+            if self.cancel_nav2_client.service_is_ready():
+                try:
+                    self.cancel_nav2_client.call_async(CancelGoal.Request())
+                except Exception as exc:
+                    self.get_logger().warn(f"Lỗi gọi cancel Nav2: {exc}")
+            if self.cancel_direct_go_client.service_is_ready():
+                try:
+                    self.cancel_direct_go_client.call_async(CancelGoal.Request())
+                except Exception as exc:
+                    self.get_logger().warn(f"Lỗi gọi cancel DirectGo: {exc}")
 
     def _activate_serving(self):
         self.blackboard.set('SERVE_REQUESTED', False)
@@ -268,6 +282,31 @@ class MissionControllerNode(Node):
         response.success = True
         response.message = "Tạm dừng tuần tra"
         self.publish_log("Lệnh HMI: Tạm dừng tuần tra.")
+        return response
+
+    def cb_emergency_stop(self, request, response):
+        self.blackboard.set('EMERGENCY_STOP', True)
+        self.blackboard.set('HMI_start_patrol', False)
+        self.blackboard.set('APPROACH_ACTIVE', False)
+        self.blackboard.set('HAND_WAVE_ACTIVE', False)
+        self.blackboard.set('WAVING_PERSON', None)
+        self.blackboard.set('TARGET_TRACK_ID', None)
+        self.blackboard.set('PERSON_IN_PATH', False)
+        self.blackboard.set('ENCOUNTER_ACTIVE', False)
+        self.blackboard.set('IS_SERVING', False)
+        self.blackboard.set('SERVE_REQUESTED', False)
+        self.blackboard.set('FINISH_SERVING_REQUESTED', False)
+        self.stop_robot_motion(cancel_nav2=True)
+        response.success = True
+        response.message = "Đã kích hoạt DỪNG KHẨN CẤP toàn bộ hệ thống."
+        self.publish_log("🚨 LỆNH HMI: DỪNG KHẨN CẤP TOÀN BỘ HOẠT ĐỘNG!")
+        return response
+
+    def cb_reset_emergency(self, request, response):
+        self.blackboard.set('EMERGENCY_STOP', False)
+        response.success = True
+        response.message = "Đã mở khóa dừng khẩn cấp."
+        self.publish_log("🟢 LỆNH HMI: Đã giải phóng Dừng khẩn cấp.")
         return response
 
     def cb_reload_route(self, request, response):

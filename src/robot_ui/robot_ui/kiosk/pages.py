@@ -231,6 +231,8 @@ class AdminPage(QWidget):
     navigation_requested = pyqtSignal()
     logout_requested = pyqtSignal()
     back_requested = pyqtSignal()
+    home_requested = pyqtSignal()
+    emergency_stop_requested = pyqtSignal()
     detection_debug_requested = pyqtSignal()
     slam_requested = pyqtSignal()
     start_nav_requested = pyqtSignal()
@@ -249,6 +251,8 @@ class AdminPage(QWidget):
         wifi_disconnected_icon: Path | None = None,
         battery_icons: dict[str, Path] | None = None,
         back_icon: Path | None = None,
+        home_icon: Path | None = None,
+        emergency_icon: Path | None = None,
     ):
         super().__init__()
         self.setObjectName("adminPage")
@@ -258,6 +262,8 @@ class AdminPage(QWidget):
         self.wifi_disconnected_icon = wifi_disconnected_icon
         self.battery_icons = battery_icons or {}
         self.back_icon = back_icon
+        self.home_icon = home_icon
+        self.emergency_icon = emergency_icon
 
         # Fallback status labels for backwards compatibility
         self.connection = QLabel("Kết nối ROS 2: Đang chờ")
@@ -269,11 +275,41 @@ class AdminPage(QWidget):
         root.setContentsMargins(28, 18, 28, 24)
         root.setSpacing(14)
 
-        # Header: Back Button + Title on Left, Status Bar on Right
+        # Header: Control cluster (Home, E-Stop, Back) + Title on Left, Status Bar on Right
         header = QHBoxLayout()
-        header.setSpacing(12)
+        header.setSpacing(10)
 
-        # Back button in top-left
+        # 1. Home button in top-left
+        self.home_button = QPushButton()
+        self.home_button.setObjectName("adminHomeButton")
+        self.home_button.setCursor(Qt.PointingHandCursor)
+        self.home_button.setFixedSize(46, 46)
+        self.home_button.setToolTip("Về màn hình chính")
+        if home_icon and Path(home_icon).is_file():
+            self.home_button.setIcon(QIcon(str(home_icon)))
+            self.home_button.setIconSize(QSize(28, 28))
+        else:
+            self.home_button.setText("🏠")
+            self.home_button.setStyleSheet("font-size: 22px;")
+        self.home_button.clicked.connect(self.home_requested.emit)
+        header.addWidget(self.home_button)
+
+        # 2. Emergency stop button in top-left
+        self.emergency_button = QPushButton()
+        self.emergency_button.setObjectName("adminEmergencyButton")
+        self.emergency_button.setCursor(Qt.PointingHandCursor)
+        self.emergency_button.setFixedSize(46, 46)
+        self.emergency_button.setToolTip("DỪNG KHẨN CẤP")
+        if emergency_icon and Path(emergency_icon).is_file():
+            self.emergency_button.setIcon(QIcon(str(emergency_icon)))
+            self.emergency_button.setIconSize(QSize(36, 36))
+        else:
+            self.emergency_button.setText("🛑")
+            self.emergency_button.setStyleSheet("font-size: 24px;")
+        self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
+        header.addWidget(self.emergency_button)
+
+        # 3. Back button in top-left
         self.back_button = QPushButton()
         self.back_button.setObjectName("adminBackButton")
         self.back_button.setCursor(Qt.PointingHandCursor)
@@ -571,7 +607,9 @@ class AdminPage(QWidget):
 
 
 class ServicePage(QWidget):
+    home_requested = pyqtSignal()
     back_requested = pyqtSignal()
+    emergency_stop_requested = pyqtSignal()
     mode_selected = pyqtSignal(str)
 
     def __init__(
@@ -580,6 +618,8 @@ class ServicePage(QWidget):
         wait_icon: Path | None = None,
         continue_icon: Path | None = None,
         service_icon: Path | None = None,
+        home_icon: Path | None = None,
+        emergency_icon: Path | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -598,13 +638,44 @@ class ServicePage(QWidget):
         header.setMaximumHeight(72)
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(12, 8, 12, 8)
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(8)
+
+        # Nút Home bên trái
+        self.home_button = QPushButton()
+        self.home_button.setObjectName("serviceHomeButton")
+        self.home_button.setCursor(Qt.PointingHandCursor)
+        self.home_button.setFixedSize(46, 46)
+        self.home_button.setToolTip("Về màn hình chính")
+        if home_icon and Path(home_icon).is_file():
+            self.home_button.setIcon(QIcon(str(home_icon)))
+            self.home_button.setIconSize(QSize(28, 28))
+        else:
+            self.home_button.setText("🏠")
+            self.home_button.setStyleSheet("font-size: 22px;")
+        self.home_button.clicked.connect(self.home_requested.emit)
+        header_layout.addWidget(self.home_button)
+
+        # Nút Dừng khẩn cấp
+        self.emergency_button = QPushButton()
+        self.emergency_button.setObjectName("serviceEmergencyButton")
+        self.emergency_button.setCursor(Qt.PointingHandCursor)
+        self.emergency_button.setFixedSize(46, 46)
+        self.emergency_button.setToolTip("DỪNG KHẨN CẤP")
+        if emergency_icon and Path(emergency_icon).is_file():
+            self.emergency_button.setIcon(QIcon(str(emergency_icon)))
+            self.emergency_button.setIconSize(QSize(36, 36))
+        else:
+            self.emergency_button.setText("🛑")
+            self.emergency_button.setStyleSheet("font-size: 24px;")
+        self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
+        header_layout.addWidget(self.emergency_button)
 
         # Nút Back bên trái
         self.back_button = QPushButton()
         self.back_button.setObjectName("serviceBackButton")
         self.back_button.setCursor(Qt.PointingHandCursor)
         self.back_button.setFixedSize(46, 46)
+        self.back_button.setToolTip("Quay lại")
         if back_icon and Path(back_icon).is_file():
             self.back_button.setIcon(QIcon(str(back_icon)))
             self.back_button.setIconSize(QSize(28, 28))

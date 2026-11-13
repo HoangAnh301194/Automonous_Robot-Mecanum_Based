@@ -74,6 +74,27 @@ QPushButton#kioskNavButton[dark="true"]:checked {
 QPushButton#kioskNavButton:pressed {
     background: transparent;
 }
+QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeButton, QPushButton#navBackButton {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+}
+QPushButton#navHomeButton:hover, QPushButton#adminHomeButton:hover, QPushButton#serviceHomeButton:hover, QPushButton#navBackButton:hover {
+    background: #334155;
+    border-color: #ffb32c;
+}
+QPushButton#navEmergencyButton, QPushButton#adminEmergencyButton, QPushButton#serviceEmergencyButton {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    padding: 2px;
+}
+QPushButton#navEmergencyButton:hover, QPushButton#adminEmergencyButton:hover, QPushButton#serviceEmergencyButton:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+QPushButton#navEmergencyButton:pressed, QPushButton#adminEmergencyButton:pressed, QPushButton#serviceEmergencyButton:pressed {
+    background: rgba(255, 255, 255, 0.22);
+}
 QLabel#lightBadge {
     color: #30404a;
     background: white;
@@ -453,11 +474,14 @@ class KioskWindow(QMainWindow):
             wifi_disconnected_icon=icon_path("wifidisconected.png"),
             battery_icons=battery_icons,
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
         )
         self.navigation_page = NavigationPage(
             {
                 "home": icon_path("homeIcon.png"),
                 "back": icon_path("back.png"),
+                "emergency": icon_path("emergency_stop.png"),
                 "click_goal": icon_path("clickGoal.png"),
                 "goal": icon_path("location.png"),
                 "start": icon_path("startNavigation.png"),
@@ -475,10 +499,14 @@ class KioskWindow(QMainWindow):
         self.chat_page = ChatPage(
             chat_icon=icon_path("chatIcon.png"),
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
             voice_icons=voice_icons,
         )
         self.service_page = ServicePage(
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
             wait_icon=icon_path("service_wait.png"),
             continue_icon=icon_path("service_continue.png"),
             service_icon=icon_path("service.png"),
@@ -507,10 +535,17 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
         self.home_page.service_requested.connect(self._on_service_requested)
+        self.home_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.service_page.home_requested.connect(self.return_to_home)
         self.service_page.back_requested.connect(self.go_back)
+        self.service_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.service_page.mode_selected.connect(self._on_service_mode_selected)
-        self.chat_page.home_requested.connect(self.go_back)
+        self.chat_page.home_requested.connect(self.return_to_home)
+        self.chat_page.back_requested.connect(self.go_back)
+        self.chat_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.admin_page.home_requested.connect(self.return_to_home)
         self.admin_page.back_requested.connect(self.go_back)
+        self.admin_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.admin_page.logout_requested.connect(self.go_back)
         self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
         self.admin_page.start_nav_requested.connect(self._on_admin_start_nav)
@@ -518,7 +553,9 @@ class KioskWindow(QMainWindow):
         self.admin_page.slam_requested.connect(self._on_admin_slam)
         self.admin_page.detection_debug_requested.connect(self._on_admin_detection)
         self.admin_page.system_status_requested.connect(self._on_admin_system_status)
-        self.navigation_page.home_requested.connect(self.go_back)
+        self.navigation_page.home_requested.connect(self.return_to_home)
+        self.navigation_page.back_requested.connect(self.go_back)
+        self.navigation_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.navigation_page.start_requested.connect(self.ros_node.navigate_to_pose)
         self.navigation_page.cancel_requested.connect(self.ros_node.cancel_navigation)
 
@@ -616,8 +653,8 @@ class KioskWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
         self.stack.setGeometry(central.rect())
-        nav_width = min(560, max(492, central.width() - 32))
-        nav_height = 80
+        nav_width = min(700, max(615, central.width() - 32))
+        nav_height = 100
         self.bottom_navigation.setGeometry(
             (central.width() - nav_width) // 2,
             central.height() - nav_height - 12,
@@ -742,10 +779,27 @@ class KioskWindow(QMainWindow):
             if self._active_page == "service":
                 self.show_page("home")
 
+    def return_to_home(self) -> None:
+        """Quay thẳng về màn hình chính (home / WelcomePage), dọn sạch lịch sử điều hướng."""
+        self._page_history.clear()
+        self.show_page("home", track_history=False)
+
     def _on_emergency_stop(self) -> None:
-        print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)
+        print("[robot_ui] EMERGENCY STOP TRIGGERED!", flush=True)
+        # 1. Ngắt ngay toàn bộ âm thanh / giọng nói / LLM
+        if hasattr(self, "chat_page"):
+            self.chat_page.stop_speaking()
+        if hasattr(self, "_voice_controller"):
+            self._voice_controller.stop_speaking()
+            self._voice_controller.capture.cancel()
+        if hasattr(self, "_llm_worker"):
+            self._llm_worker.cancel_current_request()
+
+        # 2. Phát lệnh dừng khẩn cấp đa tầng tới ROS node
         self.ros_node.trigger_emergency_stop()
         self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
+        if hasattr(self, "admin_page") and hasattr(self.admin_page, "status_banner"):
+            self.admin_page.status_banner.setText("🚨 DỪNG KHẨN CẤP: Đã ngắt toàn bộ di chuyển và nhiệm vụ!")
         self.bottom_navigation.set_active("home" if self._active_page == "home" else self._active_page)
 
     def _on_admin_start_nav(self) -> None:

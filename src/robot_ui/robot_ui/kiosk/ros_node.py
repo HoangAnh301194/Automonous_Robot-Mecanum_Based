@@ -48,6 +48,15 @@ class KioskRosNode(Node):
         self.cancel_nav2_client = self.create_client(
             CancelGoal, "/navigate_to_pose/_action/cancel_goal"
         )
+        self.cancel_direct_go_client = self.create_client(
+            CancelGoal, "/navigation/direct_go/_action/cancel_goal"
+        )
+        self.emergency_stop_client = self.create_client(
+            Trigger, "/mission/emergency_stop"
+        )
+        self.reset_emergency_client = self.create_client(
+            Trigger, "/mission/reset_emergency"
+        )
         self.pause_patrol_client = self.create_client(
             Trigger, "/mission/pause_patrol"
         )
@@ -412,12 +421,12 @@ class KioskRosNode(Node):
         self.trigger_emergency_stop()
 
     def trigger_emergency_stop(self) -> None:
-        """Dừng khẩn cấp toàn diện: phanh tức thì, hủy Nav2 và dừng tuần tra Mission."""
+        """Dừng khẩn cấp toàn diện: phanh tức thì, hủy mọi Goal Nav2/DirectGo và kích hoạt P0 Emergency trong BT."""
         self.get_logger().warn("🚨 EMERGENCY STOP TRIGGERED FROM UI!")
 
         # 1. Phát liên tục vận tốc 0.0 vào /cmd_vel để phanh dừng bánh lập tức
         stop_twist = Twist()
-        for _ in range(5):
+        for _ in range(10):
             self.cmd_vel_pub.publish(stop_twist)
             time.sleep(0.01)
 
@@ -436,14 +445,33 @@ class KioskRosNode(Node):
         elif self.cancel_nav2_client.wait_for_service(timeout_sec=0.2):
             self.cancel_nav2_client.call_async(req)
 
-        # 4. Gửi yêu cầu tạm dừng tuần tra tới Behavior Tree / Mission Controller
-        if self.pause_patrol_client.service_is_ready():
-            self.pause_patrol_client.call_async(Trigger.Request())
-        elif self.pause_patrol_client.wait_for_service(timeout_sec=0.2):
-            self.pause_patrol_client.call_async(Trigger.Request())
+        # 4. Hủy toàn bộ goal trên DirectGo server (/navigation/direct_go)
+        if self.cancel_direct_go_client.service_is_ready():
+            self.cancel_direct_go_client.call_async(req)
+        elif self.cancel_direct_go_client.wait_for_service(timeout_sec=0.2):
+            self.cancel_direct_go_client.call_async(req)
+
+        # 5. Gọi Service Dừng Khẩn Cấp toàn hệ thống tới Mission Controller
+        if self.emergency_stop_client.service_is_ready():
+            self.emergency_stop_client.call_async(Trigger.Request())
+        elif self.emergency_stop_client.wait_for_service(timeout_sec=0.2):
+            self.emergency_stop_client.call_async(Trigger.Request())
+        else:
+            if self.pause_patrol_client.service_is_ready():
+                self.pause_patrol_client.call_async(Trigger.Request())
+            elif self.pause_patrol_client.wait_for_service(timeout_sec=0.2):
+                self.pause_patrol_client.call_async(Trigger.Request())
 
         self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
         self.signals.navigation_active_changed.emit(False)
+
+    def reset_emergency_stop(self) -> None:
+        """Mở khóa dừng khẩn cấp trên Mission Controller."""
+        if self.reset_emergency_client.service_is_ready():
+            self.reset_emergency_client.call_async(Trigger.Request())
+        elif self.reset_emergency_client.wait_for_service(timeout_sec=0.2):
+            self.reset_emergency_client.call_async(Trigger.Request())
+        self.signals.command_status_changed.emit("success", "Đã mở khóa dừng khẩn cấp")
 
     def _on_service_popup_cmd(self, msg: String) -> None:
         cmd = str(msg.data).strip()
