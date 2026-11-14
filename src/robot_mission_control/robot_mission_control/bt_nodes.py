@@ -491,7 +491,7 @@ class ActionCustomerEncounter(Action):
                 self.node.publish_popup_cmd("HIDE")
 
             blackboard.set('ENCOUNTER_ACTIVE', False)
-            blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', time.time() + 10.0)
+            blackboard.set('ENCOUNTER_COOLDOWN_UNTIL', time.time() + 25.0)
             self.start_time = None
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS

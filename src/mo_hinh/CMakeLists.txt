@@ -50,7 +50,9 @@ install(
 
 # Install scripts
 install(
-  PROGRAMS scripts/dummy_unpause.py
+  PROGRAMS
+    scripts/dummy_unpause.py
+    scripts/audio_player_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
