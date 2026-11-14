@@ -1180,7 +1180,7 @@ class MainWindow(QWidget):
     AMCL, NAV2 = "amcl", "nav2"
     CAMERAS = "cameras"
     OBSTACLE_DEBUGGER = "obstacle_debugger"
-    AI_PERCEPTION, BACKEND = "ai_perception", "backend"
+    AI_PERCEPTION, BACKEND, KIOSK_UI = "ai_perception", "backend", "kiosk_ui"
 
     def __init__(self):
         super().__init__()
@@ -1325,6 +1325,7 @@ class MainWindow(QWidget):
         self.btn_start_cameras = QPushButton("Start Cam (3 Cam + Vật cản)"); self.btn_stop_cameras = QPushButton("Stop Cam")
         self.btn_start_ai = QPushButton("Start AI (Cam + YOLO)"); self.btn_stop_ai = QPushButton("Stop AI")
         self.btn_start_backend = QPushButton("Start Backend (Mission)"); self.btn_stop_backend = QPushButton("Stop Backend")
+        self.btn_start_kiosk = QPushButton("Start Kiosk UI"); self.btn_stop_kiosk = QPushButton("Stop Kiosk UI")
         self.btn_cancel_nav2 = QPushButton("⛔ DỪNG KHẨN CẤP / HỦY GOAL")
         self.btn_cancel_nav2.setStyleSheet("background-color: #dc2626; color: white; font-weight: bold; padding: 7px; border-radius: 4px;")
         self.btn_cancel_nav2.setToolTip("Hủy mục tiêu Nav2 lập tức và phanh robot đứng im tại chỗ (không tắt Nav2)")
@@ -1340,12 +1341,14 @@ class MainWindow(QWidget):
         self.btn_start_cameras.clicked.connect(self.start_cameras); self.btn_stop_cameras.clicked.connect(self.stop_cameras)
         self.btn_start_ai.clicked.connect(self.start_ai_perception); self.btn_stop_ai.clicked.connect(self.stop_ai_perception)
         self.btn_start_backend.clicked.connect(self.start_backend); self.btn_stop_backend.clicked.connect(self.stop_backend)
+        self.btn_start_kiosk.clicked.connect(self.start_kiosk); self.btn_stop_kiosk.clicked.connect(self.stop_kiosk)
         self.btn_cancel_nav2.clicked.connect(self.cancel_nav2_goal)
         self.btn_start_all.clicked.connect(self.start_all); self.btn_stop_all.clicked.connect(self.stop_all)
         self.btn_kill_node.clicked.connect(self.kill_node); self.btn_cleanup_all.clicked.connect(self.manual_cleanup)
         self.lbl_platform_status = QLabel("Layer1 Odom: OFF"); self.lbl_mode_status = QLabel("Layer2 Mode: OFF")
         self.lbl_nav2_status = QLabel("Nav2: OFF"); self.lbl_cameras_status = QLabel("Cam + Vật cản: OFF")
         self.lbl_ai_status = QLabel("AI Perception: OFF"); self.lbl_backend_status = QLabel("Backend: OFF")
+        self.lbl_kiosk_status = QLabel("Kiosk UI: OFF")
         self.lbl_odom_status = QLabel("Odom source: esp -> /odom"); self.lbl_dataenc = QLabel("Encoder /dataenc: -")
         self.lbl_sensor_summary = QLabel("LiDAR: 0.0Hz | Odom: 0.0Hz | TF: MISS")
         self.lbl_sensor_summary.setStyleSheet("font-size: 11px; color: #334155;")
@@ -1361,21 +1364,23 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.btn_start_cameras, 4, 0); control_layout.addWidget(self.btn_stop_cameras, 4, 1)
         control_layout.addWidget(self.btn_start_ai, 5, 0); control_layout.addWidget(self.btn_stop_ai, 5, 1)
         control_layout.addWidget(self.btn_start_backend, 6, 0); control_layout.addWidget(self.btn_stop_backend, 6, 1)
-        control_layout.addWidget(self.btn_cancel_nav2, 7, 0, 1, 2)
-        control_layout.addWidget(self.btn_start_all, 8, 0); control_layout.addWidget(self.btn_stop_all, 8, 1)
-        control_layout.addWidget(QLabel("Node/pattern to kill:"), 9, 0); control_layout.addWidget(self.edt_kill_node, 9, 1)
-        control_layout.addWidget(self.btn_kill_node, 10, 0); control_layout.addWidget(self.btn_cleanup_all, 10, 1)
-        control_layout.addWidget(self.lbl_platform_status, 11, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 12, 0, 1, 2)
-        control_layout.addWidget(self.lbl_nav2_status, 13, 0, 1, 2); control_layout.addWidget(self.lbl_cameras_status, 14, 0, 1, 2)
-        control_layout.addWidget(self.lbl_ai_status, 15, 0, 1, 2); control_layout.addWidget(self.lbl_backend_status, 16, 0, 1, 2)
-        control_layout.addWidget(self.lbl_odom_status, 17, 0, 1, 2); control_layout.addWidget(self.lbl_dataenc, 18, 0, 1, 2)
-        control_layout.addWidget(self.lbl_sensor_summary, 19, 0, 1, 2); control_layout.addWidget(self.lbl_cam_summary, 20, 0, 1, 2)
-        control_layout.addWidget(self.lbl_battery_summary, 21, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_kiosk, 7, 0); control_layout.addWidget(self.btn_stop_kiosk, 7, 1)
+        control_layout.addWidget(self.btn_cancel_nav2, 8, 0, 1, 2)
+        control_layout.addWidget(self.btn_start_all, 9, 0); control_layout.addWidget(self.btn_stop_all, 9, 1)
+        control_layout.addWidget(QLabel("Node/pattern to kill:"), 10, 0); control_layout.addWidget(self.edt_kill_node, 10, 1)
+        control_layout.addWidget(self.btn_kill_node, 11, 0); control_layout.addWidget(self.btn_cleanup_all, 11, 1)
+        control_layout.addWidget(self.lbl_platform_status, 12, 0, 1, 2); control_layout.addWidget(self.lbl_mode_status, 13, 0, 1, 2)
+        control_layout.addWidget(self.lbl_nav2_status, 14, 0, 1, 2); control_layout.addWidget(self.lbl_cameras_status, 15, 0, 1, 2)
+        control_layout.addWidget(self.lbl_ai_status, 16, 0, 1, 2); control_layout.addWidget(self.lbl_backend_status, 17, 0, 1, 2)
+        control_layout.addWidget(self.lbl_kiosk_status, 18, 0, 1, 2)
+        control_layout.addWidget(self.lbl_odom_status, 19, 0, 1, 2); control_layout.addWidget(self.lbl_dataenc, 20, 0, 1, 2)
+        control_layout.addWidget(self.lbl_sensor_summary, 21, 0, 1, 2); control_layout.addWidget(self.lbl_cam_summary, 22, 0, 1, 2)
+        control_layout.addWidget(self.lbl_battery_summary, 23, 0, 1, 2)
         self.chk_mock_human = QCheckBox("👤 Giả lập: Có người trước mặt")
         self.chk_mock_human.setStyleSheet("color: #0f172a; font-weight: bold;")
         self.chk_mock_human.setToolTip("Bật để giả lập có người chắn trước mũi xe, kiểm tra phản ứng của robot")
         self.chk_mock_human.toggled.connect(self.on_mock_human_toggled)
-        control_layout.addWidget(self.chk_mock_human, 22, 0, 1, 2)
+        control_layout.addWidget(self.chk_mock_human, 24, 0, 1, 2)
         control_group.setLayout(control_layout)
         # QTabWidget chứa Tab 1 (Log gốc) và Tab 2 (Trạng thái & Suy nghĩ Nav2)
         self.tabs_info = QTabWidget()
@@ -2559,6 +2564,9 @@ class MainWindow(QWidget):
     def start_backend(self):
         self.proc_mgr.start(self.BACKEND, self.ros_prefix() + "ros2 launch robot_bringup backend.launch.py")
     def stop_backend(self): self.proc_mgr.stop(self.BACKEND)
+    def start_kiosk(self):
+        self.proc_mgr.start(self.KIOSK_UI, self.ros_prefix() + "ros2 launch robot_ui kiosk.launch.py windowed:=true hide_cursor:=false")
+    def stop_kiosk(self): self.proc_mgr.stop(self.KIOSK_UI)
     def cancel_nav2_goal(self):
         ros_node = self.get_ros_node()
         if ros_node is not None:
@@ -2626,12 +2634,14 @@ class MainWindow(QWidget):
         ai_on = self.proc_mgr.is_running(self.AI_PERCEPTION)
         cam_on = self.proc_mgr.is_running(self.CAMERAS)
         backend_on = self.proc_mgr.is_running(self.BACKEND)
+        kiosk_on = self.proc_mgr.is_running(self.KIOSK_UI)
         self._set_status_label(self.lbl_platform_status, "Layer1 Odom", platform_on)
         self._set_status_label(self.lbl_mode_status, "Layer2 Mode", mode_on)
         self._set_status_label(self.lbl_nav2_status, "Nav2", nav2_on)
         self._set_status_label(self.lbl_cameras_status, "Cam + Vật cản", cam_on)
         self._set_status_label(self.lbl_ai_status, "AI Perception", ai_on)
         self._set_status_label(self.lbl_backend_status, "Backend", backend_on)
+        self._set_status_label(self.lbl_kiosk_status, "Kiosk UI", kiosk_on)
         self.lbl_odom_status.setText(f"Odom source: {self.get_selected_odom_source()} -> /odom")
         self._update_sensor_debug_ui()
 
