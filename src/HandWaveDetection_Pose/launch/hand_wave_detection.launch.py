@@ -60,8 +60,13 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument(
                 'max_people',
-                default_value='5',
+                default_value='1',
                 description='Maximum people to run RTMPose on (limits GPU/CPU load).',
+            ),
+            DeclareLaunchArgument(
+                'min_process_interval',
+                default_value='0.08',
+                description='Minimum interval in seconds between RTMPose inferences (throttles FPS/CPU load).',
             ),
             Node(
                 package='hand_wave_detection',
@@ -79,6 +84,7 @@ def generate_launch_description():
                         'yolo_pose_model': LaunchConfiguration('yolo_pose_model'),
                         'rtmpose_model': LaunchConfiguration('rtmpose_model'),
                         'max_people': LaunchConfiguration('max_people'),
+                        'min_process_interval': LaunchConfiguration('min_process_interval'),
                     }
                 ],
             ),

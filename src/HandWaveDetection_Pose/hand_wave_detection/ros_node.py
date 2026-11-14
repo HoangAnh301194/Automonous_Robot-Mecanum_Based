@@ -75,7 +75,11 @@ class HandWaveDetectionNode(Node):
         self.selector = NearestTrackSelector(
             max_people=self.config.processing.max_people
         )
-        self.get_logger().info(f'max_people={self.config.processing.max_people}')
+        self._min_process_interval = self._float_parameter('min_process_interval', 0.08)
+        self.get_logger().info(
+            f'max_people={self.config.processing.max_people}, '
+            f'min_process_interval={self._min_process_interval}s'
+        )
 
         # ── Patch 0: instrumentation ──
         self._metric_pose_ms_sum = 0.0
@@ -180,6 +184,9 @@ class HandWaveDetectionNode(Node):
     def _integer_parameter(self, name: str, default: int) -> int:
         return int(self.declare_parameter(name, default).value)
 
+    def _float_parameter(self, name: str, default: float) -> float:
+        return float(self.declare_parameter(name, default).value)
+
     def sync_callback(
         self, image_msg: Image, tracking_msg: DetectionArray
     ) -> None:
@@ -189,7 +196,14 @@ class HandWaveDetectionNode(Node):
 
     def _worker_loop(self) -> None:
         """Background worker thread loop that processes the freshest frame pair."""
+        last_process_time = 0.0
         while not self._stop_event.is_set():
+            now = time.monotonic()
+            if self._min_process_interval > 0.0 and (now - last_process_time) < self._min_process_interval:
+                sleep_time = min(0.01, self._min_process_interval - (now - last_process_time))
+                self._stop_event.wait(max(0.001, sleep_time))
+                continue
+
             pair = None
             with self._pending_lock:
                 if self._pending_pair is not None:
@@ -202,6 +216,7 @@ class HandWaveDetectionNode(Node):
 
             try:
                 self._process_pair(pair[0], pair[1])
+                last_process_time = time.monotonic()
             except Exception as error:
                 self._report_error(error)
 
