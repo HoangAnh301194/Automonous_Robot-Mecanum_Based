@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 import numpy as np
+
+# The CLI is imported by absolute file location; expose sibling kws_core package.
+sys.path.insert(0, str(Path(__file__).parent.resolve()))
 
 spec = importlib.util.spec_from_file_location("souta_kws", Path(__file__).parent / "souta_kws.py")
 kws = importlib.util.module_from_spec(spec)
@@ -15,6 +19,14 @@ spec.loader.exec_module(kws)
 
 
 class PipelineTests(unittest.TestCase):
+    def test_cli_subcommands_preserved(self):
+        parser = kws.build_parser()
+        for name in ("record", "prepare", "extract", "train", "calibrate", "evaluate"):
+            with self.subTest(command=name):
+                self.assertEqual(parser.parse_args(
+                    [name] + (["--output", "example.wav"] if name == "record" else [])
+                ).command, name)
+
     def test_audio_round_trip(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "voice.wav"
