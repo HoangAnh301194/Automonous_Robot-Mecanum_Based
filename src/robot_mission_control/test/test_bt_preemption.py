@@ -340,3 +340,60 @@ def test_serve_customer_resumes_interrupted_patrol_target():
     assert patrol.tick(bb) == NodeStatus.RUNNING
     assert patrol.current_idx == 1
     assert sent_targets == ["B", "B"]
+
+
+def test_action_patrol_sends_comma_separated_remaining_points():
+    """Verify ActionPatrol formats remaining waypoints into a comma-separated string for NavigateThroughPoses."""
+    from types import SimpleNamespace
+    from robot_mission_control.bt_nodes import ActionPatrol, Blackboard, NodeStatus
+
+    patrol = ActionPatrol("TestPatrolChain", node=None)
+    patrol._route_loaded = True
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2", "diem3"]
+    patrol.current_idx = 0
+
+    sent_targets = []
+    fake_client = SimpleNamespace(
+        server_is_ready=lambda: True,
+        send_goal_async=lambda goal: SimpleNamespace(
+            add_done_callback=lambda cb: sent_targets.append(goal.target_location)
+        )
+    )
+    patrol.action_client = fake_client
+
+    # 1. Starting at index 0 should dispatch full chain
+    patrol.send_next_goal()
+    assert len(sent_targets) == 1
+    assert sent_targets[0] == "khoihanh,diem1,diem2,diem3"
+
+    # 2. When current_idx is updated to 2, sending next goal dispatches remaining slice
+    patrol.is_waiting_for_result = False
+    patrol.current_idx = 2
+    patrol.send_next_goal()
+    assert len(sent_targets) == 2
+    assert sent_targets[1] == "diem2,diem3"
+
+
+def test_action_patrol_navigation_status_updates_current_idx():
+    """Verify ActionPatrol listens to NavigationStatus and dynamically updates current_idx."""
+    from robot_interfaces.msg import NavigationStatus
+    from robot_mission_control.bt_nodes import ActionPatrol
+
+    patrol = ActionPatrol("TestPatrolStatus", node=None)
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2", "diem3"]
+    patrol.current_idx = 0
+
+    status_msg = NavigationStatus()
+    status_msg.current_goal_name = "diem2"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 2
+
+    status_msg.current_goal_name = "diem3"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 3
+
+    # Unknown waypoint should not corrupt current_idx
+    status_msg.current_goal_name = "unrelated_point"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 3
+

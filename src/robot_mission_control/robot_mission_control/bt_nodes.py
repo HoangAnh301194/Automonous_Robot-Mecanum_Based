@@ -8,6 +8,7 @@ from geometry_msgs.msg import PoseStamped, PointStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
 from robot_interfaces.action import DirectGo
 from robot_interfaces.srv import GetRoute
+from robot_interfaces.msg import NavigationStatus
 
 from .bt_core import NodeStatus, Condition, Action, Blackboard
 
@@ -568,8 +569,11 @@ class ActionServeCustomer(Action):
 class ActionPatrol(Action):
     """
     Hành vi tuần tra chu kỳ qua các điểm [Trạm nước -> Điểm A -> Điểm B -> Điểm C -> Trạm]:
+    - Sử dụng NavigateThroughPoses để robot lướt qua các điểm trung gian mượt mà, không dừng/xoay giật cục.
     - Lấy lộ trình từ /config/get_route (nếu có).
-    - Hủy goal sạch sẽ qua halt() khi bị ngắt bởi sự kiện ưu tiên cao hơn hoặc Pause.
+    - Lắng nghe /navigation/status để cập nhật waypoint hiện tại (current_idx) theo thời gian thực.
+    - Hủy goal sạch sẽ qua halt() khi bị ngắt bởi sự kiện ưu tiên cao hơn (vẫy tay P3, gặp khách P4, pin yếu P1).
+    - Khi hết gián đoạn, tự động tiếp tục các điểm còn lại trong chuỗi tuần tra mà không bị lặp lại từ đầu.
     - Dùng sequence token để bỏ qua callback muộn từ goal cũ đã hủy.
     """
     def __init__(self, name="ActionPatrol", node=None):
@@ -580,6 +584,7 @@ class ActionPatrol(Action):
         self.current_idx = 0
         self.action_client = None
         self.get_route_client = None
+        self.status_sub = None
         self.goal_handle = None
         self.is_waiting_for_result = False
         self.wait_start_time = 0.0
@@ -593,6 +598,23 @@ class ActionPatrol(Action):
         if self.node:
             self.action_client = ActionClient(self.node, DirectGo, '/navigation/direct_go')
             self.get_route_client = self.node.create_client(GetRoute, '/config/get_route')
+            self.status_sub = self.node.create_subscription(
+                NavigationStatus,
+                '/navigation/status',
+                self.navigation_status_callback,
+                10
+            )
+
+    def navigation_status_callback(self, msg: NavigationStatus):
+        if not self.patrol_points:
+            return
+        target_name = msg.current_goal_name
+        if target_name in self.patrol_points:
+            target_idx = self.patrol_points.index(target_name)
+            if target_idx != self.current_idx:
+                self.current_idx = target_idx
+                if self.node:
+                    self.node.get_logger().info(f"📍 [TUẦN TRA] Đang tiếp cận điểm: {target_name} (chỉ số {target_idx})")
 
     def _schedule_wait(self, advance: bool):
         self.is_waiting_for_result = False
@@ -672,7 +694,10 @@ class ActionPatrol(Action):
         if blackboard.get('PATROL_ADVANCE_NEXT', False):
             blackboard.set('PATROL_ADVANCE_NEXT', False)
             if self.patrol_points:
+                self._cancel_active_goal()
+                self.is_waiting_at_waypoint = False
                 self.current_idx = (self.current_idx + 1) % len(self.patrol_points)
+                self.send_next_goal()
 
         if self.status != NodeStatus.RUNNING:
             self.is_waiting_at_waypoint = False
@@ -711,14 +736,21 @@ class ActionPatrol(Action):
 
         self._goal_seq += 1
         seq = self._goal_seq
-        target = self.patrol_points[self.current_idx]
-        msg = f"🚀 [TUẦN TRA] Đang di chuyển đến điểm: {target}"
+
+        # Option 2: Send remaining sequence of waypoints from current_idx to the end of route
+        if self.current_idx >= len(self.patrol_points):
+            self.current_idx = 0
+
+        remaining_points = self.patrol_points[self.current_idx:]
+        target_str = ",".join(remaining_points)
+        active_target = self.patrol_points[self.current_idx]
+        msg = f"🚀 [TUẦN TRA] Bắt đầu lộ trình: {target_str} (bắt đầu tại: {active_target})"
         if self.node:
             self.node.get_logger().info(msg)
             self.node.publish_log(msg)
 
         goal_msg = DirectGo.Goal()
-        goal_msg.target_location = target
+        goal_msg.target_location = target_str
 
         send_future = self.action_client.send_goal_async(goal_msg)
         send_future.add_done_callback(lambda fut, s=seq: self.goal_response_callback(fut, s))
@@ -735,7 +767,7 @@ class ActionPatrol(Action):
 
         if not goal_handle.accepted:
             if self.node:
-                self.node.get_logger().warn(f"Goal tới {self.patrol_points[self.current_idx]} chưa được nhận, sẽ thử lại.")
+                self.node.get_logger().warn(f"Goal chuỗi tới {self.patrol_points[self.current_idx]} chưa được nhận, sẽ thử lại.")
             self._schedule_wait(advance=True)
             return
 
@@ -747,7 +779,6 @@ class ActionPatrol(Action):
         if seq is not None and seq != self._goal_seq:
             return
         self.goal_handle = None
-        target = self.patrol_points[self.current_idx]
         success = False
         try:
             res_wrapper = future.result()
@@ -756,12 +787,18 @@ class ActionPatrol(Action):
             success = False
 
         if success:
-            msg = f"🏁 [TUẦN TRA] Đã đến điểm: {target}"
+            last_point = self.patrol_points[-1] if self.patrol_points else "None"
+            msg = f"🏁 [TUẦN TRA] Hoàn thành lộ trình tuần tra (điểm cuối: {last_point})"
+            # Full sequence reached successfully; position index at last waypoint so next advance wraps to 0
+            self.current_idx = len(self.patrol_points) - 1
+            if self.node:
+                self.node.get_logger().info(msg)
+                self.node.publish_log(msg)
+            self._schedule_wait(advance=True)
         else:
-            msg = f"⚠️ [TUẦN TRA] Không thể đến được {target}, chuyển điểm tiếp theo."
-
-        if self.node:
-            self.node.get_logger().info(msg)
-            self.node.publish_log(msg)
-
-        self._schedule_wait(advance=True)
+            curr_point = self.patrol_points[self.current_idx] if self.patrol_points and self.current_idx < len(self.patrol_points) else "Unknown"
+            msg = f"⚠️ [TUẦN TRA] Không thể hoàn tất lộ trình tại {curr_point}, chuyển điểm tiếp theo."
+            if self.node:
+                self.node.get_logger().info(msg)
+                self.node.publish_log(msg)
+            self._schedule_wait(advance=True)

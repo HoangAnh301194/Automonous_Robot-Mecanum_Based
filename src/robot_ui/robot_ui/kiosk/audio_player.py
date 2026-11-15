@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 from typing import Callable
@@ -12,7 +13,7 @@ LOG = logging.getLogger(__name__)
 
 
 class AudioPlayer:
-    """Manages audio playback via mpv subprocess with thread safety and instant abort."""
+    """Manages audio playback via mpv/ffplay subprocess with thread safety and instant abort."""
 
     def __init__(
         self,
@@ -25,7 +26,18 @@ class AudioPlayer:
         self.on_playback_finished = on_playback_finished  # (request_id)
         self.on_playback_error = on_playback_error        # (request_id, error_msg)
 
-        self.player_cmd = player_cmd or os.getenv("KIOSK_AUDIO_PLAYER", "mpv")
+        if player_cmd:
+            self.player_cmd = player_cmd
+        else:
+            env_cmd = os.getenv("KIOSK_AUDIO_PLAYER", "").strip()
+            if env_cmd and shutil.which(env_cmd):
+                self.player_cmd = env_cmd
+            elif shutil.which("mpv"):
+                self.player_cmd = "mpv"
+            elif shutil.which("ffplay"):
+                self.player_cmd = "ffplay"
+            else:
+                self.player_cmd = "aplay"
         self.playback_speed = os.getenv("AUDIO_PLAYBACK_SPEED", "1.15").strip()
         try:
             default_vol = int(os.getenv("AUDIO_PLAYBACK_VOLUME", "80"))
@@ -121,7 +133,12 @@ class AudioPlayer:
         self.stop()
 
         vol = self._volume
-        cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", f"--volume={vol}", "-"]
+        if self.player_cmd == "mpv":
+            cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", f"--volume={vol}", "--af=lavfi=[adelay=300|300]", "-"]
+        elif self.player_cmd == "ffplay":
+            cmd = [self.player_cmd, "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", "adelay=300|300", "-i", "-"]
+        else:
+            cmd = [self.player_cmd, "-"]
         try:
             proc = subprocess.Popen(
                 cmd,

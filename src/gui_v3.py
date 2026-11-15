@@ -1385,10 +1385,32 @@ class MainWindow(QWidget):
         tab_log = QWidget()
         tab_log_layout = QVBoxLayout()
         tab_log_layout.setContentsMargins(4, 4, 4, 4)
+        tab_log_layout.setSpacing(4)
+
+        log_toolbar = QHBoxLayout()
+        log_toolbar.setContentsMargins(0, 0, 0, 0)
+        self.chk_autoscroll_log = QCheckBox("Tự động cuộn xuống cuối")
+        self.chk_autoscroll_log.setChecked(True)
+        self.chk_autoscroll_log.setStyleSheet("font-size: 11px; color: #334155; font-weight: bold;")
+        self.btn_clear_log = QPushButton("🗑️ Xóa Log Hệ Thống")
+        self.btn_clear_log.setStyleSheet(
+            "background-color: #f1f5f9; color: #334155; font-size: 11px; font-weight: bold; padding: 4px 10px; border: 1px solid #cbd5e1; border-radius: 4px;"
+        )
+
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setMinimumHeight(140)
-        tab_log_layout.addWidget(self.log_box)
+        self.log_box.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.log_box.setStyleSheet(
+            "background-color: #ffffff; color: #000000; font-family: Monospace, Consolas, monospace; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;"
+        )
+        self.btn_clear_log.clicked.connect(self.log_box.clear)
+
+        log_toolbar.addWidget(self.chk_autoscroll_log)
+        log_toolbar.addStretch()
+        log_toolbar.addWidget(self.btn_clear_log)
+        tab_log_layout.addLayout(log_toolbar)
+        tab_log_layout.addWidget(self.log_box, stretch=1)
         tab_log.setLayout(tab_log_layout)
         self.tabs_info.addTab(tab_log, "📜 Log Hệ Thống")
 
@@ -1444,6 +1466,7 @@ class MainWindow(QWidget):
         self.thought_history_box = QTextEdit()
         self.thought_history_box.setReadOnly(True)
         self.thought_history_box.setMinimumHeight(100)
+        self.thought_history_box.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.thought_history_box.setStyleSheet(
             "background-color: #ffffff; color: #000000; font-family: Monospace, Consolas, monospace; font-size: 10px; border: 1px solid #cbd5e1; border-radius: 4px;"
         )
@@ -1654,6 +1677,7 @@ class MainWindow(QWidget):
         fsm_log_layout = QVBoxLayout()
         self.fsm_log_box = QTextEdit()
         self.fsm_log_box.setReadOnly(True)
+        self.fsm_log_box.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.fsm_log_box.setStyleSheet(
             "background-color: #ffffff; color: #000000; font-family: Monospace, Consolas, monospace; font-size: 11px; border: 1px solid #cbd5e1; border-radius: 4px;"
         )
@@ -1926,6 +1950,9 @@ class MainWindow(QWidget):
 
     def _append_log_ui(self, text):
         self.log_box.append(text)
+        if hasattr(self, 'chk_autoscroll_log') and self.chk_autoscroll_log.isChecked():
+            sb = self.log_box.verticalScrollBar()
+            sb.setValue(sb.maximum())
         self._parse_log_for_mind(text)
 
     def on_new_map(self, msg):
@@ -2216,6 +2243,8 @@ class MainWindow(QWidget):
         now_str = time.strftime("%H:%M:%S")
         if hasattr(self, "fsm_log_box"):
             self.fsm_log_box.append(f"<span style='color:#64748b;'>[{now_str}]</span> {text}")
+            sb = self.fsm_log_box.verticalScrollBar()
+            sb.setValue(sb.maximum())
 
         lower = text.lower()
         if "khẩn cấp" in lower or "emergency" in lower:
@@ -2238,6 +2267,8 @@ class MainWindow(QWidget):
         now_str = time.strftime("%H:%M:%S")
         if hasattr(self, "fsm_log_box"):
             self.fsm_log_box.append(f"<span style='color:#0284c7;'>[{now_str}] [POPUP KIOSK] {cmd}</span>")
+            sb = self.fsm_log_box.verticalScrollBar()
+            sb.setValue(sb.maximum())
         if cmd == "SHOW_5S_INVITE":
             self._set_fsm_banner("☕ MỜI KHÁCH LẤY NƯỚC (ĐẾM NGƯỢC 5S)", "Phát hiện người đứng trước robot. Bấm 'Lấy Nước' nếu muốn nhận nước.", "#0284c7", "#ffffff")
         elif cmd == "SHOW_SERVING":
