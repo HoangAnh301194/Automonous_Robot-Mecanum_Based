@@ -8,7 +8,7 @@ import subprocess
 import threading
 import time
 from functools import partial
-from pathlib import Path
+from pathlib import Path as FilePath
 from typing import Any
 
 from action_msgs.msg import GoalStatus
@@ -826,7 +826,7 @@ class KioskRosNode(Node):
             self.trigger_finish_client.call_async(Trigger.Request())
 
     def _get_ws_prefix(self) -> str:
-        ws_root = Path(__file__).resolve().parents[4]
+        ws_root = FilePath(__file__).resolve().parents[4]
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
         ws_setup = ws_root / "install" / "setup.bash"
         cmd = f"source '{ros_setup}'"
@@ -908,7 +908,7 @@ class KioskRosNode(Node):
         """Thực hiện lưu bản đồ kép (AMCL YAML + PoseGraph serialize) trên background thread."""
         def _save_worker():
             raw_name = map_stem.strip() or "new_map"
-            ws_root = Path(__file__).resolve().parents[4]
+            ws_root = FilePath(__file__).resolve().parents[4]
             map_dir = ws_root / "my_map"
             map_dir.mkdir(parents=True, exist_ok=True)
 
