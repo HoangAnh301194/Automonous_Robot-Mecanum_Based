@@ -64,9 +64,9 @@ class ROS2SystemDetailScreen(QWidget):
         self._log_queue: list[str] = []
         self._init_ui()
 
-        # Throttled log batching: cập nhật UI mỗi 60ms để chống lag/nghẽn Main Thread
+        # Throttled log batching: cập nhật UI mỗi 120ms để chống lag/nghẽn Main Thread
         self._log_timer = QTimer(self)
-        self._log_timer.setInterval(60)
+        self._log_timer.setInterval(120)
         self._log_timer.timeout.connect(self._flush_log_queue)
         self._log_timer.start()
 

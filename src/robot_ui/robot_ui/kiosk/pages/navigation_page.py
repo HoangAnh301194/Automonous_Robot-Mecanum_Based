@@ -342,42 +342,54 @@ class InteractiveNavMapWidget(QWidget):
         cells = cells[: width * height].reshape((height, width))
         rgb = np.empty((height, width, 3), dtype=np.uint8)
         rgb[cells < 0] = (30, 36, 44)                    # Unknown: Dark slate
-        rgb[(cells >= 0) & (cells < 50)] = (235, 238, 242) # Free space: Off-white
+        rgb[(cells >= 0) & (cells < 50)] = (235, 238, 242)  # Free space: Off-white
         rgb[cells >= 50] = (15, 23, 42)                  # Obstacle: Black/Navy
         rgb = np.ascontiguousarray(np.flipud(rgb))
         self._map_image = QImage(
             rgb.data, width, height, width * 3, QImage.Format_RGB888
         ).copy()
+        if self.isVisible():
+            self.update()
+
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
         self.update()
 
     def set_pose(self, pose: dict[str, Any]) -> None:
         self._pose = pose
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_path(self, path: list[list[float]]) -> None:
         self._path = path
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_locations(self, locations: list[dict[str, Any]]) -> None:
         self._locations = [item for item in locations if isinstance(item, dict)]
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_goal(self, x: float, y: float, yaw: float) -> None:
         self._goal = {"x": x, "y": y, "yaw": yaw}
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def clear_goal(self) -> None:
         self._goal = None
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_batch_waypoints(self, waypoints: list[dict[str, Any]]) -> None:
         self._batch_waypoints = list(waypoints)
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_pick_mode(self, enabled: bool) -> None:
         self._pick_mode = enabled
         self.setCursor(Qt.CrossCursor if enabled else Qt.PointingHandCursor)
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_selection_enabled(self, enabled: bool) -> None:
         self._selection_enabled = enabled
@@ -386,14 +398,16 @@ class InteractiveNavMapWidget(QWidget):
 
     def set_scan_points(self, points: list[tuple[float, float]]) -> None:
         self._scan_points = points
-        self.update()
+        if self.isVisible():
+            self.update()
 
     def set_obstacle_points(self, side: str, points: list[tuple[float, float]]) -> None:
         if side == "front":
             self._front_obs_points = points
         elif side == "rear":
             self._rear_obs_points = points
-        self.update()
+        if self.isVisible():
+            self.update()
 
     # -------------------------------------------------------------------------
     # Coordinate Transforms with Zoom & Pan
@@ -584,12 +598,14 @@ class InteractiveNavMapWidget(QWidget):
         # 1. Map Image
         painter.drawImage(target, self._map_image)
 
+        rect_f = QRectF(self.rect())
+
         # 2. LiDAR Points (/scan) in Cyan
         if self._scan_points:
             painter.setPen(QPen(QColor(0, 255, 255, 200), 1.5))
             for px, py in self._scan_points:
                 pt = self._world_to_screen(px, py, target)
-                if pt is not None and self.rect().contains(pt.toPoint()):
+                if pt is not None and rect_f.contains(pt):
                     painter.drawPoint(pt)
 
         # 3. Depth Obstacle Points (Front in Amber, Rear in Purple)
@@ -597,14 +613,14 @@ class InteractiveNavMapWidget(QWidget):
             painter.setPen(QPen(QColor(245, 158, 11, 230), 3))
             for px, py in self._front_obs_points:
                 pt = self._world_to_screen(px, py, target)
-                if pt is not None and self.rect().contains(pt.toPoint()):
+                if pt is not None and rect_f.contains(pt):
                     painter.drawPoint(pt)
 
         if self._rear_obs_points:
             painter.setPen(QPen(QColor(232, 121, 249, 230), 3))
             for px, py in self._rear_obs_points:
                 pt = self._world_to_screen(px, py, target)
-                if pt is not None and self.rect().contains(pt.toPoint()):
+                if pt is not None and rect_f.contains(pt):
                     painter.drawPoint(pt)
 
         # 4. Nav2 Plan Path (blue/amber dashed line)

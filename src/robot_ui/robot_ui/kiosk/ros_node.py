@@ -121,6 +121,7 @@ class KioskRosNode(Node):
         self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
         self._initial_goal_dist: float | None = None
         self._last_scan_ui_pub = 0.0
+        self._last_odom_pose_pub = 0.0
         self._last_obs_ui_pub = {"front": 0.0, "rear": 0.0}
         self._location_client = self.create_client(
             GetLocationList,
@@ -365,7 +366,10 @@ class KioskRosNode(Node):
         wz = float(msg.twist.twist.angular.z)
         self._mark_topic_rx("odom", {"vx": vx, "wz": wz})
         if not self._have_localized_pose:
-            self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
+            now = time.monotonic()
+            if now - self._last_odom_pose_pub >= 0.1:
+                self._last_odom_pose_pub = now
+                self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
 
     def _on_path(self, msg: NavPath) -> None:
         poses = msg.poses
@@ -677,7 +681,7 @@ class KioskRosNode(Node):
         self._mark_topic_rx("lidar", {"min_dist": min_lidar, "count": len(valid_ranges)})
 
         now = time.monotonic()
-        if now - self._last_scan_ui_pub < 0.1:
+        if now - self._last_scan_ui_pub < 0.2:
             return
         self._last_scan_ui_pub = now
         if not getattr(self, "_pose", None):
@@ -693,7 +697,7 @@ class KioskRosNode(Node):
         lx_base, ly_base = 0.175, 0.0
         origin_x = robot_x + cos_yaw * lx_base - sin_yaw * ly_base
         origin_y = robot_y + sin_yaw * lx_base + cos_yaw * ly_base
-        step = max(1, len(ranges) // 360)
+        step = max(1, len(ranges) // 180)
         points: list[tuple[float, float]] = []
         for i in range(0, len(ranges), step):
             r = ranges[i]
@@ -710,7 +714,7 @@ class KioskRosNode(Node):
         self._mark_topic_rx(f"obs_{side}", {"min_dist": min_obs})
 
         now = time.monotonic()
-        if now - self._last_obs_ui_pub.get(side, 0.0) < 0.15:
+        if now - self._last_obs_ui_pub.get(side, 0.0) < 0.25:
             return
         self._last_obs_ui_pub[side] = now
         if not getattr(self, "_pose", None):
@@ -727,7 +731,7 @@ class KioskRosNode(Node):
         ly_base = 0.0
         origin_x = robot_x + cos_yaw * lx_base - sin_yaw * ly_base
         origin_y = robot_y + sin_yaw * lx_base + cos_yaw * ly_base
-        step = max(1, len(ranges) // 120)
+        step = max(1, len(ranges) // 60)
         points: list[tuple[float, float]] = []
         for i in range(0, len(ranges), step):
             r = ranges[i]
@@ -974,10 +978,20 @@ class KioskRosNode(Node):
 
             def _stream_slam():
                 if self._slam_proc and self._slam_proc.stdout:
+                    buf: list[str] = []
+                    last_flush = time.monotonic()
                     for line in self._slam_proc.stdout:
                         cl = line.rstrip()
                         if cl:
-                            self.signals.process_log_received.emit("layer_slam", cl)
+                            buf.append(cl)
+                        now = time.monotonic()
+                        if buf and (len(buf) >= 15 or (now - last_flush) >= 0.1):
+                            chunk = "\n".join(buf)
+                            buf.clear()
+                            last_flush = now
+                            self.signals.process_log_received.emit("layer_slam", chunk)
+                    if buf:
+                        self.signals.process_log_received.emit("layer_slam", "\n".join(buf))
 
             threading.Thread(target=_stream_slam, daemon=True).start()
         except Exception as exc:
@@ -1101,10 +1115,20 @@ class KioskRosNode(Node):
 
                 def _stream_loc():
                     if self._localization_proc and self._localization_proc.stdout:
+                        buf: list[str] = []
+                        last_flush = time.monotonic()
                         for line in self._localization_proc.stdout:
                             cl = line.rstrip()
                             if cl:
-                                self.signals.process_log_received.emit("layer_navigation", cl)
+                                buf.append(cl)
+                            now = time.monotonic()
+                            if buf and (len(buf) >= 15 or (now - last_flush) >= 0.1):
+                                chunk = "\n".join(buf)
+                                buf.clear()
+                                last_flush = now
+                                self.signals.process_log_received.emit("layer_navigation", chunk)
+                        if buf:
+                            self.signals.process_log_received.emit("layer_navigation", "\n".join(buf))
 
                 threading.Thread(target=_stream_loc, daemon=True).start()
             except Exception as exc:
