@@ -9,15 +9,18 @@ Organizes:
 from __future__ import annotations
 
 import glob
+import time
 from typing import Any, Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -130,7 +133,7 @@ class ROS2SystemDetailScreen(QWidget):
                 }}
                 QPushButton:hover {{ background-color: {KioskTheme.COLOR_HEALTHY}; color: #ffffff; }}
             """)
-            btn_start.clicked.connect(lambda _, k=key: self.start_layer_requested.emit(k))
+            btn_start.clicked.connect(lambda _, k=key, n=name: self._on_start_layer_clicked(k, n))
             rl.addWidget(btn_start)
 
             btn_stop = QPushButton("TẮT")
@@ -147,7 +150,7 @@ class ROS2SystemDetailScreen(QWidget):
                 }}
                 QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; }}
             """)
-            btn_stop.clicked.connect(lambda _, k=key: self.stop_layer_requested.emit(k))
+            btn_stop.clicked.connect(lambda _, k=key, n=name: self._on_stop_layer_clicked(k, n))
             rl.addWidget(btn_stop)
 
             l_layout.addWidget(row_frame)
@@ -159,7 +162,74 @@ class ROS2SystemDetailScreen(QWidget):
 
         c_layout.addWidget(card_layers)
 
-        # B. THIẾT BỊ NGOẠI VI & CỔNG SERIAL
+        # B. NHẬT KÝ TIẾN TRÌNH ROS 2 HỆ THỐNG (STDOUT / STDERR CONSOLE)
+        card_log, log_layout = create_section_card(
+            "NHẬT KÝ TIẾN TRÌNH ROS 2 (REAL-TIME CONSOLE LOG)",
+            KioskTheme.COLOR_ACCENT,
+        )
+
+        log_top = QHBoxLayout()
+        log_top.setSpacing(10)
+
+        self.chk_autoscroll = QCheckBox("Tự động cuộn xuống cuối")
+        self.chk_autoscroll.setChecked(True)
+        self.chk_autoscroll.setStyleSheet(f"""
+            QCheckBox {{
+                color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                font-size: 11px;
+                font-weight: 700;
+            }}
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
+        """)
+        log_top.addWidget(self.chk_autoscroll)
+        log_top.addStretch()
+
+        self.btn_clear_log = QPushButton("Xóa Log Hệ Thống")
+        self.btn_clear_log.setFixedHeight(28)
+        self.btn_clear_log.setCursor(Qt.PointingHandCursor)
+        self.btn_clear_log.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                color: {KioskTheme.COLOR_TEXT_MUTED};
+                font-size: 11px;
+                font-weight: bold;
+                padding: 0 12px;
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                border-color: {KioskTheme.COLOR_ACCENT};
+            }}
+        """)
+        self.btn_clear_log.clicked.connect(self._clear_log)
+        log_top.addWidget(self.btn_clear_log)
+        log_layout.addLayout(log_top)
+
+        self.txt_log = QTextEdit()
+        self.txt_log.setReadOnly(True)
+        self.txt_log.setMinimumHeight(180)
+        self.txt_log.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        self.txt_log.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #090d12;
+                color: #10b981;
+                font-family: 'DejaVu Sans Mono', Consolas, Monaco, monospace;
+                font-size: 11px;
+                line-height: 1.4;
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 6px;
+            }}
+        """)
+        self.txt_log.setText("[SYSTEM] Sẵn sàng nhận nhật ký tiến trình ROS 2...")
+        log_layout.addWidget(self.txt_log)
+        c_layout.addWidget(card_log)
+
+        # C. THIẾT BỊ NGOẠI VI & CỔNG SERIAL
         card_ports, port_layout = create_section_card("THIẾT BỊ NGOẠI VI & ĐƯỜNG TRUYỀN SERIAL", "#38BDF8")
         ports_row = QHBoxLayout()
         ports_row.setSpacing(10)
@@ -256,6 +326,26 @@ class ROS2SystemDetailScreen(QWidget):
     def _on_swap_ports(self) -> None:
         self.lbl_ports_info.setText("Đã yêu cầu đảo cổng cấu hình Serial Hoverboard/ESP32.")
 
+    def _on_start_layer_clicked(self, key: str, name: str) -> None:
+        self.append_process_log(key, f"Gửi yêu cầu khởi động: {name}...")
+        self.start_layer_requested.emit(key)
+
+    def _on_stop_layer_clicked(self, key: str, name: str) -> None:
+        self.append_process_log(key, f"Gửi yêu cầu dừng: {name}...")
+        self.stop_layer_requested.emit(key)
+
+    def append_process_log(self, layer: str, line: str) -> None:
+        """Thêm dòng log từ tiến trình nền vào khung hiển thị."""
+        now_str = time.strftime("%H:%M:%S")
+        self.txt_log.append(f"[{now_str}] [{layer}] {line}")
+        if self.chk_autoscroll.isChecked():
+            sb = self.txt_log.verticalScrollBar()
+            sb.setValue(sb.maximum())
+
+    def _clear_log(self) -> None:
+        self.txt_log.clear()
+        self.txt_log.setText("[SYSTEM] Đã xóa toàn bộ nhật ký hiển thị.")
+
     def _on_emergency_cleanup_clicked(self) -> None:
         dialog = DangerousActionDialog(
             title="DỌN DẸP KHẨN CẤP TOÀN BỘ TIẾN TRÌNH ROS 2",
@@ -264,4 +354,5 @@ class ROS2SystemDetailScreen(QWidget):
             parent=self,
         )
         if dialog.exec_():
+            self.append_process_log("EMERGENCY", "Yêu cầu dọn dẹp khẩn cấp toàn bộ tiến trình ROS 2...")
             self.emergency_cleanup_requested.emit()

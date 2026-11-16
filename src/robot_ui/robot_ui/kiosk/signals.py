@@ -39,4 +39,5 @@ class KioskSignals(QObject):
     layer_status_changed = pyqtSignal(dict)               # Trạng thái các tầng tiến trình
     preflight_step_updated = pyqtSignal(str, bool, str)   # (step_key, is_ok, message)
     actuator_test_result = pyqtSignal(str, bool, str)     # (test_key, is_ok, message)
+    process_log_received = pyqtSignal(str, str)           # (process_or_layer_name, log_line)
 

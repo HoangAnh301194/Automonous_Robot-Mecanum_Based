@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import glob
 import math
 import os
 import shlex
@@ -14,7 +15,7 @@ from typing import Any
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
-from nav_msgs.msg import OccupancyGrid, Odometry, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from nav2_msgs.action import NavigateToPose
 from collections import deque
 import tf2_ros
@@ -180,7 +181,7 @@ class KioskRosNode(Node):
             10,
         )
         self.create_subscription(Odometry, "/odom", self._on_odom, 20)
-        self.create_subscription(Path, "/plan", self._on_path, 10)
+        self.create_subscription(NavPath, "/plan", self._on_path, 10)
         self.create_subscription(String, "/mission/service_popup_cmd", self._on_service_popup_cmd, 10)
 
         best_effort_qos = QoSProfile(
@@ -361,7 +362,7 @@ class KioskRosNode(Node):
         if not self._have_localized_pose:
             self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
 
-    def _on_path(self, msg: Path) -> None:
+    def _on_path(self, msg: NavPath) -> None:
         poses = msg.poses
         step = max(1, math.ceil(len(poses) / self.PATH_PREVIEW_MAX_POINTS))
         self.signals.path_changed.emit(
@@ -795,8 +796,29 @@ class KioskRosNode(Node):
         elif self.trigger_finish_client.wait_for_service(timeout_sec=0.2):
             self.trigger_finish_client.call_async(Trigger.Request())
 
+    def _get_ws_root(self) -> Path:
+        env_ws = os.environ.get("ROS2_WS")
+        if env_ws and Path(env_ws).is_dir():
+            return Path(env_ws)
+        colcon_prefix = os.environ.get("COLCON_PREFIX_PATH")
+        if colcon_prefix:
+            for p in colcon_prefix.split(os.pathsep):
+                cand = Path(p).parent
+                if (cand / "install" / "setup.bash").is_file():
+                    return cand
+        cur = Path(__file__).resolve()
+        for parent in cur.parents:
+            if (parent / "install" / "setup.bash").is_file():
+                return parent
+            if (parent / "src").is_dir() and (parent / "build").is_dir():
+                return parent
+        home_ws = Path.home() / "ros2_ws"
+        if home_ws.is_dir():
+            return home_ws
+        return cur.parents[4]
+
     def _get_ws_prefix(self) -> str:
-        ws_root = Path(__file__).resolve().parents[4]
+        ws_root = self._get_ws_root()
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
         ws_setup = ws_root / "install" / "setup.bash"
         cmd = f"source '{ros_setup}'"
@@ -804,15 +826,51 @@ class KioskRosNode(Node):
             cmd += f" && source '{ws_setup}'"
         return cmd + " && "
 
+    @staticmethod
+    def _list_serial_ports() -> list[str]:
+        return sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+
+    def _detect_esp_lidar_ports(self) -> tuple[str, str, str]:
+        esp_alias, lidar_alias = "/dev/esp32", "/dev/lidar"
+        if os.path.exists(esp_alias) and os.path.exists(lidar_alias):
+            return esp_alias, lidar_alias, "udev_alias"
+        ports = self._list_serial_ports()
+        if not ports:
+            return "/dev/ttyUSB0", "/dev/ttyUSB1", "fallback_defaults"
+        esp_port, lidar_port = None, None
+        for port in ports:
+            key = os.path.basename(port).lower()
+            if lidar_port is None and ("rplidar" in key or "slamtec" in key or "lidar" in key):
+                lidar_port = port
+            if esp_port is None and ("esp32" in key or "esp" in key):
+                esp_port = port
+        if esp_port is None:
+            for port in ports:
+                if port.endswith("ttyUSB0") or port.endswith("ttyACM0"):
+                    esp_port = port
+                    break
+        if esp_port is None:
+            esp_port = ports[0]
+        if lidar_port is None:
+            for port in ports:
+                if port != esp_port:
+                    lidar_port = port
+                    break
+        if lidar_port is None or lidar_port == esp_port:
+            lidar_port = "/dev/ttyUSB1" if esp_port != "/dev/ttyUSB1" else "/dev/ttyUSB0"
+        return esp_port, lidar_port, "scan"
+
     def start_slam(self) -> None:
         """Khởi chạy node SLAM mapping qua launch file real_slam.launch.py."""
         if self._slam_proc and self._slam_proc.poll() is None:
             self.get_logger().info("[KIOSK SLAM] Tiến trình SLAM đang chạy rồi.")
             self.signals.slam_status_changed.emit(True, "SLAM đang chạy")
+            self.signals.process_log_received.emit("layer_slam", "[layer_slam] Tiến trình đang chạy rồi.")
             return
 
         cmd = self._get_ws_prefix() + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         self.get_logger().info(f"[KIOSK SLAM] START: {cmd}")
+        self.signals.process_log_received.emit("layer_slam", f"[layer_slam] START: {cmd}")
         try:
             self._slam_proc = subprocess.Popen(
                 ["bash", "-c", cmd],
@@ -821,10 +879,21 @@ class KioskRosNode(Node):
                 text=True,
                 preexec_fn=os.setsid,
             )
+            self._layer_procs["layer_slam"] = self._slam_proc
             self.signals.slam_status_changed.emit(True, "Đã khởi động SLAM Mapping")
+
+            def _stream_slam():
+                if self._slam_proc and self._slam_proc.stdout:
+                    for line in self._slam_proc.stdout:
+                        cl = line.rstrip()
+                        if cl:
+                            self.signals.process_log_received.emit("layer_slam", cl)
+
+            threading.Thread(target=_stream_slam, daemon=True).start()
         except Exception as exc:
             self.get_logger().error(f"[KIOSK SLAM] Lỗi khởi chạy SLAM: {exc}")
             self.signals.slam_status_changed.emit(False, f"Lỗi khởi động SLAM: {exc}")
+            self.signals.process_log_received.emit("layer_slam", f"[layer_slam] LỖI: {exc}")
 
     def stop_slam(self) -> None:
         """Dừng tiến trình SLAM một cách an toàn."""
@@ -834,6 +903,7 @@ class KioskRosNode(Node):
             return
 
         self.get_logger().info("[KIOSK SLAM] STOP SLAM process group")
+        self.signals.process_log_received.emit("layer_slam", "[layer_slam] Dừng tiến trình (SIGINT)...")
         try:
             pgid = os.getpgid(self._slam_proc.pid)
             os.killpg(pgid, signal.SIGINT)
@@ -841,20 +911,25 @@ class KioskRosNode(Node):
             while time.monotonic() < deadline:
                 if self._slam_proc.poll() is not None:
                     break
-                time.sleep(0.1)
+                time.sleep(0.05)
             if self._slam_proc.poll() is None:
                 os.killpg(pgid, signal.SIGTERM)
+                time.sleep(0.5)
+            if self._slam_proc.poll() is None:
+                os.killpg(pgid, signal.SIGKILL)
         except Exception as exc:
             self.get_logger().warning(f"[KIOSK SLAM] Dừng SLAM gặp lỗi: {exc}")
         finally:
             self._slam_proc = None
+            self._layer_procs.pop("layer_slam", None)
             self.signals.slam_status_changed.emit(False, "Đã dừng SLAM Mapping")
+            self.signals.process_log_received.emit("layer_slam", "[layer_slam] Đã dừng SLAM Mapping.")
 
     def save_map(self, map_stem: str) -> None:
         """Thực hiện lưu bản đồ kép (AMCL YAML + PoseGraph serialize) trên background thread."""
         def _save_worker():
             raw_name = map_stem.strip() or "new_map"
-            ws_root = Path(__file__).resolve().parents[4]
+            ws_root = self._get_ws_root()
             map_dir = ws_root / "my_map"
             map_dir.mkdir(parents=True, exist_ok=True)
 
@@ -870,6 +945,7 @@ class KioskRosNode(Node):
                 + f"ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph {serialize_req}"
             )
             self.get_logger().info(f"[KIOSK MAP SAVE] Chạy lệnh: {cmd}")
+            self.signals.process_log_received.emit("layer_slam", f"[KIOSK MAP SAVE] Chạy lệnh: {cmd}")
             try:
                 proc = subprocess.run(
                     ["bash", "-c", cmd],
@@ -881,13 +957,16 @@ class KioskRosNode(Node):
                     msg = f"Đã lưu bản đồ: {raw_name}_amcl.yaml và {raw_name}_localization.posegraph"
                     self.get_logger().info(f"[KIOSK MAP SAVE] Thành công: {msg}")
                     self.signals.map_saved_result.emit(True, msg)
+                    self.signals.process_log_received.emit("layer_slam", f"[KIOSK MAP SAVE] {msg}")
                 else:
                     err_msg = f"Lỗi khi lưu (mã lỗi {proc.returncode}): {proc.stderr[:100]}"
                     self.get_logger().error(f"[KIOSK MAP SAVE] {err_msg}")
                     self.signals.map_saved_result.emit(False, err_msg)
+                    self.signals.process_log_received.emit("layer_slam", f"[KIOSK MAP SAVE] {err_msg}")
             except Exception as exc:
                 self.get_logger().error(f"[KIOSK MAP SAVE] Ngoại lệ: {exc}")
                 self.signals.map_saved_result.emit(False, f"Lỗi: {exc}")
+                self.signals.process_log_received.emit("layer_slam", f"[KIOSK MAP SAVE] Lỗi: {exc}")
 
         threading.Thread(target=_save_worker, daemon=True).start()
 
@@ -897,6 +976,10 @@ class KioskRosNode(Node):
         self._selected_backend = backend
         self.get_logger().info(
             f"[KIOSK LOCALIZATION] Áp dụng bản đồ: {map_yaml_path} (Backend: {backend})"
+        )
+        self.signals.process_log_received.emit(
+            "layer_navigation",
+            f"[layer_navigation] Áp dụng bản đồ: {map_yaml_path} (Backend: {backend})",
         )
         self.stop_slam()
 
@@ -915,6 +998,7 @@ class KioskRosNode(Node):
                 + f"map_yaml:={shlex.quote(map_yaml_path)} use_rviz:=false"
             )
             self.get_logger().info(f"[KIOSK LOCALIZATION] START: {cmd}")
+            self.signals.process_log_received.emit("layer_navigation", f"[layer_navigation] START: {cmd}")
             try:
                 self._localization_proc = subprocess.Popen(
                     ["bash", "-c", cmd],
@@ -923,8 +1007,19 @@ class KioskRosNode(Node):
                     text=True,
                     preexec_fn=os.setsid,
                 )
+                self._layer_procs["layer_navigation"] = self._localization_proc
+
+                def _stream_loc():
+                    if self._localization_proc and self._localization_proc.stdout:
+                        for line in self._localization_proc.stdout:
+                            cl = line.rstrip()
+                            if cl:
+                                self.signals.process_log_received.emit("layer_navigation", cl)
+
+                threading.Thread(target=_stream_loc, daemon=True).start()
             except Exception as exc:
                 self.get_logger().error(f"[KIOSK LOCALIZATION] Lỗi: {exc}")
+                self.signals.process_log_received.emit("layer_navigation", f"[layer_navigation] LỖI: {exc}")
 
         threading.Thread(target=_loc_worker, daemon=True).start()
 
@@ -1064,13 +1159,28 @@ class KioskRosNode(Node):
         self.signals.system_telemetry_changed.emit(snap)
 
         # Layer states
+        def _is_running(k: str) -> bool:
+            p = self._layer_procs.get(k)
+            return bool(p and p.poll() is None)
+
+        is_hw = _is_running("layer_hardware") or _is_running("layer1")
+        is_nav = _is_running("layer_navigation") or _is_running("layer2") or bool(self._localization_proc and self._localization_proc.poll() is None)
+        is_slam = _is_running("layer_slam") or _is_running("layer3") or bool(self._slam_proc and self._slam_proc.poll() is None)
+        is_ai = _is_running("layer_perception") or _is_running("layer4")
+        is_voice = _is_running("layer_voice_interaction") or _is_running("layer5")
+
         layer_states = {
-            "layer1": bool(self._layer_procs.get("layer1") and self._layer_procs["layer1"].poll() is None),
-            "layer2": bool(self._localization_proc and self._localization_proc.poll() is None)
-            or bool(self._slam_proc and self._slam_proc.poll() is None),
-            "layer3": bool(self._layer_procs.get("layer3") and self._layer_procs["layer3"].poll() is None),
-            "layer4": bool(self._layer_procs.get("layer4") and self._layer_procs["layer4"].poll() is None),
-            "layer5": bool(self._layer_procs.get("layer5") and self._layer_procs["layer5"].poll() is None),
+            "layer_hardware": is_hw,
+            "layer_navigation": is_nav,
+            "layer_slam": is_slam,
+            "layer_perception": is_ai,
+            "layer_voice_interaction": is_voice,
+            # Backward compatibility aliases
+            "layer1": is_hw,
+            "layer2": is_nav,
+            "layer3": is_slam,
+            "layer4": is_ai,
+            "layer5": is_voice,
         }
         self.signals.layer_status_changed.emit(layer_states)
 
@@ -1117,55 +1227,184 @@ class KioskRosNode(Node):
 
             threading.Thread(target=_jog_worker, daemon=True).start()
 
+    def _terminate_proc_group(self, name: str, proc: subprocess.Popen) -> None:
+        """Dừng tiến trình nhẹ nhàng bằng SIGINT trước (giống gui_v3) rồi SIGTERM / SIGKILL nếu cần."""
+        if not proc or proc.poll() is not None:
+            self.signals.process_log_received.emit(name, f"[{name}] Chưa chạy hoặc đã dừng.")
+            return
+        try:
+            pgid = os.getpgid(proc.pid)
+            self.signals.process_log_received.emit(name, f"[{name}] Dừng tiến trình (SIGINT)...")
+            os.killpg(pgid, signal.SIGINT)
+        except ProcessLookupError:
+            return
+        except Exception as exc:
+            self.get_logger().error(f"[{name}] Lỗi gửi SIGINT: {exc}")
+            return
+
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                self.signals.process_log_received.emit(name, f"[{name}] Đã dừng thành công.")
+                return
+            time.sleep(0.05)
+
+        if proc.poll() is None:
+            try:
+                pgid = os.getpgid(proc.pid)
+                self.signals.process_log_received.emit(name, f"[{name}] Tiến trình chưa thoát, gửi SIGTERM...")
+                os.killpg(pgid, signal.SIGTERM)
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        if proc.poll() is None:
+            try:
+                pgid = os.getpgid(proc.pid)
+                self.signals.process_log_received.emit(name, f"[{name}] Buộc dừng (SIGKILL)!")
+                os.killpg(pgid, signal.SIGKILL)
+            except Exception:
+                pass
+
     def start_layer(self, layer_key: str) -> None:
-        """Khởi động tầng tiến trình tương ứng."""
-        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key}")
-        cmd = ""
+        """Khởi động tầng tiến trình tương ứng giống gui_v3."""
+        canonical_map = {
+            "layer1": "layer_hardware",
+            "layer2": "layer_navigation",
+            "layer3": "layer_slam",
+            "layer4": "layer_perception",
+            "layer5": "layer_voice_interaction",
+        }
+        target_key = canonical_map.get(layer_key, layer_key)
+
+        existing_proc = self._layer_procs.get(target_key)
+        if existing_proc and existing_proc.poll() is None:
+            self.get_logger().info(f"[LAYER START] Tầng {target_key} đang chạy rồi.")
+            self.signals.process_log_received.emit(target_key, f"[{target_key}] Tiến trình đang chạy rồi.")
+            return
+
         prefix = self._get_ws_prefix()
-        if layer_key == "layer1":
-            cmd = prefix + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false"
-        elif layer_key == "layer2":
-            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false"
-        elif layer_key == "layer3":
-            cmd = prefix + "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false"
-        elif layer_key == "layer4":
-            cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py"
-        elif layer_key == "layer5":
+        cmd = ""
+        if target_key == "layer_hardware":
+            esp_port, lidar_port, detect_src = self._detect_esp_lidar_ports()
+            self.get_logger().info(f"[LAYER START] Cổng Serial ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}")
+            self.signals.process_log_received.emit(
+                target_key,
+                f"[{target_key}] Phát hiện cổng ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}",
+            )
+            cmd = (
+                prefix
+                + f"ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
+            )
+        elif target_key == "layer_navigation":
+            map_arg = ""
+            if self._selected_map_yaml and os.path.exists(self._selected_map_yaml):
+                map_arg = f" map_yaml:={shlex.quote(self._selected_map_yaml)}"
+            else:
+                ws_root = self._get_ws_root()
+                default_yaml = ws_root / "my_map" / "my_map.yaml"
+                if default_yaml.is_file():
+                    map_arg = f" map_yaml:={shlex.quote(str(default_yaml))}"
+            cmd = (
+                prefix
+                + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:={shlex.quote(self._selected_backend)} "
+                + f"use_sim_time:=false use_rviz:=false{map_arg}"
+            )
+        elif target_key == "layer_slam":
+            cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+        elif target_key == "layer_perception":
+            ws_root = self._get_ws_root()
+            front_cfg = ws_root / "my_map" / "cam_truoc.yaml"
+            rear_cfg = ws_root / "my_map" / "cam_sau.yaml"
+            extra_cfgs = ""
+            if front_cfg.is_file():
+                extra_cfgs += f" front_obstacle_config:={shlex.quote(str(front_cfg))}"
+            if rear_cfg.is_file():
+                extra_cfgs += f" rear_obstacle_config:={shlex.quote(str(rear_cfg))}"
+            cmd = (
+                prefix
+                + "ros2 launch robot_bringup ai_perception.launch.py enable_cameras:=true "
+                + f"enable_obstacle_detectors:=true enable_ai_nodes:=true{extra_cfgs}"
+            )
+        elif target_key == "layer_voice_interaction":
             cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
-        if cmd:
-            def _launch():
-                try:
-                    proc = subprocess.Popen(
-                        ["bash", "-c", cmd],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        preexec_fn=os.setsid,
-                    )
-                    self._layer_procs[layer_key] = proc
-                except Exception as exc:
-                    self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
+        if not cmd:
+            self.get_logger().warning(f"[LAYER START] Không tìm thấy cấu hình cho tầng: {layer_key}")
+            return
 
-            threading.Thread(target=_launch, daemon=True).start()
+        self.get_logger().info(f"[LAYER START] [{target_key}] CMD: {cmd}")
+        self.signals.process_log_received.emit(target_key, f"[{target_key}] START: {cmd}")
+
+        def _launch_and_stream():
+            try:
+                proc = subprocess.Popen(
+                    ["bash", "-c", cmd],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    preexec_fn=os.setsid,
+                )
+                self._layer_procs[target_key] = proc
+                if target_key == "layer_navigation":
+                    self._localization_proc = proc
+                elif target_key == "layer_slam":
+                    self._slam_proc = proc
+
+                if proc.stdout:
+                    for line in proc.stdout:
+                        clean_line = line.rstrip()
+                        if clean_line:
+                            self.signals.process_log_received.emit(target_key, clean_line)
+            except Exception as exc:
+                self.get_logger().error(f"[LAYER START] Lỗi khởi chạy {target_key}: {exc}")
+                self.signals.process_log_received.emit(target_key, f"[{target_key}] LỖI: {exc}")
+
+        threading.Thread(target=_launch_and_stream, daemon=True).start()
 
     def stop_layer(self, layer_key: str) -> None:
         """Dừng tầng tiến trình tương ứng."""
-        proc = self._layer_procs.get(layer_key)
+        canonical_map = {
+            "layer1": "layer_hardware",
+            "layer2": "layer_navigation",
+            "layer3": "layer_slam",
+            "layer4": "layer_perception",
+            "layer5": "layer_voice_interaction",
+        }
+        target_key = canonical_map.get(layer_key, layer_key)
+        self.get_logger().info(f"[LAYER STOP] Yêu cầu dừng tầng: {target_key}")
+
+        proc = self._layer_procs.get(target_key)
         if proc and proc.poll() is None:
-            self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGINT)
-                time.sleep(0.5)
-                if proc.poll() is None:
-                    os.killpg(pgid, signal.SIGKILL)
-            except Exception:
-                pass
+            self._terminate_proc_group(target_key, proc)
+        else:
+            self.signals.process_log_received.emit(target_key, f"[{target_key}] Tầng chưa chạy.")
+
+        if target_key == "layer_navigation":
+            if self._localization_proc and self._localization_proc != proc:
+                self._terminate_proc_group("layer_navigation", self._localization_proc)
+            self._localization_proc = None
+        elif target_key == "layer_slam":
+            if self._slam_proc and self._slam_proc != proc:
+                self._terminate_proc_group("layer_slam", self._slam_proc)
+            self._slam_proc = None
+            self.signals.slam_status_changed.emit(False, "Đã dừng SLAM Mapping")
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
+        self.signals.process_log_received.emit("EMERGENCY", "[EMERGENCY CLEANUP] Đang quét và đóng sạch toàn bộ tiến trình ROS 2...")
+        for key in list(self._layer_procs.keys()):
+            proc = self._layer_procs.pop(key, None)
+            if proc and proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+        self._slam_proc = None
+        self._localization_proc = None
+
         patterns = [
             "robot_state_publisher",
             "scan_to_scan_filter_chain",
@@ -1205,4 +1444,5 @@ class KioskRosNode(Node):
                 subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=1.0)
             except Exception:
                 pass
+        self.signals.process_log_received.emit("EMERGENCY", "[EMERGENCY CLEANUP] Hoàn tất dọn dẹp các tiến trình.")
 
