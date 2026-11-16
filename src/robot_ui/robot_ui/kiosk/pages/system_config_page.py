@@ -554,6 +554,13 @@ class SystemConfigPage(QWidget):
     def update_layer_status(self, layers_state: dict[str, bool]) -> None:
         """Called when layer execution state changes."""
         self.ros2_screen.update_layer_status(layers_state)
+        # Update ROS 2 System card on the Overview Screen
+        active_count = sum(
+            1 for row in self.ros2_screen.layer_rows.values()
+            if row["status_lbl"].text() == "RUNNING"
+        )
+        total_layers = len(self.ros2_screen.layer_rows) or 5
+        self.overview_screen.update_ros2_status(active_count, total_layers)
 
     def append_console_log(self, text: str) -> None:
         """Append log to diagnostics console output."""

@@ -8,6 +8,7 @@ Organizes:
 """
 from __future__ import annotations
 
+import os
 import shlex
 import subprocess
 from typing import Any, Optional
@@ -280,7 +281,12 @@ class SensorsAIDetailScreen(QWidget):
 
     def _launch_rqt_image_view(self, topic: str) -> None:
         """Launch rqt_image_view process detached in background."""
-        cmd = f"source /opt/ros/humble/setup.bash && rqt_image_view {shlex.quote(topic)}"
+        ros_domain = os.environ.get("ROS_DOMAIN_ID", "94")
+        disp = os.environ.get("DISPLAY", ":0")
+        cmd = (
+            f"source /opt/ros/humble/setup.bash && export ROS_DOMAIN_ID={ros_domain} "
+            f"&& export DISPLAY={disp} && ros2 run rqt_image_view rqt_image_view {shlex.quote(topic)}"
+        )
         try:
             subprocess.Popen(["bash", "-c", cmd], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:

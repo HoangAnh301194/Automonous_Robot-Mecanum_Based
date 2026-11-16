@@ -53,6 +53,10 @@ def probe_rplidar(port: str, baudrate: int = 115200, timeout: float = 0.4) -> bo
     ser = None
     try:
         ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
+        # Send STOP first in case LiDAR is continuously streaming scan data
+        ser.write(bytes([0xA5, 0x25]))
+        import time
+        time.sleep(0.02)
         ser.reset_input_buffer()
         # RPLiDAR GET_HEALTH command: 0xA5 0x52
         ser.write(bytes([0xA5, 0x52]))

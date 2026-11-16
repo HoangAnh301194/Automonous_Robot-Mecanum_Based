@@ -218,7 +218,7 @@ class KioskRosNode(Node):
                 Image,
                 topic,
                 lambda _msg, k=key: self._mark_topic_rx(k),
-                qos_profile_sensor_data,
+                10,
                 raw=True,
             )
 
@@ -1251,9 +1251,9 @@ class KioskRosNode(Node):
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
-            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false"
+            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer3":
-            cmd = prefix + "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false"
+            cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
             cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py"
         elif launch_key == "layer5":
@@ -1336,7 +1336,7 @@ class KioskRosNode(Node):
                 pass
 
     def cleanup_ros_processes(self) -> None:
-        """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền."""
+        """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
@@ -1358,6 +1358,9 @@ class KioskRosNode(Node):
             "amcl",
             "map_server",
             "hoverboard_driver",
+            "ros2_control_node",
+            "controller_manager",
+            "spawner",
             "sllidar_node",
             "esp_bridge_node",
             "ai_perception",
@@ -1372,11 +1375,31 @@ class KioskRosNode(Node):
             "hand_wave_detector",
             "rough_localizer",
             "backend.launch.py",
+            "config_manager_node",
+            "system_monitor_node",
+            "navigation_manager_node",
+            "mission_controller_node",
+            "audio_player_node",
+            "smoother_server",
+            "waypoint_follower",
+            "velocity_smoother",
+            "front_astra_optical_alias",
+            "rqt_image_view",
         ]
         for p in patterns:
             try:
                 subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=1.0)
             except Exception:
                 pass
+
+        # Reset bộ nhớ theo dõi tiến trình trong giao diện
+        self._layer_procs.clear()
+        self._slam_proc = None
+        self._localization_proc = None
+
+        # Cập nhật trạng thái STOPPED lên giao diện
+        stopped_states = {k: False for k in self.LAYER_ALIAS_MAP}
+        self.signals.layer_status_changed.emit(stopped_states)
+        self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
         self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
 

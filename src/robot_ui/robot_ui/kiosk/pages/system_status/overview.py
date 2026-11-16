@@ -288,6 +288,15 @@ class SystemOverviewScreen(QWidget):
         )
         self.card_hardware.set_status(h_health.value, h_health, f"Jetson: {host.cpu_temp:.1f}°C | CPU: {host.cpu_pct:.0f}%")
 
+    def update_ros2_status(self, active_count: int, total_count: int = 5) -> None:
+        """Update ROS 2 System Module card status based on active layers count."""
+        st = HealthStatus.HEALTHY if active_count >= 1 else HealthStatus.STOPPED
+        status_text = f"{active_count}/{total_count} ACTIVE" if active_count > 0 else "STOPPED"
+        subtitle = "Tất cả 5 tầng đang chạy" if active_count == total_count else (
+            f"{active_count}/{total_count} tầng đang hoạt động" if active_count > 0 else "Các tầng đang dừng"
+        )
+        self.card_ros2.set_status(status_text, st, subtitle)
+
     def _on_warning_detail_clicked(self) -> None:
         """Route to appropriate detail screen based on top warning."""
         if not self._current_warnings:
