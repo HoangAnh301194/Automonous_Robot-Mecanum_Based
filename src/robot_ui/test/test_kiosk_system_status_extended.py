@@ -141,17 +141,67 @@ def test_sensors_ai_rqt_camera_buttons(app):
     sensors.close()
 
 
-def test_navigation_map_yaml_sync(app):
+def test_navigation_map_yaml_sync(app, tmp_path):
     icons = {"goal": Path("/nonexistent/goal.png")}
     nav = NavigationPage(icons=icons)
 
-    map_path = Path("my_map/a2_amcl.yaml")
-    if map_path.is_file():
-        success = nav.load_map_yaml(map_path)
+    # 1. Load a2_amcl map and verify its dedicated waypoints are loaded
+    map_a2 = Path("my_map/a2_amcl.yaml")
+    if map_a2.is_file():
+        success = nav.load_map_yaml(map_a2)
         assert success is True
         assert not nav.map_widget._map_image.isNull()
-        assert not nav.patrol_map_widget._map_image.isNull()
         assert "a2_amcl" in nav.status_label.text()
+        assert len(nav._batch_waypoints) == 7
+        assert nav._batch_waypoints[0]["name"] == "khoihanh"
+        assert nav.table_waypoints.rowCount() == 7
+
+    # 2. Switch to san_b5 map and verify waypoints switch to san_b5's dedicated waypoints
+    map_b5 = Path("my_map/san_b5.yaml")
+    if map_b5.is_file():
+        success = nav.load_map_yaml(map_b5)
+        assert success is True
+        assert "san_b5" in nav.status_label.text()
+        assert len(nav._batch_waypoints) == 1
+        assert nav.table_waypoints.rowCount() == 1
+        assert "Trạm xuất phát san_b5" in nav._batch_waypoints[0]["note"]
+
+    # 3. Switch to a brand new map without any saved waypoints
+    # Create dummy map yaml and 1x1 pgm
+    dummy_yaml = tmp_path / "new_clean_map.yaml"
+    dummy_pgm = tmp_path / "new_clean_map.pgm"
+    # P2 1 1 255 0
+    dummy_pgm.write_bytes(b"P5\n1 1\n255\n\x00")
+    dummy_yaml.write_text(
+        "image: new_clean_map.pgm\nresolution: 0.05\norigin: [0, 0, 0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.25\n"
+    )
+
+    success = nav.load_map_yaml(dummy_yaml)
+    assert success is True
+    # Canvas and waypoints must be completely cleared
+    assert len(nav._batch_waypoints) == 0
+    assert nav.table_waypoints.rowCount() == 0
+    assert "Chưa có điểm" in nav.status_label.text()
+
+    # 4. Add waypoints to the new map and save
+    nav._batch_waypoints = [
+        {"name": "p1", "x": 1.5, "y": 2.5, "yaw": 0.0, "note": "Point 1"},
+        {"name": "p2", "x": 3.0, "y": 4.0, "yaw": 1.0, "note": "Point 2"},
+    ]
+    nav._sync_views_from_waypoints()
+    with patch("PyQt5.QtWidgets.QMessageBox.information"), patch("PyQt5.QtWidgets.QMessageBox.warning"):
+        assert nav._save_patrol_to_yaml() is True
+
+    # Check dedicated file was created for new_clean_map
+    expected_wp_file = tmp_path / "new_clean_map_waypoints.yaml"
+    assert expected_wp_file.is_file()
+
+    # 5. Switch back to a2_amcl and verify its original 7 waypoints return intact
+    if map_a2.is_file():
+        nav.load_map_yaml(map_a2)
+        assert len(nav._batch_waypoints) == 7
+        assert nav._batch_waypoints[0]["name"] == "khoihanh"
+        assert nav.table_waypoints.rowCount() == 7
 
     nav.close()
 

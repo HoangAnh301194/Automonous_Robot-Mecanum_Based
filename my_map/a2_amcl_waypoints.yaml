@@ -1,0 +1,82 @@
+map_name: a2_amcl.yaml
+locations:
+  khoihanh:
+    x: -3.819
+    y: -2.893
+    yaw: 1.2703855092188803
+    note: Trạm nước / Khởi hành
+  diem1:
+    x: -1.179
+    y: 5.629
+    yaw: -1.5707963267948966
+    note: Điểm tuần tra diem1
+  diem2:
+    x: -1.179
+    y: -8.054
+    yaw: -0.14597698533802356
+    note: Điểm tuần tra diem2
+  diem3:
+    x: 2.902
+    y: -8.654
+    yaw: -2.7827991572198627
+    note: Điểm tuần tra diem3
+  diem4:
+    x: -6.7
+    y: -12.255
+    yaw: -1.8381489528218404
+    note: Điểm tuần tra diem4
+  diem5:
+    x: -9.1
+    y: -21.017
+    yaw: -0.31258300491990965
+    note: Điểm tuần tra diem5
+  diem6:
+    x: 2.782
+    y: -24.857
+    yaw: 1.8627459316303328
+    note: Điểm tuần tra diem6
+routes:
+  patrol_route:
+    - khoihanh
+    - diem1
+    - diem2
+    - diem3
+    - diem4
+    - diem5
+    - diem6
+waypoints:
+  - name: khoihanh
+    x: -3.819
+    y: -2.893
+    yaw: 1.2703855092188803
+    note: Trạm nước / Khởi hành
+  - name: diem1
+    x: -1.179
+    y: 5.629
+    yaw: -1.5707963267948966
+    note: Điểm tuần tra diem1
+  - name: diem2
+    x: -1.179
+    y: -8.054
+    yaw: -0.14597698533802356
+    note: Điểm tuần tra diem2
+  - name: diem3
+    x: 2.902
+    y: -8.654
+    yaw: -2.7827991572198627
+    note: Điểm tuần tra diem3
+  - name: diem4
+    x: -6.7
+    y: -12.255
+    yaw: -1.8381489528218404
+    note: Điểm tuần tra diem4
+  - name: diem5
+    x: -9.1
+    y: -21.017
+    yaw: -0.31258300491990965
+    note: Điểm tuần tra diem5
+  - name: diem6
+    x: 2.782
+    y: -24.857
+    yaw: 1.8627459316303328
+    note: Điểm tuần tra diem6

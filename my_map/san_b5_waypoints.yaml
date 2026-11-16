@@ -1,0 +1,16 @@
+map_name: san_b5.yaml
+locations:
+  khoihanh:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    note: Trạm xuất phát san_b5
+routes:
+  patrol_route:
+    - khoihanh
+waypoints:
+  - name: khoihanh
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    note: Trạm xuất phát san_b5

@@ -764,9 +764,14 @@ class NavigationPage(QWidget):
         self._goal: tuple[float, float, float] | None = None
         self._navigation_active = False
         self._batch_waypoints: list[dict[str, Any]] = []
+        self._current_map_path: Path | None = None
 
         self._init_ui()
-        self._load_patrol_from_yaml(silent=True)
+        default_map = Path("my_map/a2_amcl.yaml")
+        if default_map.is_file():
+            self.load_map_yaml(default_map)
+        else:
+            self._load_patrol_from_yaml(silent=True)
 
         self._clock_timer = QTimer(self)
         self._clock_timer.timeout.connect(self._update_clock)
@@ -1432,8 +1437,6 @@ class NavigationPage(QWidget):
             self._sync_views_from_waypoints()
 
     def _clear_batch_waypoints(self) -> None:
-        if not self._batch_waypoints:
-            return
         self._batch_waypoints.clear()
         self._sync_views_from_waypoints()
 
@@ -1463,6 +1466,8 @@ class NavigationPage(QWidget):
     def _sync_waypoints_from_table(self) -> None:
         """Extract user edits from table into _batch_waypoints."""
         rows = self.table_waypoints.rowCount()
+        if rows == 0 and self._batch_waypoints:
+            return
         updated: list[dict[str, Any]] = []
         for r in range(rows):
             item_name = self.table_waypoints.item(r, 0)
@@ -1491,74 +1496,44 @@ class NavigationPage(QWidget):
         recompute_cyclic_waypoint_yaws(self._batch_waypoints)
 
     # -------------------------------------------------------------------------
-    # YAML Configuration Sync
+    # Per-Map YAML Waypoint & Configuration Sync
     # -------------------------------------------------------------------------
-    def _load_patrol_from_yaml(self, silent: bool = False) -> bool:
-        loc_file = self._config_dir / "locations.yaml"
-        route_file = self._config_dir / "routes.yaml"
+    def _get_map_waypoints_path(self, map_path: Path | str | None) -> Path | None:
+        """Find or determine the dedicated waypoints YAML file associated with a map."""
+        if not map_path:
+            return None
+        p = Path(map_path)
+        stem = p.stem
 
-        locations: dict[str, Any] = {}
-        routes: dict[str, Any] = {}
+        # Priority 1: In the same directory as the map, e.g. <map_dir>/<map_stem>_waypoints.yaml
+        direct = p.parent / f"{stem}_waypoints.yaml"
+        if direct.is_file():
+            return direct
+
+        # If stem ends with _amcl or _localization (e.g. a2_amcl), also check base stem
+        if stem.endswith("_amcl"):
+            base_cand = p.parent / f"{stem[:-5]}_waypoints.yaml"
+            if base_cand.is_file():
+                return base_cand
+        elif stem.endswith("_localization"):
+            base_cand = p.parent / f"{stem[:-13]}_waypoints.yaml"
+            if base_cand.is_file():
+                return base_cand
+
+        # Priority 2: In config/waypoints/<map_stem>_waypoints.yaml
+        cfg_cand = self._config_dir / "waypoints" / f"{stem}_waypoints.yaml"
+        if cfg_cand.is_file():
+            return cfg_cand
+
+        return direct
+
+    def _sync_active_config_files(self) -> None:
+        """Mirror current batch waypoints to global config/locations.yaml & routes.yaml for background nodes."""
         try:
-            if loc_file.is_file():
-                with loc_file.open("r", encoding="utf-8") as f:
-                    locations = yaml.safe_load(f) or {}
-            if route_file.is_file():
-                with route_file.open("r", encoding="utf-8") as f:
-                    routes = yaml.safe_load(f) or {}
-        except Exception as exc:
-            if not silent:
-                QMessageBox.warning(self, "Lỗi đọc YAML", f"Không thể đọc file cấu hình:\n{exc}")
-            return False
+            loc_file = self._config_dir / "locations.yaml"
+            route_file = self._config_dir / "routes.yaml"
 
-        patrol_names = routes.get("patrol_route")
-        if not isinstance(patrol_names, list) or not patrol_names:
-            patrol_names = list(locations.keys())
-
-        loaded: list[dict[str, Any]] = []
-        for name in patrol_names:
-            coords = locations.get(name)
-            if not isinstance(coords, dict):
-                continue
-            note = "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra {name}"
-            loaded.append({
-                "name": str(name),
-                "x": float(coords.get("x", 0.0)),
-                "y": float(coords.get("y", 0.0)),
-                "yaw": float(coords.get("yaw", 0.0)),
-                "note": note,
-            })
-
-        self._batch_waypoints = loaded
-        recompute_cyclic_waypoint_yaws(self._batch_waypoints)
-        self._sync_views_from_waypoints()
-        if not silent:
-            QMessageBox.information(
-                self, "Nạp cấu hình thành công",
-                f"Đã nạp {len(loaded)} điểm tuần tra từ config:\n- {loc_file.name}\n- {route_file.name}",
-            )
-        return True
-
-    def _save_patrol_to_yaml(self) -> bool:
-        self._sync_waypoints_from_table()
-        if not self._batch_waypoints:
-            QMessageBox.warning(self, "Chưa có điểm", "Hãy chấm ít nhất 1 điểm trên bản đồ trước khi lưu lộ trình.")
-            return False
-
-        loc_file = self._config_dir / "locations.yaml"
-        route_file = self._config_dir / "routes.yaml"
-
-        try:
             locations: dict[str, Any] = {}
-            if loc_file.is_file():
-                with loc_file.open("r", encoding="utf-8") as f:
-                    locations = yaml.safe_load(f) or {}
-
-            routes: dict[str, Any] = {}
-            if route_file.is_file():
-                with route_file.open("r", encoding="utf-8") as f:
-                    routes = yaml.safe_load(f) or {}
-
             route_names: list[str] = []
             for wp in self._batch_waypoints:
                 name = str(wp["name"])
@@ -1568,18 +1543,141 @@ class NavigationPage(QWidget):
                     "y": float(wp["y"]),
                     "yaw": float(wp.get("yaw", 0.0)),
                 }
-            routes["patrol_route"] = route_names
 
             with loc_file.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
             with route_file.open("w", encoding="utf-8") as f:
-                yaml.safe_dump(routes, f, allow_unicode=True, sort_keys=False)
+                yaml.safe_dump({"patrol_route": route_names}, f, allow_unicode=True, sort_keys=False)
 
             self.reload_route_requested.emit()
+        except Exception:
+            pass
+
+    def _load_patrol_from_file(self, wp_file: Path, silent: bool = True) -> bool:
+        """Load waypoints from a dedicated map waypoints file and sync to views."""
+        try:
+            with wp_file.open("r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+
+            locations = data.get("locations", {})
+            routes = data.get("routes", {})
+            patrol_names = routes.get("patrol_route", []) if isinstance(routes, dict) else []
+
+            loaded: list[dict[str, Any]] = []
+
+            if isinstance(locations, dict) and locations:
+                if not patrol_names:
+                    patrol_names = list(locations.keys())
+                for name in patrol_names:
+                    coords = locations.get(name)
+                    if not isinstance(coords, dict):
+                        continue
+                    note = coords.get("note", "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra {name}")
+                    loaded.append({
+                        "name": str(name),
+                        "x": float(coords.get("x", 0.0)),
+                        "y": float(coords.get("y", 0.0)),
+                        "yaw": float(coords.get("yaw", 0.0)),
+                        "note": note,
+                    })
+            elif "waypoints" in data and isinstance(data["waypoints"], list):
+                for wp in data["waypoints"]:
+                    if isinstance(wp, dict) and "x" in wp and "y" in wp:
+                        name = str(wp.get("name", "diem"))
+                        loaded.append({
+                            "name": name,
+                            "x": float(wp["x"]),
+                            "y": float(wp["y"]),
+                            "yaw": float(wp.get("yaw", 0.0)),
+                            "note": str(wp.get("note", f"Điểm {name}")),
+                        })
+
+            self._batch_waypoints = loaded
+            recompute_cyclic_waypoint_yaws(self._batch_waypoints)
             self._sync_views_from_waypoints()
+            self._sync_active_config_files()
+
+            if not silent:
+                QMessageBox.information(
+                    self,
+                    "Nạp cấu hình thành công",
+                    f"Đã nạp {len(loaded)} điểm tuần tra từ:\n{wp_file.name}",
+                )
+            return True
+        except Exception as exc:
+            if not silent:
+                QMessageBox.warning(self, "Lỗi đọc YAML", f"Không thể đọc file {wp_file.name}:\n{exc}")
+            return False
+
+    def _load_patrol_from_yaml(self, silent: bool = False) -> bool:
+        """Load waypoints: prioritized from current map's waypoint file, falling back to global config."""
+        wp_file = self._get_map_waypoints_path(self._current_map_path)
+        if wp_file and wp_file.is_file():
+            return self._load_patrol_from_file(wp_file, silent=silent)
+
+        loc_file = self._config_dir / "locations.yaml"
+        if loc_file.is_file():
+            return self._load_patrol_from_file(loc_file, silent=silent)
+
+        if not silent:
+            QMessageBox.warning(self, "Chưa có file cấu hình", "Không tìm thấy file lộ trình nào.")
+        return False
+
+    def _save_patrol_to_yaml(self) -> bool:
+        """Save waypoints into dedicated file for current map, overwriting existing, and sync to global config."""
+        self._sync_waypoints_from_table()
+        if not self._batch_waypoints:
+            QMessageBox.warning(self, "Chưa có điểm", "Hãy chấm ít nhất 1 điểm trên bản đồ trước khi lưu lộ trình.")
+            return False
+
+        target_wp_file = self._get_map_waypoints_path(self._current_map_path)
+        if target_wp_file is None:
+            target_wp_file = self._config_dir / "locations.yaml"
+
+        try:
+            target_wp_file.parent.mkdir(parents=True, exist_ok=True)
+
+            locations: dict[str, Any] = {}
+            route_names: list[str] = []
+            wp_list: list[dict[str, Any]] = []
+
+            for wp in self._batch_waypoints:
+                name = str(wp["name"])
+                route_names.append(name)
+                locations[name] = {
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                    "note": str(wp.get("note", "")),
+                }
+                wp_list.append({
+                    "name": name,
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                    "note": str(wp.get("note", "")),
+                })
+
+            map_name_str = self._current_map_path.name if self._current_map_path else "default_map"
+            payload = {
+                "map_name": map_name_str,
+                "locations": locations,
+                "routes": {
+                    "patrol_route": route_names,
+                },
+                "waypoints": wp_list,
+            }
+
+            with target_wp_file.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
+
+            self._sync_active_config_files()
+            self._sync_views_from_waypoints()
+
             QMessageBox.information(
-                self, "Lưu lộ trình thành công",
-                f"Đã lưu {len(self._batch_waypoints)} điểm và đồng bộ tới hệ thống:\n{' -> '.join(route_names)}",
+                self,
+                "Lưu lộ trình thành công",
+                f"Đã lưu {len(self._batch_waypoints)} điểm vào {target_wp_file.name} và đồng bộ tới hệ thống:\n{' -> '.join(route_names)}",
             )
             return True
         except Exception as exc:
@@ -1705,12 +1803,23 @@ class NavigationPage(QWidget):
         self.lbl_recovery_count.setText(f"Tự cứu: {recov} lần")
 
     def load_map_yaml(self, yaml_path: Path | str | None) -> bool:
-        """Load and render map from YAML file into navigation and patrol map views."""
+        """Load and render map from YAML file, and automatically load corresponding map waypoints."""
         map_data = parse_nav_map_yaml(yaml_path)
         if map_data is not None:
             self.set_map(map_data)
-            stem = Path(yaml_path).stem if yaml_path else "bản đồ"
-            self.status_label.setText(f"Đã nạp bản đồ: {stem}")
+            self._current_map_path = Path(yaml_path).resolve() if yaml_path else None
+            stem = self._current_map_path.stem if self._current_map_path else "bản đồ"
+
+            wp_file = self._get_map_waypoints_path(self._current_map_path)
+            if wp_file and wp_file.is_file():
+                self._load_patrol_from_file(wp_file, silent=True)
+                n = len(self._batch_waypoints)
+                self.status_label.setText(f"Đã nạp bản đồ: {stem} ({n} điểm waypoint)")
+            else:
+                # Clear waypoints for maps that don't have saved waypoints yet
+                self._clear_batch_waypoints()
+                self._sync_active_config_files()
+                self.status_label.setText(f"Đã nạp bản đồ: {stem} (Chưa có điểm, hãy chấm điểm mới)")
             return True
         return False
 

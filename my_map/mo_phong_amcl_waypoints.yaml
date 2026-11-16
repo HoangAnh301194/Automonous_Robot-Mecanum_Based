@@ -1,0 +1,16 @@
+map_name: mo_phong_amcl.yaml
+locations:
+  khoihanh:
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    note: Trạm xuất phát mô phỏng
+routes:
+  patrol_route:
+    - khoihanh
+waypoints:
+  - name: khoihanh
+    x: 0.0
+    y: 0.0
+    yaw: 0.0
+    note: Trạm xuất phát mô phỏng
