@@ -644,5 +644,46 @@ def test_service_page_layout_dimensions(app):
     assert page.height() == 720
 
 
+def test_kiosk_ros_node_pose_and_scan_safety(app):
+    import rclpy
+    from sensor_msgs.msg import LaserScan
+    from robot_ui.kiosk.signals import KioskSignals
+    from robot_ui.kiosk.ros_node import KioskRosNode
+    if not rclpy.ok():
+        rclpy.init(args=None)
+    signals = KioskSignals()
+    node = KioskRosNode(signals)
+    assert hasattr(node, "_pose")
+    assert node._pose == {}
+
+    # Calling _on_scan before any pose received must NOT raise AttributeError
+    scan = LaserScan()
+    scan.ranges = [1.0, 2.0, 3.0]
+    scan.range_min = 0.1
+    scan.range_max = 10.0
+    scan.angle_min = -1.57
+    scan.angle_increment = 0.01
+    node._on_scan(scan)
+    node._on_obstacle_scan("front", scan)
+
+    # Calling _emit_pose must save _pose
+    class DummyPose:
+        class Pos:
+            x = 1.2
+            y = 3.4
+        class Ori:
+            x = 0.0
+            y = 0.0
+            z = 0.0
+            w = 1.0
+        position = Pos()
+        orientation = Ori()
+    node._emit_pose(DummyPose(), "map", "test")
+    assert node._pose["x"] == 1.2
+    assert node._pose["y"] == 3.4
+    node.destroy_node()
+
+
+
 
 

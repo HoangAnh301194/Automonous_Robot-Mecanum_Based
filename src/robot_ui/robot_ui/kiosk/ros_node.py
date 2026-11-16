@@ -132,6 +132,7 @@ class KioskRosNode(Node):
         self._remaining_locations = 0
         self._goal_handle: Any = None
         self._have_localized_pose = False
+        self._pose: dict[str, Any] = {}
         self._last_robot_status_at: float | None = None
         self._connected = False
         self._slam_proc: subprocess.Popen | None = None
@@ -334,20 +335,20 @@ class KioskRosNode(Node):
 
     def _emit_pose(self, pose: Any, frame_id: str, source: str) -> None:
         orientation = pose.orientation
-        self.signals.pose_changed.emit(
-            {
-                "source": source,
-                "frame_id": frame_id,
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
-                "yaw": quaternion_to_yaw(
-                    orientation.x,
-                    orientation.y,
-                    orientation.z,
-                    orientation.w,
-                ),
-            }
-        )
+        p_data = {
+            "source": source,
+            "frame_id": frame_id,
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "yaw": quaternion_to_yaw(
+                orientation.x,
+                orientation.y,
+                orientation.z,
+                orientation.w,
+            ),
+        }
+        self._pose = p_data
+        self.signals.pose_changed.emit(p_data)
 
     def _on_amcl_pose(self, msg: PoseWithCovarianceStamped) -> None:
         self._have_localized_pose = True
@@ -673,7 +674,7 @@ class KioskRosNode(Node):
         if now - self._last_scan_ui_pub < 0.1:
             return
         self._last_scan_ui_pub = now
-        if not self._pose:
+        if not getattr(self, "_pose", None):
             return
         ranges = msg.ranges
         if not ranges:
@@ -706,7 +707,7 @@ class KioskRosNode(Node):
         if now - self._last_obs_ui_pub.get(side, 0.0) < 0.15:
             return
         self._last_obs_ui_pub[side] = now
-        if not self._pose:
+        if not getattr(self, "_pose", None):
             return
         ranges = msg.ranges
         if not ranges:
