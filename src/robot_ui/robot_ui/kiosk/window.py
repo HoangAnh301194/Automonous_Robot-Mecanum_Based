@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
 import logging
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
@@ -24,6 +25,7 @@ from robot_ui.kiosk.pages import (
     AdminPage,
     AdminPinDialog,
     ChatPage,
+    DetectionDebugPage,
     HomePage,
     MicState,
     NavigationPage,
@@ -565,6 +567,7 @@ class KioskWindow(QMainWindow):
             "settings": icon_path("setting_icon.png"),
         }
         self.system_config_page = SystemConfigPage(icons=config_icons)
+        self.detection_debug_page = DetectionDebugPage(icons=config_icons)
         self.pages = {
             "idle": self.idle_page,
             "home": self.home_page,
@@ -574,6 +577,7 @@ class KioskWindow(QMainWindow):
             "navigation": self.navigation_page,
             "slam": self.slam_page,
             "system_config": self.system_config_page,
+            "detection_debug": self.detection_debug_page,
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
@@ -626,6 +630,7 @@ class KioskWindow(QMainWindow):
         self.slam_page.stop_slam_requested.connect(self.ros_node.stop_slam)
         self.slam_page.save_map_requested.connect(self.ros_node.save_map)
         self.slam_page.apply_map_requested.connect(self._on_apply_map_from_slam_page)
+        self.slam_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.system_config_page.home_requested.connect(self.return_to_home)
         self.system_config_page.back_requested.connect(self.go_back)
         self.system_config_page.emergency_stop_requested.connect(self._on_emergency_stop)
@@ -634,11 +639,16 @@ class KioskWindow(QMainWindow):
         self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
         self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
+        self.detection_debug_page.home_requested.connect(self.return_to_home)
+        self.detection_debug_page.back_requested.connect(self.go_back)
+        self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.detection_debug_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
 
         signals.connection_changed.connect(self._on_connection)
         signals.robot_status_changed.connect(self._on_robot_status)
         signals.navigation_status_changed.connect(self._on_navigation_status)
         signals.system_telemetry_changed.connect(self.system_config_page.update_sensor_telemetry)
+        signals.system_telemetry_changed.connect(self.detection_debug_page.update_ai_telemetry)
         signals.layer_status_changed.connect(self.system_config_page.update_layer_status)
         signals.actuator_test_result.connect(
             lambda name, ok, msg: self.system_config_page.append_console_log(
@@ -923,11 +933,13 @@ class KioskWindow(QMainWindow):
         self.ros_node.apply_localization_map(map_path, backend)
         map_name = Path(map_path).name
         self.admin_page.status_banner.setText(f"Đã chọn bản đồ: {map_name} ({backend.upper()})")
+        if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "load_map_yaml"):
+            self.navigation_page.load_map_yaml(map_path)
         self.show_page("admin")
 
     def _on_admin_detection(self) -> None:
         LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
-        self.admin_page.status_banner.setText("Detection Debug: Kênh /yolo/detections đang mở")
+        self.show_page("detection_debug")
 
     def _on_admin_system_status(self) -> None:
         LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
@@ -936,6 +948,8 @@ class KioskWindow(QMainWindow):
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
         self.admin_page.set_connection(connected)
+        if hasattr(self, "detection_debug_page") and hasattr(self.detection_debug_page, "update_wifi"):
+            self.detection_debug_page.update_wifi(connected)
         self._update_emotion()
 
     def _on_robot_status(self, status: dict[str, Any]) -> None:
@@ -948,6 +962,10 @@ class KioskWindow(QMainWindow):
             self.slam_page.set_battery(status.get("battery_percent") or status.get("battery"))
         if hasattr(self, "system_config_page"):
             self.system_config_page.update_battery_water(status)
+        if hasattr(self, "detection_debug_page"):
+            bat = status.get("battery_percent") or status.get("battery")
+            if isinstance(bat, (int, float)):
+                self.detection_debug_page.update_battery(float(bat))
         self._update_emotion()
 
     def _on_navigation_status(self, status: dict[str, Any]) -> None:
@@ -1066,8 +1084,12 @@ class KioskWindow(QMainWindow):
             self.admin_page.update_fullscreen_button(full)
         if hasattr(self, "navigation_page"):
             self.navigation_page.update_fullscreen_button(full)
+        if hasattr(self, "slam_page") and hasattr(self.slam_page, "update_fullscreen_button"):
+            self.slam_page.update_fullscreen_button(full)
         if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "update_fullscreen_button"):
             self.system_config_page.update_fullscreen_button(full)
+        if hasattr(self, "detection_debug_page") and hasattr(self.detection_debug_page, "update_fullscreen_button"):
+            self.detection_debug_page.update_fullscreen_button(full)
 
     def changeEvent(self, event: QEvent) -> None:
         if event.type() == QEvent.WindowStateChange:
@@ -1178,6 +1200,8 @@ class KioskWindow(QMainWindow):
         self._voice_controller.shutdown()
         self._llm_worker.reset_session()
         self.idle_page.video.stop()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "stop"):
+            self.system_config_page.stop()
         if hasattr(self, "ros_node"):
             self.ros_node.stop_subprocesses()
         super().closeEvent(event)

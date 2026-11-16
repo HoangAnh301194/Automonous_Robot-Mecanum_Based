@@ -1,4 +1,4 @@
-"""Unit tests for SystemConfigPage in Robot UI Kiosk."""
+"""Unit tests for SystemConfigPage and System Status Architecture in Robot UI Kiosk."""
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -21,30 +21,37 @@ def app():
     return application
 
 
-def test_system_config_page_init(app):
+def test_system_config_page_3level_navigation(app):
     missing = Path("/nonexistent-asset")
     page = SystemConfigPage(home_icon=missing, back_icon=missing, emergency_icon=missing)
 
     assert page.stack is not None
-    assert page.stack.count() == 4
+    # 5 Screens: 0=Overview, 1=Sensors, 2=Hardware, 3=ROS2, 4=Diagnostics
+    assert page.stack.count() == 5
     assert page.stack.currentIndex() == 0
 
-    # 4 tabs present
-    assert len(page.tab_buttons) == 4
-    assert page.tab_buttons[0].isChecked()
-
-    # Sub-page switching
-    page._switch_tab(1)
+    # 1. Navigate to Sensors & AI Detail and use top bar Back button
+    page.overview_screen.card_sensors.click()
     assert page.stack.currentIndex() == 1
-    assert page.tab_buttons[1].isChecked()
+    page.btn_back.click()  # Top bar back button returns to overview
+    assert page.stack.currentIndex() == 0
 
-    page._switch_tab(2)
+    # 2. Navigate to Hardware Detail and use screen header Back button
+    page.overview_screen.card_hardware.click()
     assert page.stack.currentIndex() == 2
+    page.hardware_screen.header.btn_back.click()
+    assert page.stack.currentIndex() == 0
 
-    page._switch_tab(3)
+    # 3. Navigate to ROS 2 System Detail
+    page.overview_screen.card_ros2.click()
     assert page.stack.currentIndex() == 3
+    page.ros2_screen.header.btn_back.click()
+    assert page.stack.currentIndex() == 0
 
-    page._switch_tab(0)
+    # 4. Navigate to Diagnostics Detail
+    page.overview_screen.card_diagnostics.click()
+    assert page.stack.currentIndex() == 4
+    page.diagnostics_screen.header.btn_back.click()
     assert page.stack.currentIndex() == 0
 
     page.close()

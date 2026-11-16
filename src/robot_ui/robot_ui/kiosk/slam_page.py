@@ -211,7 +211,7 @@ class StaticMapPreviewWidget(QWidget):
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#090d12"))
+        painter.fillRect(self.rect(), QColor("#080808"))
 
         if self._map_image.isNull():
             painter.setPen(QColor("#64748b"))
@@ -251,16 +251,16 @@ class StaticMapPreviewWidget(QWidget):
         painter.restore()
 
         # Border
-        painter.setPen(QPen(QColor("#2c3e50"), 2))
+        painter.setPen(QPen(QColor("#242c36"), 2))
         painter.drawRoundedRect(target_rect, 8, 8)
 
         # Bottom info badge
         info_rect = QRect(pad, h - 38, w - pad * 2, 30)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(15, 23, 42, 220))
+        painter.setBrush(QColor(17, 20, 24, 230))
         painter.drawRoundedRect(QRectF(info_rect), 6, 6)
 
-        painter.setPen(QColor("#cbd5e1"))
+        painter.setPen(QColor("#e2e8f0"))
         painter.setFont(QFont("Sans Serif", 10, QFont.DemiBold))
         text = (
             f"Map: {self._map_name}  |  "
@@ -287,8 +287,8 @@ class TouchMapNameDialog(QDialog):
         self._map_dirs = map_dirs
         self.setStyleSheet("""
             QDialog {
-                background: #090d16;
-                border: 2px solid #334155;
+                background: #0a0a0a;
+                border: 2px solid #242c36;
                 border-radius: 16px;
             }
             QLabel#touchDialogTitle {
@@ -297,7 +297,7 @@ class TouchMapNameDialog(QDialog):
                 font-weight: 800;
             }
             QLineEdit#touchDisplayInput {
-                background: #0f172a;
+                background: #111418;
                 border: 2px solid #3b82f6;
                 border-radius: 10px;
                 color: #ffffff;
@@ -306,44 +306,44 @@ class TouchMapNameDialog(QDialog):
                 padding: 0 14px;
             }
             QPushButton#touchKeyBtn {
-                background: #1e293b;
-                border: 1px solid #334155;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 color: #f1f5f9;
                 font-size: 16px;
                 font-weight: 700;
             }
             QPushButton#touchKeyBtn:hover {
-                background: #334155;
+                background: #242c36;
             }
             QPushButton#touchKeyBtn:pressed {
                 background: #2563eb;
                 color: white;
             }
             QPushButton#touchActionKeyBtn {
-                background: #334155;
-                border: 1px solid #475569;
+                background: #242c36;
+                border: 1px solid #384352;
                 border-radius: 8px;
                 color: #f8fafc;
                 font-size: 14px;
                 font-weight: 700;
             }
             QPushButton#touchActionKeyBtn:hover {
-                background: #475569;
+                background: #323b47;
             }
             QPushButton#touchPresetBtn {
-                background: #1e293b;
-                border: 1px solid #3b82f6;
+                background: #171c22;
+                border: 1px solid #f6c16a;
                 border-radius: 6px;
-                color: #93c5fd;
+                color: #f6c16a;
                 font-size: 13px;
                 font-weight: 600;
             }
             QPushButton#touchPresetBtn:hover {
-                background: #1e3a8a;
+                background: #2a2215;
             }
             QPushButton#touchCancelBtn {
-                background: #334155;
+                background: #242c36;
                 color: #f1f5f9;
                 border: none;
                 border-radius: 10px;
@@ -352,7 +352,7 @@ class TouchMapNameDialog(QDialog):
             }
             QPushButton#touchConfirmBtn {
                 background: #f6c16a;
-                color: #0f172a;
+                color: #0a0a0a;
                 border: none;
                 border-radius: 10px;
                 font-size: 16px;
@@ -506,7 +506,7 @@ class TouchMapNameDialog(QDialog):
             self.btn_confirm.setText("XÁC NHẬN (LƯU TÊN)")
             self.btn_confirm.setStyleSheet("""
                 QPushButton#touchConfirmBtn {
-                    background: #475569;
+                    background: #242c36;
                     color: #94a3b8;
                     border: none;
                     border-radius: 10px;
@@ -548,7 +548,7 @@ class TouchMapNameDialog(QDialog):
         else:
             self.entry.setStyleSheet("""
                 QLineEdit#touchDisplayInput {
-                    background: #062419;
+                    background: #0a1c13;
                     border: 2px solid #22c55e;
                     border-radius: 10px;
                     color: #ffffff;
@@ -563,7 +563,7 @@ class TouchMapNameDialog(QDialog):
             self.btn_confirm.setStyleSheet("""
                 QPushButton#touchConfirmBtn {
                     background: #f6c16a;
-                    color: #0f172a;
+                    color: #0a0a0a;
                     border: none;
                     border-radius: 10px;
                     font-size: 16px;
@@ -593,6 +593,7 @@ class SlamMapPage(QWidget):
     back_requested = pyqtSignal()
     home_requested = pyqtSignal()
     emergency_stop_requested = pyqtSignal()
+    fullscreen_toggle_requested = pyqtSignal()
     start_slam_requested = pyqtSignal()
     stop_slam_requested = pyqtSignal()
     save_map_requested = pyqtSignal(str)              # (map_stem)
@@ -721,6 +722,30 @@ class SlamMapPage(QWidget):
         bat_l.addWidget(self.battery_icon_label)
         bat_l.addWidget(self.battery_text_label)
         status_bar.addWidget(self.battery_widget)
+
+        # Fullscreen Toggle Button
+        self.fullscreen_button = QPushButton()
+        self.fullscreen_button.setObjectName("slamFullscreenButton")
+        self.fullscreen_button.setCursor(Qt.PointingHandCursor)
+        self.fullscreen_button.setFixedSize(44, 44)
+        self.fullscreen_button.setStyleSheet("""
+            QPushButton#slamFullscreenButton {
+                background-color: #152130;
+                border: 1px solid #2a3644;
+                border-radius: 8px;
+                color: #eaf0f7;
+                font-size: 16px;
+                font-weight: bold;
+            }
+            QPushButton#slamFullscreenButton:hover {
+                background-color: #f6c16a;
+                color: #000000;
+                border-color: #f6c16a;
+            }
+        """)
+        self.fullscreen_button.clicked.connect(self.fullscreen_toggle_requested.emit)
+        self.update_fullscreen_button(is_fullscreen=True)
+        status_bar.addWidget(self.fullscreen_button)
 
         header.addLayout(status_bar)
         root.addLayout(header)
@@ -1107,7 +1132,7 @@ class SlamMapPage(QWidget):
             self.lbl_name_warning.setStyleSheet("color: #f59e0b; font-size: 12px; font-weight: 600;")
             self.edt_map_name.setStyleSheet("""
                 QLineEdit#slamMapNameInput {
-                    background: #1e293b;
+                    background: #171c22;
                     border: 2px solid #f59e0b;
                     border-radius: 8px;
                     color: white;
@@ -1155,7 +1180,7 @@ class SlamMapPage(QWidget):
             self.lbl_name_warning.setStyleSheet("color: #4ade80; font-size: 12px; font-weight: 600;")
             self.edt_map_name.setStyleSheet("""
                 QLineEdit#slamMapNameInput {
-                    background: #062419;
+                    background: #0a1c13;
                     border: 1.5px solid #10b981;
                     border-radius: 8px;
                     color: #ffffff;
@@ -1263,6 +1288,15 @@ class SlamMapPage(QWidget):
                 QPixmap(str(bat_icon)).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation)
             )
 
+    def update_fullscreen_button(self, is_fullscreen: bool) -> None:
+        """Update single button icon and tooltip alternating between fullscreen and windowed mode."""
+        if is_fullscreen:
+            self.fullscreen_button.setText("🗗")
+            self.fullscreen_button.setToolTip("Thoát toàn màn hình (Esc hoặc F11)")
+        else:
+            self.fullscreen_button.setText("🗖")
+            self.fullscreen_button.setToolTip("Toàn màn hình (F11)")
+
     def set_slam_status(self, is_running: bool, message: str = "") -> None:
         self._is_slam_running = is_running
         self.btn_start_slam.setEnabled(not is_running)
@@ -1304,8 +1338,8 @@ class SlamMapPage(QWidget):
                 font-weight: 500;
             }
             QWidget#slamHeaderBadge {
-                background: #0f172a;
-                border: 1px solid #1e293b;
+                background: #0f1318;
+                border: 1px solid #242c36;
                 border-radius: 10px;
             }
             QLabel#slamBadgeText {
@@ -1314,21 +1348,21 @@ class SlamMapPage(QWidget):
                 font-weight: 700;
             }
             QPushButton#slamBackButton, QPushButton#slamHomeButton, QPushButton#slamEmergencyButton {
-                background: #0f172a;
-                border: 1px solid #1e293b;
+                background: #111418;
+                border: 1px solid #242c36;
                 border-radius: 12px;
                 color: white;
             }
             QPushButton#slamBackButton:hover, QPushButton#slamHomeButton:hover {
-                background: #1e293b;
-                border-color: #334155;
+                background: #1c222b;
+                border-color: #384352;
             }
             QPushButton#slamEmergencyButton:pressed {
                 background: #7f1d1d;
             }
             QPushButton#slamTabButton {
-                background: #0f172a;
-                border: 2px solid #1e293b;
+                background: #111418;
+                border: 2px solid #242c36;
                 border-radius: 12px;
                 color: #94a3b8;
                 font-size: 15px;
@@ -1336,13 +1370,13 @@ class SlamMapPage(QWidget):
                 padding: 0 16px;
             }
             QPushButton#slamTabButton:checked {
-                background: #1e293b;
+                background: #1c222b;
                 border-color: #f6c16a;
                 color: #f6c16a;
             }
             QFrame#slamMapContainer {
-                background: #05080c;
-                border: 1px solid #1e293b;
+                background: #080808;
+                border: 1px solid #242c36;
                 border-radius: 14px;
             }
             QLabel#slamLiveTag {
@@ -1352,8 +1386,8 @@ class SlamMapPage(QWidget):
                 padding: 2px 6px;
             }
             QFrame#slamManualCard {
-                background: #171b26;
-                border: 1px solid #2d3748;
+                background: #111418;
+                border: 1px solid #242c36;
                 border-left: 4px solid #f6c16a;
                 border-radius: 12px;
             }
@@ -1368,8 +1402,8 @@ class SlamMapPage(QWidget):
                 line-height: 1.4;
             }
             QFrame#slamControlCard, QFrame#slamSaveCard {
-                background: #0f172a;
-                border: 1px solid #1e293b;
+                background: #111418;
+                border: 1px solid #242c36;
                 border-radius: 12px;
             }
             QLabel#slamStatusLabel {
@@ -1413,8 +1447,8 @@ class SlamMapPage(QWidget):
                 font-weight: 800;
             }
             QLineEdit#slamMapNameInput {
-                background: #1e293b;
-                border: 1px solid #334155;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 color: white;
                 font-size: 15px;
@@ -1425,15 +1459,15 @@ class SlamMapPage(QWidget):
                 border-color: #f6c16a;
             }
             QPushButton#slamPresetButton {
-                background: #1e293b;
-                border: 1px solid #334155;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 6px;
                 color: #cbd5e1;
                 font-size: 12px;
                 font-weight: 600;
             }
             QPushButton#slamPresetButton:hover {
-                background: #334155;
+                background: #242c36;
             }
             QPushButton#slamSaveButton {
                 background: #2563eb;
@@ -1456,19 +1490,19 @@ class SlamMapPage(QWidget):
                 font-size: 12px;
             }
             QPushButton#slamActionMiniButton {
-                background: #1e293b;
-                border: 1px solid #334155;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 color: #f1f5f9;
                 font-size: 13px;
                 font-weight: 600;
             }
             QPushButton#slamActionMiniButton:hover {
-                background: #334155;
+                background: #242c36;
             }
             QListWidget#slamMapList {
-                background: #020617;
-                border: 1px solid #1e293b;
+                background: #080808;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 color: #f1f5f9;
                 font-size: 14px;
@@ -1481,12 +1515,12 @@ class SlamMapPage(QWidget):
                 border-radius: 6px;
             }
             QListWidget#slamMapList::item:hover {
-                background: #1e293b;
+                background: #171c22;
             }
             QListWidget#slamMapList::item:selected {
-                background: #1e3a8a;
-                color: #60a5fa;
-                border: 1px solid #3b82f6;
+                background: #2a2215;
+                color: #f6c16a;
+                border: 1px solid #f6c16a;
             }
             QRadioButton#slamRadio {
                 color: #cbd5e1;
@@ -1499,7 +1533,7 @@ class SlamMapPage(QWidget):
             }
             QPushButton#slamApplyButton {
                 background: #f6c16a;
-                color: #0f172a;
+                color: #000000;
                 border: none;
                 border-radius: 12px;
                 font-size: 16px;

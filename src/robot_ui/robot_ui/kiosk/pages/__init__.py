@@ -14,6 +14,7 @@ from robot_ui.kiosk.pages.chat_page import (
     SpeakerButton,
     VolumeSliderWidget,
 )
+from robot_ui.kiosk.pages.detection_debug_page import DetectionDebugPage
 from robot_ui.kiosk.pages.home_page import HomePage, VideoBackground
 from robot_ui.kiosk.pages.navigation_page import MapWidget, NavigationPage
 from robot_ui.kiosk.pages.service_page import ServicePage
@@ -24,6 +25,7 @@ __all__ = [
     "AdminPage",
     "AdminPinDialog",
     "ChatPage",
+    "DetectionDebugPage",
     "HomePage",
     "MapWidget",
     "MicState",

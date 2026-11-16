@@ -306,7 +306,7 @@ class AdminPage(QWidget):
 
         # 1. System Configuration (Hàng 1, Cột 1)
         self.btn_status = make_launcher_icon(
-            "Cấu hình Hệ thống",
+            "System Config",
             status_icon,
             "adminSystemStatusButton",
             lambda: (self.system_status_requested.emit(), self.system_config_requested.emit()),

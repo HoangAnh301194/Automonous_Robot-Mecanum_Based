@@ -34,6 +34,7 @@ from PyQt5.QtGui import (
     QFont,
     QIcon,
     QImage,
+    QImageReader,
     QPainter,
     QPainterPath,
     QPen,
@@ -98,6 +99,92 @@ def waypoint_name_from_index(index: int) -> str:
     if index == 0:
         return "khoihanh"
     return f"diem{index}"
+
+
+def parse_nav_map_yaml(yaml_path: Path | str | None) -> dict[str, Any] | None:
+    """Parse Nav2/AMCL map YAML and raster image into an OccupancyGrid dictionary."""
+    if not yaml_path:
+        return None
+    path = Path(yaml_path)
+    if not path.is_file():
+        return None
+
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        img_rel = str(data.get("image", "")).strip()
+        if not img_rel:
+            return None
+
+        img_path = (path.parent / img_rel).resolve()
+        if not img_path.is_file():
+            for ext in (".pgm", ".png", ".jpg", ".jpeg"):
+                candidate = path.with_suffix(ext)
+                if candidate.is_file():
+                    img_path = candidate
+                    break
+
+        if not img_path.is_file():
+            return None
+
+        reader = QImageReader(str(img_path))
+        reader.setAutoTransform(True)
+        img = reader.read()
+        if img.isNull():
+            return None
+
+        gray = img.convertToFormat(QImage.Format_Grayscale8)
+        w, h = gray.width(), gray.height()
+        if w <= 0 or h <= 0:
+            return None
+
+        origin = data.get("origin", [0.0, 0.0, 0.0])
+        res = float(data.get("resolution", 0.05))
+        negate = int(data.get("negate", 0))
+        free_thresh = float(data.get("free_thresh", 0.25))
+        occupied_thresh = float(data.get("occupied_thresh", 0.65))
+
+        ptr = gray.bits()
+        ptr.setsize(h * gray.bytesPerLine())
+        arr = np.frombuffer(ptr, dtype=np.uint8).reshape((h, gray.bytesPerLine()))[:, :w]
+        # In ROS OccupancyGrid, row 0 is bottom row (y=0 in map frame is bottom)
+        arr_flipped = np.flipud(arr)
+
+        if negate:
+            occ = arr_flipped.astype(np.float32) / 255.0
+        else:
+            occ = (255.0 - arr_flipped.astype(np.float32)) / 255.0
+
+        cells = np.full((h, w), -1, dtype=np.int16)
+        cells[occ < free_thresh] = 0
+        cells[occ > occupied_thresh] = 100
+
+        max_dim = 1024
+        step = max(1, math.ceil(max(w, h) / max_dim))
+        preview_width = math.ceil(w / step)
+        preview_height = math.ceil(h / step)
+
+        if step > 1:
+            cells = cells[::step, ::step]
+
+        flat_cells = cells.flatten().tolist()
+        return {
+            "frame_id": "map",
+            "width": w,
+            "height": h,
+            "preview_width": preview_width,
+            "preview_height": preview_height,
+            "sample_step": step,
+            "resolution": res,
+            "origin_x": float(origin[0]) if len(origin) > 0 else 0.0,
+            "origin_y": float(origin[1]) if len(origin) > 1 else 0.0,
+            "origin_yaw": float(origin[2]) if len(origin) > 2 else 0.0,
+            "cells": flat_cells,
+            "yaml_path": str(path),
+        }
+    except Exception:
+        return None
 
 
 class InteractiveNavMapWidget(QWidget):
@@ -171,19 +258,20 @@ class InteractiveNavMapWidget(QWidget):
 
         btn_style = """
             QPushButton {
-                background: rgba(15, 23, 42, 220);
+                background: rgba(17, 20, 24, 220);
                 color: #f8fafc;
-                border: 1px solid #334155;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 16px;
                 font-weight: 800;
             }
             QPushButton:hover {
-                background: #2563eb;
-                border-color: #60a5fa;
+                background: #242c36;
+                border-color: #f6c16a;
+                color: #ffffff;
             }
             QPushButton:pressed {
-                background: #1d4ed8;
+                background: #171c22;
             }
         """
 
@@ -234,6 +322,14 @@ class InteractiveNavMapWidget(QWidget):
     # -------------------------------------------------------------------------
     # Data Setters
     # -------------------------------------------------------------------------
+    def load_map_yaml(self, yaml_path: Path | str | None) -> bool:
+        """Load and render map directly from a Nav2/AMCL map YAML file."""
+        map_data = parse_nav_map_yaml(yaml_path)
+        if map_data is not None:
+            self.set_map(map_data)
+            return True
+        return False
+
     def set_map(self, map_data: dict[str, Any]) -> None:
         self._map = map_data
         width = int(map_data.get("preview_width", 0))
@@ -467,7 +563,7 @@ class InteractiveNavMapWidget(QWidget):
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         # Background
-        painter.fillRect(self.rect(), QColor("#0b0f19"))
+        painter.fillRect(self.rect(), QColor("#080808"))
 
         if self._map_image.isNull():
             painter.setPen(QColor("#64748b"))
@@ -564,7 +660,7 @@ class InteractiveNavMapWidget(QWidget):
                 badge_w = painter.fontMetrics().horizontalAdvance(name) + 12
                 badge_rect = QRectF(pt.x() - badge_w / 2.0, pt.y() - 26, badge_w, 18)
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(15, 23, 42, 220))
+                painter.setBrush(QColor(17, 20, 24, 220))
                 painter.drawRoundedRect(badge_rect, 4, 4)
                 painter.setPen(node_color)
                 painter.drawText(badge_rect, Qt.AlignCenter, name)
@@ -580,7 +676,7 @@ class InteractiveNavMapWidget(QWidget):
                 tw = painter.fontMetrics().horizontalAdvance(name) + 10
                 rect_b = QRectF(pt.x() - tw / 2.0, pt.y() - 22, tw, 16)
                 painter.setPen(Qt.NoPen)
-                painter.setBrush(QColor(30, 41, 59, 210))
+                painter.setBrush(QColor(23, 28, 34, 210))
                 painter.drawRoundedRect(rect_b, 4, 4)
                 painter.setPen(QColor("#cbd5e1"))
                 painter.drawText(rect_b, Qt.AlignCenter, name)
@@ -624,7 +720,7 @@ class InteractiveNavMapWidget(QWidget):
         painter.restore()
 
         # Border
-        painter.setPen(QPen(QColor("#1e293b"), 2))
+        painter.setPen(QPen(QColor("#242c36"), 2))
         painter.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 10, 10)
 
         # Zoom & Status HUD in bottom-left corner
@@ -632,7 +728,7 @@ class InteractiveNavMapWidget(QWidget):
         if self._pick_mode:
             hud_text += f" | Đang chấm điểm ({len(self._batch_waypoints)} điểm)"
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(15, 23, 42, 190))
+        painter.setBrush(QColor(17, 20, 24, 190))
         painter.drawRoundedRect(QRectF(8, self.height() - 28, 200, 22), 5, 5)
         painter.setPen(QColor("#94a3b8"))
         painter.setFont(QFont("Sans Serif", 8, QFont.Bold))
@@ -683,8 +779,8 @@ class NavigationPage(QWidget):
                 background-color: #000000;
             }
             QFrame#navHeaderBar {
-                background: #0f172a;
-                border: 1px solid #1e293b;
+                background: #0f1318;
+                border: 1px solid #242c36;
                 border-radius: 12px;
             }
             QLabel#navTitle {
@@ -704,8 +800,8 @@ class NavigationPage(QWidget):
                 font-weight: 700;
             }
             QWidget#navHeaderBadge {
-                background: #1e293b;
-                border: 1px solid #334155;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 8px;
             }
             QLabel#navBadgeText {
@@ -714,22 +810,23 @@ class NavigationPage(QWidget):
                 font-weight: 700;
             }
             QPushButton#navFullscreenButton {
-                background: #1e293b;
+                background: #171c22;
                 color: #cbd5e1;
-                border: 1px solid #334155;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 16px;
                 font-weight: 700;
             }
             QPushButton#navFullscreenButton:hover {
-                background: #334155;
+                background: #242c36;
+                border-color: #f6c16a;
                 color: #ffffff;
             }
             /* Segmented Mode Switcher */
             QPushButton#navModeTab {
-                background: #1e293b;
+                background: #171c22;
                 color: #94a3b8;
-                border: 1px solid #334155;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: 700;
@@ -738,7 +835,7 @@ class NavigationPage(QWidget):
             }
             QPushButton#navModeTab:hover {
                 color: #f8fafc;
-                background: #334155;
+                background: #242c36;
             }
             QPushButton#navModeTab[active="true"] {
                 background: #2563eb;
@@ -780,16 +877,17 @@ class NavigationPage(QWidget):
                 background: #b45309;
             }
             QPushButton#navToolBtn {
-                background: #1e293b;
+                background: #171c22;
                 color: #e2e8f0;
-                border: 1px solid #334155;
+                border: 1px solid #242c36;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 700;
                 padding: 6px 12px;
             }
             QPushButton#navToolBtn:hover {
-                background: #334155;
+                background: #242c36;
+                border-color: #f6c16a;
             }
             QPushButton#navToolBtn[toggled_on="true"] {
                 background: #2563eb;
@@ -797,16 +895,16 @@ class NavigationPage(QWidget):
                 border-color: #60a5fa;
             }
             QFrame#navDashboardCard {
-                background: #0f172a;
-                border: 1px solid #1e293b;
+                background: #0f1318;
+                border: 1px solid #242c36;
                 border-radius: 10px;
                 padding: 6px;
             }
             QTableWidget {
-                background: #090d16;
+                background: #080808;
                 color: #f1f5f9;
-                gridline-color: #1e293b;
-                border: 1px solid #1e293b;
+                gridline-color: #242c36;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 11px;
             }
@@ -815,7 +913,7 @@ class NavigationPage(QWidget):
                 color: #ffffff;
             }
             QHeaderView::section {
-                background: #1e293b;
+                background: #171c22;
                 color: #cbd5e1;
                 font-size: 11px;
                 font-weight: 700;
@@ -1050,10 +1148,10 @@ class NavigationPage(QWidget):
         self.nav_progress_bar.setFixedHeight(20)
         self.nav_progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #334155;
+                border: 1px solid #242c36;
                 border-radius: 6px;
                 text-align: center;
-                background-color: #090d16;
+                background-color: #080808;
                 color: #ffffff;
                 font-weight: 800;
                 font-size: 11px;
@@ -1275,16 +1373,17 @@ class NavigationPage(QWidget):
             btn = QPushButton(name)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #1e293b;
+                    background: #171c22;
                     color: #e2e8f0;
-                    border: 1px solid #334155;
+                    border: 1px solid #242c36;
                     border-radius: 6px;
                     font-size: 11px;
                     font-weight: 700;
                     padding: 4px 10px;
                 }
                 QPushButton:hover {
-                    background: #2563eb;
+                    background: #242c36;
+                    border-color: #f6c16a;
                     color: #ffffff;
                 }
             """)
@@ -1604,6 +1703,16 @@ class NavigationPage(QWidget):
         self.lbl_nav_time.setText(f"Thời gian chạy: {nav_sec:.1f} s")
         self.lbl_est_time.setText(f"Ước tính: {est_sec:.1f} s")
         self.lbl_recovery_count.setText(f"Tự cứu: {recov} lần")
+
+    def load_map_yaml(self, yaml_path: Path | str | None) -> bool:
+        """Load and render map from YAML file into navigation and patrol map views."""
+        map_data = parse_nav_map_yaml(yaml_path)
+        if map_data is not None:
+            self.set_map(map_data)
+            stem = Path(yaml_path).stem if yaml_path else "bản đồ"
+            self.status_label.setText(f"Đã nạp bản đồ: {stem}")
+            return True
+        return False
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         self.map_widget.set_map(map_data)
