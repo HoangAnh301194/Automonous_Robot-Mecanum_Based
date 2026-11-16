@@ -2,22 +2,28 @@
 
 ## 0) Build & Source Workspace
 
-Run these commands from any directory inside the cloned repository. Repeat the
-workspace export and source commands in every new terminal before using packages
-from this workspace.
+### A. Chuẩn trên Jetson Orin (`~/ros2_ws`):
+Mở terminal trên Jetson Orin và thực hiện:
 
 ```bash
-export WS="$(git rev-parse --show-toplevel)"
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+colcon build --symlink-install
+source install/setup.bash
+```
+
+Với mỗi terminal mới mở trên Jetson Orin, chỉ cần:
+```bash
+cd ~/ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
+```
+
+### B. Trên máy tính phát triển (PC / Laptop):
+```bash
+export WS="$(git rev-parse --show-toplevel 2>/dev/null || echo $PWD)"
 cd "$WS"
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source "$WS/install/setup.bash"
-```
-
-For a source archive without Git metadata, open the workspace root and use:
-
-```bash
-export WS="$PWD"
 ```
 
 Rebuild and source the workspace after moving it. Do not reuse `build/`,
@@ -812,3 +818,54 @@ converts semantic locations into `NavigateToPose` goals for Nav2.
 
 Avoid hard-coded workspace paths such as `/home/orin/ros2_ws`. Use `$WS`,
 ROS package-share lookup, or paths relative to the owning configuration file.
+
+## 10) Process Management & Emergency Stop / Kill All Tasks
+
+### 10.1 Dọn dẹp & Tắt sạch toàn bộ tiến trình (Kill All Tasks)
+Để dừng tức thì toàn bộ các node ROS 2, launch wrappers, giao diện Kiosk UI, tiến trình 9router, camera và cảm biến:
+
+**Cách 1: Dùng script có sẵn tại thư mục gốc (Khuyên dùng trên Jetson Orin):**
+```bash
+cd ~/ros2_ws && ./kill_all.sh
+```
+
+**Cách 2: Lệnh 1 dòng copy-paste trực tiếp:**
+```bash
+killall -9 ros2 _ros2_daemon rviz2 robot_ui_kiosk 9router astra_camera_node usb_cam_node_exe static_transform_publisher 2>/dev/null || true
+pkill -9 -f "(ros2|nav2|robot_|kiosk|9router|rviz2|obstacle_detector|astra|usb_cam|sllidar|hoverboard|person_depth|gui_v3|yolo|transform_publisher|depthimage|laser_odometry)" 2>/dev/null || true
+ros2 daemon stop && ros2 daemon start
+```
+
+### 10.2 Phanh dừng khẩn cấp bánh xe (Emergency Stop)
+Nếu robot đang di chuyển và muốn phanh dừng khẩn cấp ngay lập tức mà không tắt các node:
+
+```bash
+ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
+ros2 service call /mission/emergency_stop std_srvs/srv/Trigger "{}"
+```
+
+### 10.3 Lệnh tắt riêng từng cụm thành phần
+- **Chỉ tắt giao diện Kiosk & Voice Chat:**
+  ```bash
+  pkill -9 -f "(robot_ui_kiosk|9router)"
+  ```
+- **Chỉ tắt Điều hướng Nav2 & SLAM:**
+  ```bash
+  pkill -9 -f "(nav2|slam_toolbox|amcl|controller_server|planner_server|bt_navigator)"
+  ```
+- **Chỉ tắt Driver Camera & Cảm biến phần cứng:**
+  ```bash
+  pkill -9 -f "(astra_camera|sllidar|obstacle_detector|usb_cam|depthimage_to_laserscan)"
+  ```
+- **Chỉ tắt Mission Controller & Backend:**
+  ```bash
+  pkill -9 -f "(robot_mission_control|robot_navigation_manager|robot_config_manager|robot_system_monitor)"
+  ```
+
+### 10.4 Cấu hình Alias tiện lợi trên Jetson Orin (Tùy chọn)
+Thêm alias này vào file `~/.bashrc` trên Jetson Orin để chỉ cần gõ `killrobot` ở bất kỳ terminal nào:
+
+```bash
+alias killrobot='cd ~/ros2_ws && ./kill_all.sh'
+```
+

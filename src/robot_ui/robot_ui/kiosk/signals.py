@@ -12,6 +12,11 @@ class KioskSignals(QObject):
     command_status_changed = pyqtSignal(str, str)
     navigation_active_changed = pyqtSignal(bool)
     service_popup_cmd = pyqtSignal(str)   # Lệnh popup từ Behavior Tree: SHOW_5S_INVITE, SHOW_SERVING, HIDE
+    # Nav2 detailed feedback and sensor overlays
+    nav_feedback_changed = pyqtSignal(dict)           # (dist_remain, initial_dist, nav_time, est_time, recoveries)
+    scan_points_changed = pyqtSignal(list)            # [(x, y), ...] world coordinates from LiDAR
+    obstacle_points_changed = pyqtSignal(str, list)   # ("front"|"rear", [(x, y), ...]) world coordinates
+    patrol_route_changed = pyqtSignal(list)           # [{"name": ..., "x": ..., "y": ..., "yaw": ...}, ...]
     # LLM chatbot signals
     llm_response_ready = pyqtSignal(int, str)   # phát khi LLM trả về response (backward compatible)
     llm_stream_delta = pyqtSignal(int, int, str)       # (session_id, turn_id, delta_text)
@@ -25,4 +30,13 @@ class KioskSignals(QObject):
     tts_finished = pyqtSignal(int, int)                   # (session_id, turn_id)
     # Wake word signals
     wake_word_detected = pyqtSignal(str)                  # (keyword_id, e.g. "vi_sota_oi")
+    # SLAM & Map signals
+    slam_status_changed = pyqtSignal(bool, str)           # (is_running, status_message)
+    map_saved_result = pyqtSignal(bool, str)              # (success, message)
+    # System Configuration & Telemetry signals
+    system_telemetry_changed = pyqtSignal(dict)           # Cảm biến, TF, Pin 36V, AI
+    host_telemetry_changed = pyqtSignal(dict)             # Jetson CPU, GPU, RAM, Disk, IP, WiFi
+    layer_status_changed = pyqtSignal(dict)               # Trạng thái các tầng tiến trình
+    preflight_step_updated = pyqtSignal(str, bool, str)   # (step_key, is_ok, message)
+    actuator_test_result = pyqtSignal(str, bool, str)     # (test_key, is_ok, message)
 

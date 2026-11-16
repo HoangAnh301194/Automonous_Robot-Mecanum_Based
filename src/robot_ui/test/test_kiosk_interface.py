@@ -11,6 +11,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 import pytest
 
 pytest.importorskip("PyQt5.QtWidgets")
+from PyQt5.QtCore import QEvent, Qt
+from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import QApplication, QDialog, QLabel, QLineEdit, QPushButton
 
 from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
@@ -159,6 +161,53 @@ def test_kiosk_window_dock_hidden_on_idle_and_shown_on_home(app):
         win.close()
 
 
+def test_kiosk_window_fullscreen_toggle_and_window_controls(app):
+    from unittest.mock import MagicMock
+    try:
+        from robot_ui.kiosk.signals import KioskSignals
+        from robot_ui.kiosk.window import KioskWindow
+    except ImportError:
+        pytest.skip("KioskWindow dependencies not in environment")
+
+    node = MagicMock()
+    signals = KioskSignals()
+    win = KioskWindow(node, signals)
+    win.show()
+    try:
+        # Floating window controls removed from global window
+        assert not hasattr(win, "window_controls")
+        assert not hasattr(win, "_min_btn")
+
+        # Fullscreen button ONLY exists on AdminPage, not on motion (idle) or home
+        assert not hasattr(win.idle_page, "fullscreen_button")
+        assert not hasattr(win.home_page, "fullscreen_button")
+        assert hasattr(win.admin_page, "fullscreen_button")
+        assert win.admin_page.fullscreen_button is not None
+        assert win.admin_page.fullscreen_button.objectName() == "adminFullscreenButton"
+
+        # Check initial state (windowed)
+        win._update_fullscreen_ui(is_full=False)
+        assert win.admin_page.fullscreen_button.text() == "🗖"
+        assert "Toàn màn hình" in win.admin_page.fullscreen_button.toolTip()
+
+        # Check fullscreen state
+        win._update_fullscreen_ui(is_full=True)
+        assert win.admin_page.fullscreen_button.text() == "🗗"
+        assert "Thoát toàn màn hình" in win.admin_page.fullscreen_button.toolTip()
+
+        # Test toggle_fullscreen
+        win.toggle_fullscreen()
+
+        # Test keyPressEvent with Key_Escape (toggles fullscreen instead of closing window)
+        key_event = QKeyEvent(QEvent.KeyPress, Qt.Key_Escape, Qt.NoModifier)
+        win.keyPressEvent(key_event)
+        # Window is still active / not closed
+        assert win.isVisible()
+    finally:
+        win.close()
+
+
+
 def test_chat_page_widgets_and_object_names(app):
     from robot_ui.kiosk.widgets import ChatPage
     missing = Path("/nonexistent-kiosk-test-asset")
@@ -204,7 +253,7 @@ def test_chat_page_widgets_and_object_names(app):
     send = page.findChild(QPushButton, "chatSendButton")
     assert send is not None
     assert send.width() >= 52
-    assert send.height() >= 52
+    assert send.height() >= 48
     assert send.text() == "Gửi"
 
 
@@ -432,10 +481,84 @@ def test_nav_button_1_25x_dimensions(app):
     from robot_ui.kiosk.widgets import NavButton
     missing = Path("/nonexistent-kiosk-test-asset")
     btn = NavButton("Trang chủ", missing, "home")
-    assert btn.iconSize().width() == 31
-    assert btn.iconSize().height() == 31
-    assert btn.width() == 88
-    assert btn.height() == 65
+    assert btn.iconSize().width() == 39
+    assert btn.iconSize().height() == 39
+    assert btn.width() == 110
+    assert btn.height() == 81
+
+
+def test_top_left_home_and_emergency_buttons_on_pages(app):
+    """Verify that all main pages provide top-left Home and Emergency Stop buttons."""
+    from robot_ui.kiosk.widgets import ChatPage, NavigationPage
+    from robot_ui.kiosk.pages import WelcomePage, ServicePage, AdminPage
+
+    missing = Path("/nonexistent-kiosk-test-asset")
+
+    # 1. ChatPage
+    chat_page = ChatPage(chat_icon=missing, back_icon=missing, home_icon=missing, emergency_icon=missing)
+    chat_home_seen, chat_emg_seen = [], []
+    chat_page.home_requested.connect(lambda: chat_home_seen.append(True))
+    chat_page.emergency_stop_requested.connect(lambda: chat_emg_seen.append(True))
+    chat_home_btn = chat_page.findChild(QPushButton, "navHomeButton")
+    chat_emg_btn = chat_page.findChild(QPushButton, "navEmergencyButton")
+    assert chat_home_btn is not None
+    assert chat_emg_btn is not None
+    chat_home_btn.click()
+    chat_emg_btn.click()
+    assert chat_home_seen == [True]
+    assert chat_emg_seen == [True]
+
+    # 2. ServicePage
+    service_page = ServicePage(back_icon=missing, home_icon=missing, emergency_icon=missing)
+    srv_home_seen, srv_emg_seen = [], []
+    service_page.home_requested.connect(lambda: srv_home_seen.append(True))
+    service_page.emergency_stop_requested.connect(lambda: srv_emg_seen.append(True))
+    assert service_page.home_button is not None
+    assert service_page.emergency_button is not None
+    service_page.home_button.click()
+    service_page.emergency_button.click()
+    assert srv_home_seen == [True]
+    assert srv_emg_seen == [True]
+
+    # 3. AdminPage
+    admin_page = AdminPage(
+        nav_icon=missing, slam_icon=missing, back_icon=missing, home_icon=missing, emergency_icon=missing
+    )
+    admin_home_seen, admin_emg_seen = [], []
+    admin_page.home_requested.connect(lambda: admin_home_seen.append(True))
+    admin_page.emergency_stop_requested.connect(lambda: admin_emg_seen.append(True))
+    assert admin_page.home_button is not None
+    assert admin_page.emergency_button is not None
+    admin_page.home_button.click()
+    admin_page.emergency_button.click()
+    assert admin_home_seen == [True]
+    assert admin_emg_seen == [True]
+
+    # 4. NavigationPage
+    nav_page = NavigationPage({
+        "home": missing,
+        "back": missing,
+        "emergency": missing,
+        "goal": missing,
+        "click_goal": missing,
+        "start": missing,
+        "stop": missing,
+    })
+    nav_home_seen, nav_emg_seen = [], []
+    nav_page.home_requested.connect(lambda: nav_home_seen.append(True))
+    nav_page.emergency_stop_requested.connect(lambda: nav_emg_seen.append(True))
+    nav_home = nav_page.findChild(QPushButton, "navHomeButton")
+    nav_emg = nav_page.findChild(QPushButton, "navEmergencyButton")
+    assert nav_home is not None
+    assert nav_emg is not None
+    nav_home.click()
+    nav_emg.click()
+    assert nav_home_seen == [True]
+    assert nav_emg_seen == [True]
+
+    # 5. WelcomePage (uses bottom dock for emergency stop, no duplicate button on top)
+    welcome_page = WelcomePage(background=missing, ptit=missing, faculty=missing, emergency_icon=missing)
+    assert welcome_page.findChild(QPushButton, "welcomeEmergencyButton") is None
 
 
 

@@ -84,6 +84,25 @@ def find_pulseaudio_source_for_usb_node(target_node: Path, pactl_output: str | N
     return None
 
 
+def is_orbbec_device_present(sys_usb_root: Path | None = None) -> bool:
+    """Quickly verify via sysfs if an Orbbec USB device (vendor 2bc5) is plugged in."""
+    root = sys_usb_root or Path("/sys/bus/usb/devices")
+    if not root.is_dir():
+        return False
+    try:
+        for dev in root.iterdir():
+            vendor_file = dev / "idVendor"
+            if vendor_file.is_file():
+                try:
+                    if vendor_file.read_text().strip().lower() == "2bc5":
+                        return True
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    return False
+
+
 def resolve_ai_camera_mic_source(
     target_serial: str = DEFAULT_AI_CAMERA_SERIAL,
     sys_usb_root: Path | None = None,
@@ -95,6 +114,15 @@ def resolve_ai_camera_mic_source(
     3. Query PulseAudio sources via `pactl list sources` and find the ALSA source
        whose `sysfs.path` belongs to the SAME physical USB device.
     """
+    # Fast check: If no Orbbec USB hardware is present on the bus, avoid blocking
+    # synchronously on OpenNI2 enumeration timeout (prevents 60-second UI hang on PC/laptop).
+    if not is_orbbec_device_present(sys_usb_root):
+        LOG.info(
+            "No Orbbec USB hardware (vendor 2bc5) detected in sysfs; "
+            "skipping OpenNI camera mic resolution (using system default)."
+        )
+        return None
+
     resolver_mod = _load_astra_serial_resolver()
     if resolver_mod is None:
         LOG.debug("Astra serial resolver module could not be loaded.")

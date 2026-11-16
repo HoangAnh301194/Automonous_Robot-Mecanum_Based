@@ -378,3 +378,30 @@ def test_volume_slider_widget_and_chat_page(app):
     page._volume_widget.set_volume(50)
     assert page._speaker_enabled is True
 
+
+def test_speaker_double_click_toggles_volume_slider(app):
+    from PyQt5.QtTest import QTest
+    from PyQt5.QtCore import Qt
+
+    missing = Path("/nonexistent-kiosk-test-asset")
+    page = ChatPage(chat_icon=missing, back_icon=missing)
+    page.show()
+
+    assert page._volume_widget.isHidden()
+    assert page._speaker_enabled is True
+
+    # 1. Double click via signal or double_clicked event
+    page._speaker_btn.double_clicked.emit()
+    assert not page._volume_widget.isHidden()
+    assert page._speaker_enabled is True
+
+    # 2. Double click again toggles slider back to hidden
+    page._speaker_btn.double_clicked.emit()
+    assert page._volume_widget.isHidden()
+
+    # 3. Simulate mouse double click via QTest.mouseDClick
+    QTest.mouseDClick(page._speaker_btn, Qt.LeftButton)
+    assert not page._volume_widget.isHidden()
+    assert page._speaker_enabled is True
+
+

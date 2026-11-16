@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>robot_wakeword</name>
+  <version>0.1.0</version>
+  <description>Standalone Vosk wake-phrase baseline for the service robot; no Kiosk or ROS topic integration.</description>
+  <maintainer email="orin@todo.todo">orin</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,22 +1,44 @@
 from __future__ import annotations
 
-from typing import Any
 import logging
 import os
 import time
+from pathlib import Path
+from typing import Any
 
 from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
-from PyQt5.QtWidgets import QApplication, QMainWindow, QStackedWidget, QWidget
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QMainWindow,
+    QPushButton,
+    QStackedWidget,
+    QWidget,
+)
 
 from robot_ui.kiosk.assets import EmotionCatalog, icon_path
 from robot_ui.kiosk.audio_worker import VoiceController, VoiceState
 from robot_ui.kiosk.llm_client import LLMWorker, TurnContext
-from robot_ui.kiosk.pages import AdminPage, AdminPinDialog, ServicePage, WelcomePage
+from robot_ui.kiosk.pages import (
+    AdminPage,
+    AdminPinDialog,
+    ChatPage,
+    DetectionDebugPage,
+    HomePage,
+    MicState,
+    NavigationPage,
+    ServicePage,
+    SystemConfigPage,
+    WelcomePage,
+    check_wifi_connected,
+)
 from robot_ui.kiosk.ros_node import KioskRosNode
 from robot_ui.kiosk.signals import KioskSignals
+from robot_ui.kiosk.slam_page import SlamMapPage
 from robot_ui.kiosk.wakeword_worker import WakeWordWorker
-from robot_ui.kiosk.widgets import BottomNavigation, ChatPage, HomePage, MicState, NavigationPage
+from robot_ui.kiosk.widgets import BottomNavigation
 
 LOG = logging.getLogger(__name__)
 
@@ -73,6 +95,27 @@ QPushButton#kioskNavButton[dark="true"]:checked {
 }
 QPushButton#kioskNavButton:pressed {
     background: transparent;
+}
+QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeButton, QPushButton#navBackButton {
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 12px;
+}
+QPushButton#navHomeButton:hover, QPushButton#adminHomeButton:hover, QPushButton#serviceHomeButton:hover, QPushButton#navBackButton:hover {
+    background: #334155;
+    border-color: #ffb32c;
+}
+QPushButton#navEmergencyButton, QPushButton#adminEmergencyButton, QPushButton#serviceEmergencyButton {
+    background: transparent;
+    border: none;
+    border-radius: 12px;
+    padding: 2px;
+}
+QPushButton#navEmergencyButton:hover, QPushButton#adminEmergencyButton:hover, QPushButton#serviceEmergencyButton:hover {
+    background: rgba(255, 255, 255, 0.12);
+}
+QPushButton#navEmergencyButton:pressed, QPushButton#adminEmergencyButton:pressed, QPushButton#serviceEmergencyButton:pressed {
+    background: rgba(255, 255, 255, 0.22);
 }
 QLabel#lightBadge {
     color: #30404a;
@@ -299,20 +342,26 @@ QLabel#typingText {
     font-style: italic;
 }
 QPushButton#chatMicButton {
-    background: #171717;
-    border: 1px solid #3a3a3a;
-    border-radius: 12px;
+    background: #181818;
+    border: 2px solid #3a3a3a;
+    border-radius: 50px;
+}
+QPushButton#chatMicButton:hover {
+    background: #282828;
+    border-color: #ffb32c;
 }
 QPushButton#chatMicButton:pressed {
-    background: #2b2b2b;
+    background: #333333;
 }
 QPushButton#chatMicButton[listening="true"] {
     background: #2b1c09;
-    border: 1px solid #ffb32c;
+    border: 3px solid #ffb32c;
+    border-radius: 50px;
 }
 QPushButton#chatMicButton:disabled {
     background: #101010;
     border-color: #222222;
+    border-radius: 50px;
 }
 QPushButton#chatSendButton {
     color: #151515;
@@ -453,15 +502,21 @@ class KioskWindow(QMainWindow):
             wifi_disconnected_icon=icon_path("wifidisconected.png"),
             battery_icons=battery_icons,
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
         )
         self.navigation_page = NavigationPage(
             {
                 "home": icon_path("homeIcon.png"),
                 "back": icon_path("back.png"),
+                "emergency": icon_path("emergency_stop.png"),
                 "click_goal": icon_path("clickGoal.png"),
                 "goal": icon_path("location.png"),
                 "start": icon_path("startNavigation.png"),
                 "stop": icon_path("stopNavigation.png"),
+                "wifi_connected": icon_path("wifi.png"),
+                "wifi_disconnected": icon_path("wifidisconected.png"),
+                "battery_icons": battery_icons,
             }
         )
         voice_icons = {
@@ -475,14 +530,44 @@ class KioskWindow(QMainWindow):
         self.chat_page = ChatPage(
             chat_icon=icon_path("chatIcon.png"),
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
             voice_icons=voice_icons,
         )
         self.service_page = ServicePage(
             back_icon=icon_path("back.png"),
+            home_icon=icon_path("homeIcon.png"),
+            emergency_icon=icon_path("emergency_stop.png"),
             wait_icon=icon_path("service_wait.png"),
             continue_icon=icon_path("service_continue.png"),
             service_icon=icon_path("service.png"),
         )
+        slam_icons = {
+            "home": icon_path("homeIcon.png"),
+            "back": icon_path("back.png"),
+            "emergency": icon_path("emergency_stop.png"),
+            "manual_control": icon_path("manual_control.png"),
+            "slam": icon_path("SLAMicon.png"),
+            "localization": icon_path("locolization.png"),
+            "goal": icon_path("location.png"),
+            "wifi_connected": icon_path("wifi.png"),
+            "wifi_disconnected": icon_path("wifidisconected.png"),
+            "battery_icons": battery_icons,
+        }
+        self.slam_page = SlamMapPage(slam_icons)
+        config_icons = {
+            "home": icon_path("homeIcon.png"),
+            "back": icon_path("back.png"),
+            "emergency": icon_path("emergency_stop.png"),
+            "wifi_connected": icon_path("wifi.png"),
+            "wifi_disconnected": icon_path("wifidisconected.png"),
+            "battery_icons": battery_icons,
+            "speaker": icon_path("speaker_on.png"),
+            "status": icon_path("status.png"),
+            "settings": icon_path("setting_icon.png"),
+        }
+        self.system_config_page = SystemConfigPage(icons=config_icons)
+        self.detection_debug_page = DetectionDebugPage(icons=config_icons)
         self.pages = {
             "idle": self.idle_page,
             "home": self.home_page,
@@ -490,6 +575,9 @@ class KioskWindow(QMainWindow):
             "service": self.service_page,
             "admin": self.admin_page,
             "navigation": self.navigation_page,
+            "slam": self.slam_page,
+            "system_config": self.system_config_page,
+            "detection_debug": self.detection_debug_page,
         }
         for page in self.pages.values():
             self.stack.addWidget(page)
@@ -507,10 +595,17 @@ class KioskWindow(QMainWindow):
         self.bottom_navigation.hide()
         self.bottom_navigation.page_requested.connect(self._on_bottom_navigation)
         self.home_page.service_requested.connect(self._on_service_requested)
+        self.home_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.service_page.home_requested.connect(self.return_to_home)
         self.service_page.back_requested.connect(self.go_back)
+        self.service_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.service_page.mode_selected.connect(self._on_service_mode_selected)
-        self.chat_page.home_requested.connect(self.go_back)
+        self.chat_page.home_requested.connect(self.return_to_home)
+        self.chat_page.back_requested.connect(self.go_back)
+        self.chat_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.admin_page.home_requested.connect(self.return_to_home)
         self.admin_page.back_requested.connect(self.go_back)
+        self.admin_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.admin_page.logout_requested.connect(self.go_back)
         self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
         self.admin_page.start_nav_requested.connect(self._on_admin_start_nav)
@@ -518,19 +613,61 @@ class KioskWindow(QMainWindow):
         self.admin_page.slam_requested.connect(self._on_admin_slam)
         self.admin_page.detection_debug_requested.connect(self._on_admin_detection)
         self.admin_page.system_status_requested.connect(self._on_admin_system_status)
-        self.navigation_page.home_requested.connect(self.go_back)
+        self.admin_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.navigation_page.home_requested.connect(self.return_to_home)
+        self.navigation_page.back_requested.connect(self.go_back)
+        self.navigation_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.navigation_page.start_requested.connect(self.ros_node.navigate_to_pose)
         self.navigation_page.cancel_requested.connect(self.ros_node.cancel_navigation)
+        self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
+        self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
+        self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
+        self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.slam_page.home_requested.connect(self.return_to_home)
+        self.slam_page.back_requested.connect(self.go_back)
+        self.slam_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.slam_page.start_slam_requested.connect(self.ros_node.start_slam)
+        self.slam_page.stop_slam_requested.connect(self.ros_node.stop_slam)
+        self.slam_page.save_map_requested.connect(self.ros_node.save_map)
+        self.slam_page.apply_map_requested.connect(self._on_apply_map_from_slam_page)
+        self.slam_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.system_config_page.home_requested.connect(self.return_to_home)
+        self.system_config_page.back_requested.connect(self.go_back)
+        self.system_config_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.system_config_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.system_config_page.start_layer_requested.connect(self.ros_node.start_layer)
+        self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
+        self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
+        self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
+        self.detection_debug_page.home_requested.connect(self.return_to_home)
+        self.detection_debug_page.back_requested.connect(self.go_back)
+        self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.detection_debug_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
 
         signals.connection_changed.connect(self._on_connection)
         signals.robot_status_changed.connect(self._on_robot_status)
         signals.navigation_status_changed.connect(self._on_navigation_status)
-        signals.map_changed.connect(self.navigation_page.map_widget.set_map)
+        signals.system_telemetry_changed.connect(self.system_config_page.update_sensor_telemetry)
+        signals.system_telemetry_changed.connect(self.detection_debug_page.update_ai_telemetry)
+        signals.layer_status_changed.connect(self.system_config_page.update_layer_status)
+        signals.actuator_test_result.connect(
+            lambda name, ok, msg: self.system_config_page.append_console_log(
+                f"[{name.upper()}] {'THÀNH CÔNG' if ok else 'THẤT BẠI'}: {msg}"
+            )
+        )
+        signals.map_changed.connect(self.navigation_page.set_map)
+        signals.map_changed.connect(self.slam_page.live_map_widget.set_map)
         signals.pose_changed.connect(self.navigation_page.set_pose)
-        signals.path_changed.connect(self.navigation_page.map_widget.set_path)
+        signals.pose_changed.connect(self.slam_page.live_map_widget.set_pose)
+        signals.slam_status_changed.connect(self.slam_page.set_slam_status)
+        signals.map_saved_result.connect(self.slam_page.set_save_result)
+        signals.path_changed.connect(self.navigation_page.set_path)
         signals.locations_changed.connect(self.navigation_page.set_locations)
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
+        signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
+        signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
+        signals.obstacle_points_changed.connect(self.navigation_page.set_obstacle_points)
         signals.service_popup_cmd.connect(self._on_service_popup_cmd)
         # LLM signals
         signals.llm_response_ready.connect(self._receive_llm_response)
@@ -616,8 +753,8 @@ class KioskWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
         self.stack.setGeometry(central.rect())
-        nav_width = min(560, max(492, central.width() - 32))
-        nav_height = 80
+        nav_width = min(700, max(615, central.width() - 32))
+        nav_height = 100
         self.bottom_navigation.setGeometry(
             (central.width() - nav_width) // 2,
             central.height() - nav_height - 12,
@@ -635,9 +772,11 @@ class KioskWindow(QMainWindow):
         page = self.pages.get(page_id)
         if page is None:
             return
-        if page_id in {"admin", "navigation"} and not self._admin_authenticated:
+        if page_id in {"admin", "navigation", "slam"} and not self._admin_authenticated:
             self.get_logger_or_warning("Blocked unauthorized admin navigation")
             return
+
+        LOG.info("[UI Navigate] Chuyển trang: '%s' -> '%s'", self._active_page, page_id)
 
         if self._active_page == "chat" and page_id != "chat":
             self.chat_page.stop_speaking()
@@ -649,7 +788,7 @@ class KioskWindow(QMainWindow):
             self._page_history.append(self._active_page)
 
         if page_id == "idle" or (
-            page_id == "home" and self._active_page in {"admin", "navigation"}
+            page_id == "home" and self._active_page in {"admin", "navigation", "slam"}
         ):
             self._admin_authenticated = False
 
@@ -674,6 +813,13 @@ class KioskWindow(QMainWindow):
                 self._wakeword_worker.pause_listening()
         if page_id == "navigation":
             self.ros_node.request_locations()
+            if hasattr(self, "navigation_page"):
+                self.navigation_page.set_wifi(check_wifi_connected())
+            self._update_fullscreen_ui()
+        elif page_id == "admin":
+            self._update_fullscreen_ui()
+        elif page_id == "slam":
+            self.slam_page.set_wifi(check_wifi_connected())
 
     def go_back(self) -> None:
         """Navigate back to the previous screen."""
@@ -683,7 +829,7 @@ class KioskWindow(QMainWindow):
         else:
             if self._active_page in {"admin", "chat", "service"}:
                 self.show_page("home", track_history=False)
-            elif self._active_page == "navigation":
+            elif self._active_page in {"navigation", "slam"}:
                 self.show_page("admin", track_history=False)
             else:
                 self.show_page("idle", track_history=False)
@@ -709,11 +855,14 @@ class KioskWindow(QMainWindow):
         if dialog.exec_() == AdminPinDialog.Accepted:
             self._admin_authenticated = True
             self._last_activity_at = time.monotonic()
+            LOG.info("[UI Admin] Đăng nhập quản trị viên thành công.")
             self.show_page("admin")
         else:
+            LOG.info("[UI Admin] Đã đóng hoặc hủy đăng nhập quản trị viên.")
             self.bottom_navigation.set_active("home")
 
     def _logout_admin(self) -> None:
+        LOG.info("[UI Admin] Đăng xuất quản trị viên.")
         self._admin_authenticated = False
         self.show_page("home")
 
@@ -721,6 +870,7 @@ class KioskWindow(QMainWindow):
         self.show_page("service")
 
     def _on_service_mode_selected(self, mode: str) -> None:
+        LOG.info("[UI Service] Người dùng chọn chế độ phục vụ: '%s'", mode)
         if mode == "wait":
             print("[robot_ui] SERVICE: Kích hoạt chế độ CHỜ PHỤC VỤ (IS_SERVING = True)", flush=True)
             self.ros_node.request_serve()
@@ -732,6 +882,7 @@ class KioskWindow(QMainWindow):
             QTimer.singleShot(1500, lambda: self.show_page("home"))
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
+        LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
         if cmd in ("SHOW_SERVING", "SHOW_5S_INVITE"):
             if hasattr(self, "service_page"):
                 self.service_page.select_mode_programmatically("wait")
@@ -742,31 +893,63 @@ class KioskWindow(QMainWindow):
             if self._active_page == "service":
                 self.show_page("home")
 
+    def return_to_home(self) -> None:
+        """Quay thẳng về màn hình chính (home / WelcomePage), dọn sạch lịch sử điều hướng."""
+        self._page_history.clear()
+        self.show_page("home", track_history=False)
+
     def _on_emergency_stop(self) -> None:
-        print("[robot_ui] EMERGENCY STOP TRIGGERED FROM BOTTOM DOCK!", flush=True)
+        LOG.warn("🚨 [UI Emergency] Kích hoạt DỪNG KHẨN CẤP từ giao diện người dùng!")
+        # 1. Ngắt ngay toàn bộ âm thanh / giọng nói / LLM
+        if hasattr(self, "chat_page"):
+            self.chat_page.stop_speaking()
+        if hasattr(self, "_voice_controller"):
+            self._voice_controller.stop_speaking()
+            self._voice_controller.capture.cancel()
+        if hasattr(self, "_llm_worker"):
+            self._llm_worker.cancel_current_request()
+
+        # 2. Phát lệnh dừng khẩn cấp đa tầng tới ROS node
         self.ros_node.trigger_emergency_stop()
         self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
+        if hasattr(self, "admin_page") and hasattr(self.admin_page, "status_banner"):
+            self.admin_page.status_banner.setText("🚨 DỪNG KHẨN CẤP: Đã ngắt toàn bộ di chuyển và nhiệm vụ!")
         self.bottom_navigation.set_active("home" if self._active_page == "home" else self._active_page)
 
     def _on_admin_start_nav(self) -> None:
         self.show_page("navigation")
 
     def _on_admin_stop_nav(self) -> None:
+        LOG.info("[UI Admin] Dừng điều hướng từ trang Admin.")
         self.ros_node.cancel_navigation()
         self.admin_page.status_banner.setText("Điều hướng: Đã gửi lệnh dừng")
 
     def _on_admin_slam(self) -> None:
-        self.admin_page.status_banner.setText("SLAM: Đang sẵn sàng khởi tạo")
+        LOG.info("[UI Admin] Mở trang Quản trị SLAM & Bản đồ.")
+        self.show_page("slam")
+
+    def _on_apply_map_from_slam_page(self, map_path: str, backend: str) -> None:
+        LOG.info("[UI SLAM] Áp dụng bản đồ: %s (%s), quay về Admin", map_path, backend)
+        self.ros_node.apply_localization_map(map_path, backend)
+        map_name = Path(map_path).name
+        self.admin_page.status_banner.setText(f"Đã chọn bản đồ: {map_name} ({backend.upper()})")
+        if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "load_map_yaml"):
+            self.navigation_page.load_map_yaml(map_path)
+        self.show_page("admin")
 
     def _on_admin_detection(self) -> None:
-        self.admin_page.status_banner.setText("Detection Debug: Kênh /yolo/detections đang mở")
+        LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
+        self.show_page("detection_debug")
 
     def _on_admin_system_status(self) -> None:
-        self.admin_page.status_banner.setText("System Status: CPU, Cảm biến & Vi điều khiển bình thường")
+        LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
+        self.show_page("system_config")
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
         self.admin_page.set_connection(connected)
+        if hasattr(self, "detection_debug_page") and hasattr(self.detection_debug_page, "update_wifi"):
+            self.detection_debug_page.update_wifi(connected)
         self._update_emotion()
 
     def _on_robot_status(self, status: dict[str, Any]) -> None:
@@ -775,6 +958,14 @@ class KioskWindow(QMainWindow):
         self.idle_page.set_robot_status(status)
         self.admin_page.set_robot_status(status)
         self.navigation_page.set_robot_status(status)
+        if hasattr(self, "slam_page"):
+            self.slam_page.set_battery(status.get("battery_percent") or status.get("battery"))
+        if hasattr(self, "system_config_page"):
+            self.system_config_page.update_battery_water(status)
+        if hasattr(self, "detection_debug_page"):
+            bat = status.get("battery_percent") or status.get("battery")
+            if isinstance(bat, (int, float)):
+                self.detection_debug_page.update_battery(float(bat))
         self._update_emotion()
 
     def _on_navigation_status(self, status: dict[str, Any]) -> None:
@@ -785,6 +976,8 @@ class KioskWindow(QMainWindow):
 
     def _on_chat_submitted(self, message: str) -> None:
         """Nhận tin nhắn từ ChatPage và gửi cho LLM worker."""
+        LOG.info("[UI Chat] Người dùng gửi tin nhắn (session=%d): '%s'",
+                 self._llm_worker.session_id, message)
         self._voice_controller.notify_llm_processing(session_id=self._llm_worker.session_id)
         self.signals.llm_status_changed.emit("●  LLM: ĐANG XỬ LÝ...")
         sent = self._llm_worker.send(
@@ -792,9 +985,11 @@ class KioskWindow(QMainWindow):
             status_updated_at=self._robot_status_received_at,
         )
         if not sent:
+            LOG.warn("[UI Chat] Không gửi được câu hỏi vì LLM đang bận xử lý câu trước.")
             self.chat_page.receive_response("Robot đang xử lý một câu hỏi khác.")
 
     def _on_voice_state_changed(self, state_str: str, msg: str) -> None:
+        LOG.info("[UI Voice] Trạng thái Mic: %s (%s)", state_str, msg)
         try:
             self.chat_page.set_mic_state(MicState(state_str))
         except ValueError:
@@ -805,6 +1000,8 @@ class KioskWindow(QMainWindow):
     def _on_voice_transcript_ready(self, session_id: int, turn_id: int, text: str) -> None:
         if session_id != self._llm_worker.session_id:
             return
+        LOG.info("[UI Voice] Nhận transcript STT (session=%d, turn=%d): '%s'",
+                 session_id, turn_id, text)
         self.chat_page.submit_voice_transcript(text)
 
     def _on_llm_stream_delta(self, session_id: int, turn_id: int, delta: str) -> None:
@@ -817,12 +1014,16 @@ class KioskWindow(QMainWindow):
     def _on_llm_stream_completed(self, session_id: int, turn_id: int, full_text: str) -> None:
         if session_id != self._llm_worker.session_id:
             return
+        preview = (full_text[:80] + "...") if len(full_text) > 80 else full_text
+        LOG.info("[UI Chat] LLM phản hồi hoàn tất (turn=%d, %d ký tự): '%s'",
+                 turn_id, len(full_text), preview)
         self.chat_page.finalize_stream(session_id, turn_id, full_text, interrupted=False)
         self.signals.llm_status_changed.emit("LLM: SẴN SÀNG")
         ctx = TurnContext(session_id, turn_id, self._voice_controller.generation_id)
         self._voice_controller.handle_stream_completed(ctx, full_text)
 
     def _on_llm_stream_interrupted(self, session_id: int, turn_id: int) -> None:
+        LOG.warn("[UI Chat] LLM streaming bị gián đoạn (turn=%d)", turn_id)
         self.chat_page.finalize_stream(session_id, turn_id, "", interrupted=True)
         ctx = TurnContext(session_id, turn_id, self._voice_controller.generation_id)
         self._voice_controller.handle_stream_interrupted(ctx)
@@ -867,6 +1068,34 @@ class KioskWindow(QMainWindow):
             if self._voice_controller.is_speaker_enabled():
                 self._voice_controller.handle_llm_response(self._llm_worker.session_id, greeting)
 
+    def toggle_fullscreen(self) -> None:
+        """Toggle between Fullscreen and Windowed mode (1024x600)."""
+        if self.isFullScreen():
+            self.showNormal()
+            self.resize(1024, 600)
+            self._update_fullscreen_ui(is_full=False)
+        else:
+            self.showFullScreen()
+            self._update_fullscreen_ui(is_full=True)
+
+    def _update_fullscreen_ui(self, is_full: bool | None = None) -> None:
+        full = self.isFullScreen() if is_full is None else is_full
+        if hasattr(self, "admin_page"):
+            self.admin_page.update_fullscreen_button(full)
+        if hasattr(self, "navigation_page"):
+            self.navigation_page.update_fullscreen_button(full)
+        if hasattr(self, "slam_page") and hasattr(self.slam_page, "update_fullscreen_button"):
+            self.slam_page.update_fullscreen_button(full)
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "update_fullscreen_button"):
+            self.system_config_page.update_fullscreen_button(full)
+        if hasattr(self, "detection_debug_page") and hasattr(self.detection_debug_page, "update_fullscreen_button"):
+            self.detection_debug_page.update_fullscreen_button(full)
+
+    def changeEvent(self, event: QEvent) -> None:
+        if event.type() == QEvent.WindowStateChange:
+            self._update_fullscreen_ui()
+        super().changeEvent(event)
+
     def eventFilter(self, watched: Any, event: QEvent) -> bool:
         input_events = (
             QEvent.MouseButtonPress, QEvent.KeyPress,
@@ -883,11 +1112,28 @@ class KioskWindow(QMainWindow):
                 ):
                     self.show_page("home")
                     return True
+
+        # Catch Escape / F11 / Ctrl+M / Ctrl+Q globally across all child widgets
+        if event.type() == QEvent.KeyPress and isinstance(event, QKeyEvent):
+            if event.key() in (Qt.Key_Escape, Qt.Key_F11):
+                self.toggle_fullscreen()
+                return True
+            if event.key() == Qt.Key_M and (event.modifiers() & Qt.ControlModifier):
+                self.showMinimized()
+                return True
+            if event.key() == Qt.Key_Q and (event.modifiers() & Qt.ControlModifier):
+                self.close()
+                return True
+
         return super().eventFilter(watched, event)
 
     def _expire_idle_session(self) -> None:
-        if self._active_page == "admin":
+        if self._active_page in {"admin", "slam", "navigation"}:
             self.admin_page.update_wifi()
+            if hasattr(self, "slam_page"):
+                self.slam_page.set_wifi(check_wifi_connected())
+            if hasattr(self, "navigation_page"):
+                self.navigation_page.set_wifi(check_wifi_connected())
         if self._active_page == "idle":
             return
         # Do not expire session while visitor is actively recording, waiting for STT/LLM/TTS, or robot is speaking
@@ -896,7 +1142,7 @@ class KioskWindow(QMainWindow):
             return
         timeout = (
             self._admin_idle_timeout_seconds
-            if self._active_page in {"admin", "navigation"}
+            if self._active_page in {"admin", "navigation", "slam"}
             else 300
             if self._active_page == "service"
             else self._idle_timeout_seconds
@@ -934,7 +1180,13 @@ class KioskWindow(QMainWindow):
         self.idle_page.video.set_video(self.emotions.path(emotion))
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key_Escape:
+        if event.key() in (Qt.Key_Escape, Qt.Key_F11):
+            self.toggle_fullscreen()
+            return
+        if event.key() == Qt.Key_M and (event.modifiers() & Qt.ControlModifier):
+            self.showMinimized()
+            return
+        if event.key() == Qt.Key_Q and (event.modifiers() & Qt.ControlModifier):
             self.close()
             return
         super().keyPressEvent(event)
@@ -943,8 +1195,13 @@ class KioskWindow(QMainWindow):
         QApplication.instance().removeEventFilter(self)
         if hasattr(self, "_wakeword_worker"):
             self._wakeword_worker.stop()
+            self._wakeword_worker.wait()
         self.chat_page.stop_speaking()
         self._voice_controller.shutdown()
         self._llm_worker.reset_session()
         self.idle_page.video.stop()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "stop"):
+            self.system_config_page.stop()
+        if hasattr(self, "ros_node"):
+            self.ros_node.stop_subprocesses()
         super().closeEvent(event)

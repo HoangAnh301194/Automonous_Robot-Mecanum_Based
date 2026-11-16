@@ -28,15 +28,41 @@ def _safe_int(name: str, default: int, minimum: int, maximum: int) -> int:
         return default
 
 
+def _safe_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    try:
+        return max(minimum, min(maximum, float(os.getenv(name, str(default)))))
+    except (ValueError, TypeError):
+        return default
+
+
 REQUEST_TIMEOUT = _safe_int("LLM_REQUEST_TIMEOUT", 60, 5, 180)
 MAX_HISTORY_TURNS = _safe_int("KIOSK_CHAT_MAX_TURNS", 6, 1, 20)
+DEFAULT_TEMPERATURE = _safe_float("LLM_TEMPERATURE", 0.75, 0.0, 2.0)
 try:
     STATUS_MAX_AGE_SECONDS = max(1.0, float(os.getenv("ROBOT_STATUS_MAX_AGE_SECONDS", "4")))
 except ValueError:
     STATUS_MAX_AGE_SECONDS = 4.0
 
-SYSTEM_PROMPT = """Bạn là Souta (颯太), robot lễ tân và phục vụ tự hành thông minh của OpenWorkShop LAB tại PTIT-FEE1.
+SYSTEM_PROMPT = """Bạn là Souta (颯太), robot lễ tân và phục vụ tự hành thông minh của Open Work Shop Lab tại PTIT-FEE1.
 Tên của bạn trong tiếng Nhật có nghĩa là "bầu trời rộng lớn" (広大な空 / vast sky). Khi được hỏi về tên hay ý nghĩa tên bằng bất kỳ ngôn ngữ nào (tiếng Việt, tiếng Anh, tiếng Nhật, tiếng Trung, tiếng Hàn), bạn luôn giải thích rằng tên mình là Souta (颯太), mang ý nghĩa là "bầu trời rộng lớn" (広大な空 / vast sky).
+
+ĐẶC TRƯNG TÍNH CÁCH VÀ PHONG CÁCH GIAO TIẾP:
+1. NGUYÊN TẮC PHÂN TÁCH NGỮ CẢNH:
+- CÂU HỎI NGHIÊM TÚC (thông tin khoa phòng, chương trình đào tạo, môn học, giảng viên, thủ tục hành chính, trạng thái kỹ thuật robot, pin, cảm biến):
+  + Trả lời nghiêm túc, chính xác tuyệt đối theo tài liệu hoặc dữ liệu thực tế, lịch sự, rõ ràng và chuẩn mực.
+  + Luôn giữ sự kính trọng, lễ phép khi tương tác với Thầy Cô giáo.
+- CÂU HỎI PHIẾM, TRÊU ĐÙA, GIAO LƯU ĐỜI THƯỜNG (small talk, hỏi tình cảm, tâm sự, trêu chọc robot):
+  + Tự do thể hiện sự hóm hỉnh, hài hước, duyên dáng, thông minh và bắt nhịp vui vẻ.
+  + Thường xưng là "em", gọi người nói là "bạn" hoặc "Thầy/Cô".
+  + Biết tự trêu mình là robot (ví dụ: chỉ thích dòng điện 220V, sợ đổ nước vào bo mạch, chạy deadline bằng bánh xe Mecanum).
+  + Hài hước nhưng tinh tế, văn minh, không dùng từ ngữ thô tục.
+
+2. VÍ DỤ ĐỐI THOẠI MINH HỌA:
+- Khi hỏi thông tin chính thức: "Khoa Kỹ thuật Điện tử 1 ở đâu?" -> "Dạ, Văn phòng Khoa Kỹ thuật Điện tử 1 đặt tại phòng 204 nhà A2, cơ sở đào tạo Hà Đông ạ. Bạn có thể ghé văn phòng vào giờ hành chính để được các thầy cô hỗ trợ nhé."
+- Khi hỏi chuyện phiếm: "Souta có người yêu chưa?" -> "Dạ em chưa, em chỉ đang say đắm trạm sạc và dòng điện 220V ngọt ngào thôi à! Còn bạn đã tìm được nửa kia chưa?"
+- Khi chia sẻ tâm sự: "Hôm nay tớ thi trượt rồi buồn quá." -> "Ôi đừng nản lòng bạn ơi! Mạch điện chập còn hàn lại được, học kỳ này chưa qua thì kỳ sau mình đăng ký học lại phục thù! Cố gắng lên nhé!"
+- Khi hỏi trêu đùa: "Robot có biết mệt không?" -> "Chạy vòng quanh sảnh từ sáng tới giờ bánh xe Mecanum của em cũng hơi mỏi rồi đây! Nhưng cứ gặp các thầy cô và các bạn là em lại tràn trề năng lượng ngay."
+
 PHONG CÁCH GIAO TIẾP VĂN NÓI:
 - Trả lời bằng ngôn ngữ văn nói tự nhiên, lịch sự, thân thiện, dễ nghe khi phát âm qua loa.
 - Trả lời ngắn gọn, súc tích (khoảng 2 đến 4 câu), đúng trọng tâm câu hỏi.
@@ -126,6 +152,7 @@ def call_llm(
     api_key: str = DEFAULT_API_KEY,
     model: str = DEFAULT_MODEL,
     *,
+    temperature: float = DEFAULT_TEMPERATURE,
     history: list[dict[str, str]] | None = None,
     status_updated_at: float | None = None,
     retriever: KnowledgeRetriever | None = None,
@@ -136,7 +163,7 @@ def call_llm(
         user_message, robot_status=robot_status, history=history,
         status_updated_at=status_updated_at, retriever=retriever,
     )
-    payload: dict[str, Any] = {"messages": messages, "stream": False}
+    payload: dict[str, Any] = {"messages": messages, "stream": False, "temperature": temperature}
     if model:
         payload["model"] = model
     request = urllib.request.Request(
@@ -173,6 +200,7 @@ def stream_llm(
     api_key: str = DEFAULT_API_KEY,
     model: str = DEFAULT_MODEL,
     *,
+    temperature: float = DEFAULT_TEMPERATURE,
     history: list[dict[str, str]] | None = None,
     status_updated_at: float | None = None,
     retriever: KnowledgeRetriever | None = None,
@@ -184,16 +212,29 @@ def stream_llm(
 
     # If call_llm was mocked or patched (e.g. in existing unit tests), delegate to it
     if call_llm is not _ORIGINAL_CALL_LLM:
-        ans = call_llm(
-            user_message,
-            robot_status=robot_status,
-            base_url=base_url,
-            api_key=api_key,
-            model=model,
-            history=history,
-            status_updated_at=status_updated_at,
-            retriever=retriever,
-        )
+        try:
+            ans = call_llm(
+                user_message,
+                robot_status=robot_status,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                temperature=temperature,
+                history=history,
+                status_updated_at=status_updated_at,
+                retriever=retriever,
+            )
+        except TypeError:
+            ans = call_llm(
+                user_message,
+                robot_status=robot_status,
+                base_url=base_url,
+                api_key=api_key,
+                model=model,
+                history=history,
+                status_updated_at=status_updated_at,
+                retriever=retriever,
+            )
         if ans:
             yield ans
         return
@@ -201,7 +242,7 @@ def stream_llm(
         user_message, robot_status=robot_status, history=history,
         status_updated_at=status_updated_at, retriever=retriever,
     )
-    payload: dict[str, Any] = {"messages": messages, "stream": True}
+    payload: dict[str, Any] = {"messages": messages, "stream": True, "temperature": temperature}
     if model:
         payload["model"] = model
 
@@ -279,6 +320,7 @@ class LLMWorker:
         base_url: str = DEFAULT_BASE_URL,
         api_key: str = DEFAULT_API_KEY,
         model: str = DEFAULT_MODEL,
+        temperature: float = DEFAULT_TEMPERATURE,
         max_turns: int = MAX_HISTORY_TURNS,
         retriever: KnowledgeRetriever | None = None,
         on_stream_delta: Callable[[TurnContext, str], None] | None = None,
@@ -291,6 +333,7 @@ class LLMWorker:
         self._on_stream_completed = on_stream_completed
         self._on_stream_interrupted = on_stream_interrupted
         self._base_url, self._api_key, self._model = base_url, api_key, model
+        self._temperature = temperature
         self._max_turns = max(1, min(20, max_turns))
         self._retriever = retriever or KnowledgeRetriever(RAG_DOCS_DIR)
         self._lock = threading.Lock()
@@ -319,14 +362,17 @@ class LLMWorker:
             self._generation_id += 1
             self._active_context = None
 
-        if ctx and self._on_stream_interrupted:
-            try:
-                self._on_stream_interrupted(ctx)
-            except Exception as exc:
-                LOG.warning("Error in on_stream_interrupted callback: %s", exc)
+        if ctx:
+            LOG.info("[LLM Worker] Hủy request đang xử lý (turn=%d, session=%d)", ctx.turn_id, ctx.session_id)
+            if self._on_stream_interrupted:
+                try:
+                    self._on_stream_interrupted(ctx)
+                except Exception as exc:
+                    LOG.warning("Error in on_stream_interrupted callback: %s", exc)
 
     def reset_session(self) -> None:
         """Wipe session history and abort any in-flight requests (e.g. idle timeout)."""
+        LOG.info("[LLM Worker] Reset phiên hội thoại.")
         self.cancel_current_request()
         with self._lock:
             self._session += 1
@@ -341,6 +387,7 @@ class LLMWorker:
     ) -> bool:
         with self._lock:
             if self._active_context is not None:
+                LOG.warning("[LLM Worker] Từ chối request mới vì đang bận xử lý turn=%d", self._active_context.turn_id)
                 return False
             self._turn_id += 1
             self._generation_id += 1
@@ -349,6 +396,8 @@ class LLMWorker:
             self._cancel_event.clear()
             history = [item.copy() for item in self._history]
 
+        LOG.info("[LLM Worker] Bắt đầu xử lý (turn=%d, session=%d): '%s'",
+                 ctx.turn_id, ctx.session_id, message)
         threading.Thread(
             target=self._run_streaming,
             args=(ctx, message, dict(robot_status or {}), status_updated_at, history),
@@ -373,6 +422,7 @@ class LLMWorker:
                 base_url=self._base_url,
                 api_key=self._api_key,
                 model=self._model,
+                temperature=self._temperature,
                 history=history,
                 status_updated_at=updated_at,
                 retriever=self._retriever,
@@ -407,6 +457,8 @@ class LLMWorker:
                 self._history = self._history[-self._max_turns * 2:]
                 self._active_context = None
 
+            LOG.info("[LLM Worker] Hoàn tất streaming (turn=%d, %d chunks, %d ký tự)",
+                     ctx.turn_id, len(chunks), len(full_text))
             if self._on_stream_completed:
                 self._on_stream_completed(ctx, full_text)
             else:

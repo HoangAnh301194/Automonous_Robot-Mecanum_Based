@@ -297,6 +297,16 @@ class TestKioskAI(unittest.TestCase):
             ctx = retriever.context(query)
             self.assertIn(expected_phrase, ctx, f"Failed to retrieve '{expected_phrase}' for query '{query}'")
 
+    def test_llm_temperature_and_humorous_system_prompt(self):
+        from robot_ui.kiosk.llm_client import SYSTEM_PROMPT, DEFAULT_TEMPERATURE
+        # Temperature defaults to 0.75 for balanced humor & accuracy
+        self.assertEqual(DEFAULT_TEMPERATURE, 0.75)
+        # System prompt contains explicit dual-mode guidance
+        self.assertIn("CÂU HỎI NGHIÊM TÚC", SYSTEM_PROMPT)
+        self.assertIn("CÂU HỎI PHIẾM", SYSTEM_PROMPT)
+        self.assertIn("VÍ DỤ ĐỐI THOẠI MINH HỌA", SYSTEM_PROMPT)
+        self.assertIn("Mecanum", SYSTEM_PROMPT)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,21 @@ data_files = [
     ),
 ]
 
+
+def _get_audio_data_files():
+    audio_path = Path("audio")
+    if not audio_path.exists():
+        return []
+    target_map = {}
+    for p in audio_path.rglob("*"):
+        if p.is_file():
+            install_dir = str(Path("share/robot_ui") / p.parent)
+            target_map.setdefault(install_dir, []).append(str(p))
+    return [(k, sorted(v)) for k, v in target_map.items()]
+
+
+data_files.extend(_get_audio_data_files())
+
 package_data = {
     package_name: ["kiosk/rag_docs/*.txt"],
 }

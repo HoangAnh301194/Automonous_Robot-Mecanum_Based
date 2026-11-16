@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-audio_player_node.py
-Node phát âm thanh MP3 tự động cho Robot (Nav2 Recovery, Mission Control, Chào hỏi):
-- Quản lý và phát 7 file âm thanh:
-    1. xin_duong.mp3         - Xin đường khi có người chắn
-    2. canh_bao_lui.mp3      - Cảnh báo lùi xe (CustomBackUp)
-    3. doi_duong.mp3         - Đang tính toán lại đường đi (Replan)
-    4. den_nguoi_vay_tay.mp3 - Tiếp cận người vẫy tay
-    5. tam_biet_5s.mp3       - Chào tạm biệt sau 5s mời nước
-    6. cam_on_phuc_vu.mp3    - Cảm ơn khi hoàn tất phục vụ nước
-    7. chuc_20_11.mp3        - Chúc mừng ngày Nhà giáo Việt Nam 20/11
-- Lắng nghe:
-    + /audio/play_sound (std_msgs/String): phát trực tiếp theo tên file hoặc alias
-    + /navigation/speech_request (std_msgs/String): thông điệp từ Nav2 Speak & HumanRecoveryBridge
+"""audio_player_node.py - Tự động phát âm thanh thông báo offline cho Robot.
+
+Cơ chế:
+1. Hàng đợi (Queue) phát tuần tự: Tránh tình trạng các topic đến dồn dập làm kill tiến trình âm thanh đang phát dở.
+2. Bộ đệm khoảng lặng (Silence padding): Chèn 350ms silence vào đầu âm thanh bằng adelay filter để DAC/soundcard kịp thức dậy.
+3. Độ ưu tiên (Priority): Cảnh báo lùi là âm thanh khẩn cấp có quyền ngắt các câu nói thông thường.
+4. Lắng nghe các topic:
+    + /audio/play_sound (std_msgs/String): phát trực tiếp tên file/key
+    + /navigation/speech_request (std_msgs/String): yêu cầu từ Nav2 (lùi, xin đường, đổi đường)
     + /navigation/operator_alert (diagnostic_msgs/KeyValue): mã alert PRE_BACKUP, REPLANNING, WAITING
     + /mission/status_log (std_msgs/String): sự kiện từ Behavior Tree tuần tra & phục vụ
 """
@@ -27,19 +21,21 @@ import time
 from typing import Dict, Optional
 
 import rclpy
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
+from diagnostic_msgs.msg import KeyValue
 from rclpy.node import Node
 from std_msgs.msg import String
-from diagnostic_msgs.msg import KeyValue
-from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 
 
 class AudioPlayerNode(Node):
     def __init__(self):
         super().__init__('audio_player_node')
 
+        # Thư mục chứa các file mp3
         self.audio_dir = self._resolve_audio_dir()
         self.get_logger().info(f"📂 Thư mục âm thanh: {self.audio_dir}")
 
+        # Bảng ánh xạ key -> tên file mp3
         self.audio_files: Dict[str, str] = {
             'xin_duong': 'xin_duong.mp3',
             'canh_bao_lui': 'canh_bao_lui.mp3',
@@ -48,6 +44,8 @@ class AudioPlayerNode(Node):
             'tam_biet_5s': 'tam_biet_5s.mp3',
             'cam_on_phuc_vu': 'cam_on_phuc_vu.mp3',
             'chuc_20_11': 'chuc_20_11.mp3',
+            'chao_thay_co': 'chao_thay_co.mp3',
+            'chao_20_11': 'chao_20_11.mp3',
         }
 
         # Tìm công cụ phát âm thanh (ưu tiên mpv, sau đó ffplay, sau đó aplay)
@@ -62,16 +60,14 @@ class AudioPlayerNode(Node):
         self._cooldown_sec = 2.5  # Không phát lặp cùng 1 file trong 2.5s
         self._shutdown_event = threading.Event()
 
-        # Thread phát âm thanh tuần tự từ hàng đợi
+        # Thread tiêu thụ hàng đợi phát âm thanh tuần tự
         self._worker_thread = threading.Thread(
-            target=self._queue_worker,
-            daemon=True,
-            name="audio-queue-worker"
+            target=self._queue_worker, daemon=True, name="audio-queue-worker"
         )
         self._worker_thread.start()
 
-        # Subscriptions
-        self.sub_direct = self.create_subscription(
+        # Subscribers
+        self.sub_play_sound = self.create_subscription(
             String, '/audio/play_sound', self.cb_play_sound, 10
         )
         self.sub_speech = self.create_subscription(
@@ -88,6 +84,10 @@ class AudioPlayerNode(Node):
 
     def _resolve_audio_dir(self) -> str:
         candidates = []
+        try:
+            candidates.append(os.path.join(get_package_share_directory('robot_ui'), 'audio'))
+        except PackageNotFoundError:
+            pass
         try:
             candidates.append(os.path.join(get_package_share_directory('mo_hinh'), 'audio'))
         except PackageNotFoundError:
@@ -122,6 +122,14 @@ class AudioPlayerNode(Node):
             filename = f"{clean_key}.mp3" if not clean_key.endswith('.mp3') else clean_key
 
         filepath = os.path.join(self.audio_dir, filename)
+        if not os.path.isfile(filepath):
+            # Tìm trong các thư mục con (greetings, nav2, events) nếu có
+            for sub in ['greetings', 'nav2', 'events']:
+                sub_path = os.path.join(self.audio_dir, sub, filename)
+                if os.path.isfile(sub_path):
+                    filepath = sub_path
+                    break
+
         if not os.path.isfile(filepath):
             self.get_logger().warn(f"Không tìm thấy file âm thanh: {filepath}")
             return
@@ -265,6 +273,17 @@ class AudioPlayerNode(Node):
         super().destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = AudioPlayerNode()
+    try:
+        rclpy.spin(node)
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
+        pass
+    finally:
+        node.destroy_node()
 
 
 if __name__ == '__main__':
