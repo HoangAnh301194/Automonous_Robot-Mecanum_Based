@@ -1373,61 +1373,61 @@ class KioskRosNode(Node):
             self.signals.process_log_received.emit(target_key, f"[{target_key}] Tiến trình đang chạy rồi.")
             return
 
-        prefix = self._get_ws_prefix()
-        cmd = ""
-        if target_key == "layer_hardware":
-            esp_port, lidar_port, detect_src = self._detect_esp_lidar_ports()
-            self.get_logger().info(f"[LAYER START] Cổng Serial ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}")
-            self.signals.process_log_received.emit(
-                target_key,
-                f"[{target_key}] Phát hiện cổng ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}",
-            )
-            cmd = (
-                prefix
-                + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
-                + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
-            )
-        elif target_key == "layer_navigation":
-            map_arg = ""
-            if self._selected_map_yaml and os.path.exists(self._selected_map_yaml):
-                map_arg = f" map_yaml:={shlex.quote(self._selected_map_yaml)}"
-            else:
+        def _bg_launcher():
+            prefix = self._get_ws_prefix()
+            cmd = ""
+            if target_key == "layer_hardware":
+                esp_port, lidar_port, detect_src = self._detect_esp_lidar_ports()
+                self.get_logger().info(f"[LAYER START] Cổng Serial ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}")
+                self.signals.process_log_received.emit(
+                    target_key,
+                    f"[{target_key}] Phát hiện cổng ({detect_src}): ESP={esp_port}, LiDAR={lidar_port}",
+                )
+                cmd = (
+                    prefix
+                    + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                    + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
+                )
+            elif target_key == "layer_navigation":
+                map_arg = ""
+                if self._selected_map_yaml and os.path.exists(self._selected_map_yaml):
+                    map_arg = f" map_yaml:={shlex.quote(self._selected_map_yaml)}"
+                else:
+                    ws_root = self._get_ws_root()
+                    default_yaml = ws_root / "my_map" / "my_map.yaml"
+                    if default_yaml.is_file():
+                        map_arg = f" map_yaml:={shlex.quote(str(default_yaml))}"
+                cmd = (
+                    prefix
+                    + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:={shlex.quote(self._selected_backend)} "
+                    + f"use_sim_time:=false use_rviz:=false{map_arg}"
+                )
+            elif target_key == "layer_slam":
+                cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+            elif target_key == "layer_perception":
                 ws_root = self._get_ws_root()
-                default_yaml = ws_root / "my_map" / "my_map.yaml"
-                if default_yaml.is_file():
-                    map_arg = f" map_yaml:={shlex.quote(str(default_yaml))}"
-            cmd = (
-                prefix
-                + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:={shlex.quote(self._selected_backend)} "
-                + f"use_sim_time:=false use_rviz:=false{map_arg}"
-            )
-        elif target_key == "layer_slam":
-            cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
-        elif target_key == "layer_perception":
-            ws_root = self._get_ws_root()
-            front_cfg = ws_root / "my_map" / "cam_truoc.yaml"
-            rear_cfg = ws_root / "my_map" / "cam_sau.yaml"
-            extra_cfgs = ""
-            if front_cfg.is_file():
-                extra_cfgs += f" front_obstacle_config:={shlex.quote(str(front_cfg))}"
-            if rear_cfg.is_file():
-                extra_cfgs += f" rear_obstacle_config:={shlex.quote(str(rear_cfg))}"
-            cmd = (
-                prefix
-                + "ros2 launch robot_bringup ai_perception.launch.py enable_cameras:=true "
-                + f"enable_obstacle_detectors:=true enable_ai_nodes:=true{extra_cfgs}"
-            )
-        elif target_key == "layer_voice_interaction":
-            cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
+                front_cfg = ws_root / "my_map" / "cam_truoc.yaml"
+                rear_cfg = ws_root / "my_map" / "cam_sau.yaml"
+                extra_cfgs = ""
+                if front_cfg.is_file():
+                    extra_cfgs += f" front_obstacle_config:={shlex.quote(str(front_cfg))}"
+                if rear_cfg.is_file():
+                    extra_cfgs += f" rear_obstacle_config:={shlex.quote(str(rear_cfg))}"
+                cmd = (
+                    prefix
+                    + "ros2 launch robot_bringup ai_perception.launch.py enable_cameras:=true "
+                    + f"enable_obstacle_detectors:=true enable_ai_nodes:=true{extra_cfgs}"
+                )
+            elif target_key == "layer_voice_interaction":
+                cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
-        if not cmd:
-            self.get_logger().warning(f"[LAYER START] Không tìm thấy cấu hình cho tầng: {layer_key}")
-            return
+            if not cmd:
+                self.get_logger().warning(f"[LAYER START] Không tìm thấy cấu hình cho tầng: {layer_key}")
+                return
 
-        self.get_logger().info(f"[LAYER START] [{target_key}] CMD: {cmd}")
-        self.signals.process_log_received.emit(target_key, f"[{target_key}] START: {cmd}")
+            self.get_logger().info(f"[LAYER START] [{target_key}] CMD: {cmd}")
+            self.signals.process_log_received.emit(target_key, f"[{target_key}] START: {cmd}")
 
-        def _launch_and_stream():
             try:
                 proc = subprocess.Popen(
                     ["bash", "-c", cmd],
@@ -1443,15 +1443,25 @@ class KioskRosNode(Node):
                     self._slam_proc = proc
 
                 if proc.stdout:
+                    buf: list[str] = []
+                    last_flush = time.monotonic()
                     for line in proc.stdout:
                         clean_line = line.rstrip()
                         if clean_line:
-                            self.signals.process_log_received.emit(target_key, clean_line)
+                            buf.append(clean_line)
+                        now = time.monotonic()
+                        if buf and (len(buf) >= 15 or (now - last_flush) >= 0.08):
+                            chunk = "\n".join(buf)
+                            buf.clear()
+                            last_flush = now
+                            self.signals.process_log_received.emit(target_key, chunk)
+                    if buf:
+                        self.signals.process_log_received.emit(target_key, "\n".join(buf))
             except Exception as exc:
                 self.get_logger().error(f"[LAYER START] Lỗi khởi chạy {target_key}: {exc}")
                 self.signals.process_log_received.emit(target_key, f"[{target_key}] LỖI: {exc}")
 
-        threading.Thread(target=_launch_and_stream, daemon=True).start()
+        threading.Thread(target=_bg_launcher, daemon=True).start()
 
     def stop_layer(self, layer_key: str) -> None:
         """Dừng tầng tiến trình tương ứng."""
@@ -1482,7 +1492,7 @@ class KioskRosNode(Node):
             self.signals.slam_status_changed.emit(False, "Đã dừng SLAM Mapping")
 
     def start_all_layers(self, mode: str = "slam_mapping", map_path: str = "", backend: str = "amcl") -> None:
-        """Khởi động toàn bộ hệ thống giống hệt nút Start All trong gui_v3."""
+        """Khởi động toàn bộ hệ thống giống hệt nút Start All trong gui_v3 trên background thread."""
         self.get_logger().info(f"[START ALL] Bắt đầu khởi động toàn bộ: mode={mode}, backend={backend}, map={map_path}")
         self.signals.process_log_received.emit("SYSTEM", f"[START ALL] Bắt đầu quy trình khởi động toàn bộ (Mode: {mode})...")
 
@@ -1491,12 +1501,11 @@ class KioskRosNode(Node):
         if backend:
             self._selected_backend = backend
 
-        # Bước 1: Khởi động Layer 1 (Hardware / Odom)
-        self.start_layer("layer_hardware")
-
-        # Bước 2: Chờ 1200ms rồi tự động khởi động tiếp Layer 2 (giống gui_v3: QTimer.singleShot(1200, self._start_all_layer2))
-        def _start_layer2_delayed():
-            time.sleep(1.2)
+        def _bg_start_all():
+            # Bước 1: Khởi động Layer 1 (Hardware / Odom)
+            self.start_layer("layer_hardware")
+            # Chờ 2.5 giây để Layer 1 nạp xong driver, sllidar và controller trước khi bật Layer 2
+            time.sleep(2.5)
             clean_mode = mode.lower()
             if "slam" in clean_mode or "mapping" in clean_mode:
                 self.get_logger().info("[START ALL] Bước 2: Tự động khởi động Layer 2 (SLAM Mapping)...")
@@ -1507,7 +1516,7 @@ class KioskRosNode(Node):
                 self.signals.process_log_received.emit("SYSTEM", f"[START ALL] Bước 2: Tự động khởi động Layer 2 (Localization Nav2 - Backend: {self._selected_backend})...")
                 self.start_layer("layer_navigation")
 
-        threading.Thread(target=_start_layer2_delayed, daemon=True).start()
+        threading.Thread(target=_bg_start_all, daemon=True).start()
 
     def stop_all_layers(self) -> None:
         """Dừng toàn bộ mọi tầng tiến trình giống nút Stop All trong gui_v3."""

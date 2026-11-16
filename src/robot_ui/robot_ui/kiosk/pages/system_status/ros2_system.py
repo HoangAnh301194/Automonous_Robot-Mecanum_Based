@@ -21,9 +21,9 @@ from PyQt5.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -374,13 +374,13 @@ class ROS2SystemDetailScreen(QWidget):
         log_top.addWidget(self.btn_clear_log)
         log_layout.addLayout(log_top)
 
-        self.txt_log = QTextEdit()
+        self.txt_log = QPlainTextEdit()
         self.txt_log.setReadOnly(True)
-        self.txt_log.document().setMaximumBlockCount(1000)
+        self.txt_log.setMaximumBlockCount(1000)
         self.txt_log.setMinimumHeight(180)
         self.txt_log.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.txt_log.setStyleSheet(f"""
-            QTextEdit {{
+            QPlainTextEdit {{
                 background-color: #090d12;
                 color: #10b981;
                 font-family: 'DejaVu Sans Mono', Consolas, Monaco, monospace;
@@ -391,7 +391,7 @@ class ROS2SystemDetailScreen(QWidget):
                 padding: 6px;
             }}
         """)
-        self.txt_log.setText("[SYSTEM] Sẵn sàng nhận nhật ký tiến trình ROS 2...")
+        self.txt_log.setPlainText("[SYSTEM] Sẵn sàng nhận nhật ký tiến trình ROS 2...")
         log_layout.addWidget(self.txt_log)
         c_layout.addWidget(card_log)
 
@@ -591,21 +591,24 @@ class ROS2SystemDetailScreen(QWidget):
 
     def append_process_log(self, layer: str, line: str, flush_now: bool = False) -> None:
         """Đưa dòng log vào hàng đợi để gom batch cập nhật UI chống giật lag."""
-        clean_line = ANSI_REGEX.sub("", line).strip()
-        if not clean_line:
+        clean_text = ANSI_REGEX.sub("", line).strip()
+        if not clean_text:
             return
         now_str = time.strftime("%H:%M:%S")
-        self._log_queue.append(f"[{now_str}] [{layer}] {clean_line}")
-        if flush_now or len(self._log_queue) >= 100:
+        for single_line in clean_text.splitlines():
+            s = single_line.strip()
+            if s:
+                self._log_queue.append(f"[{now_str}] [{layer}] {s}")
+        if flush_now or len(self._log_queue) >= 50:
             self._flush_log_queue()
 
     def _flush_log_queue(self) -> None:
-        """Gom các dòng log đang chờ và ghi 1 lần duy nhất vào QTextEdit."""
+        """Gom các dòng log đang chờ và ghi 1 lần duy nhất vào QPlainTextEdit."""
         if not self._log_queue:
             return
         batch = "\n".join(self._log_queue)
         self._log_queue.clear()
-        self.txt_log.append(batch)
+        self.txt_log.appendPlainText(batch)
         if self.chk_autoscroll.isChecked():
             sb = self.txt_log.verticalScrollBar()
             sb.setValue(sb.maximum())
@@ -613,7 +616,7 @@ class ROS2SystemDetailScreen(QWidget):
     def _clear_log(self) -> None:
         self._log_queue.clear()
         self.txt_log.clear()
-        self.txt_log.setText("[SYSTEM] Đã xóa toàn bộ nhật ký hiển thị.")
+        self.txt_log.setPlainText("[SYSTEM] Đã xóa toàn bộ nhật ký hiển thị.")
 
     def closeEvent(self, event: Any) -> None:
         if hasattr(self, "_log_timer") and self._log_timer.isActive():
