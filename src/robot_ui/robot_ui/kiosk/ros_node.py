@@ -828,7 +828,18 @@ class KioskRosNode(Node):
 
     @staticmethod
     def _list_serial_ports() -> list[str]:
-        return sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
+        raw_ports = sorted(glob.glob("/dev/serial/by-id/*")) + sorted(glob.glob("/dev/ttyUSB*")) + sorted(glob.glob("/dev/ttyACM*"))
+        dedup: list[str] = []
+        seen_real: set[str] = set()
+        for p in raw_ports:
+            try:
+                real = os.path.realpath(p)
+            except Exception:
+                real = p
+            if real not in seen_real:
+                seen_real.add(real)
+                dedup.append(p)
+        return dedup
 
     def _detect_esp_lidar_ports(self) -> tuple[str, str, str]:
         esp_alias, lidar_alias = "/dev/esp32", "/dev/lidar"
@@ -837,13 +848,16 @@ class KioskRosNode(Node):
         ports = self._list_serial_ports()
         if not ports:
             return "/dev/ttyUSB0", "/dev/ttyUSB1", "fallback_defaults"
+
         esp_port, lidar_port = None, None
         for port in ports:
             key = os.path.basename(port).lower()
             if lidar_port is None and ("rplidar" in key or "slamtec" in key or "lidar" in key):
                 lidar_port = port
-            if esp_port is None and ("esp32" in key or "esp" in key):
+            if esp_port is None and ("esp32" in key or "esp" in key or "cp210" in key):
                 esp_port = port
+
+        # If esp_port not identified, choose first available
         if esp_port is None:
             for port in ports:
                 if port.endswith("ttyUSB0") or port.endswith("ttyACM0"):
@@ -851,13 +865,20 @@ class KioskRosNode(Node):
                     break
         if esp_port is None:
             esp_port = ports[0]
-        if lidar_port is None:
+
+        # Ensure lidar_port is a DIFFERENT physical hardware device
+        esp_real = os.path.realpath(esp_port)
+        if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
+            lidar_port = None
             for port in ports:
-                if port != esp_port:
+                if os.path.realpath(port) != esp_real:
                     lidar_port = port
                     break
-        if lidar_port is None or lidar_port == esp_port:
-            lidar_port = "/dev/ttyUSB1" if esp_port != "/dev/ttyUSB1" else "/dev/ttyUSB0"
+
+        # Fallback if no separate lidar port exists
+        if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
+            lidar_port = "/dev/ttyUSB1" if esp_real != "/dev/ttyUSB1" else "/dev/ttyUSB0"
+
         return esp_port, lidar_port, "scan"
 
     def start_slam(self) -> None:

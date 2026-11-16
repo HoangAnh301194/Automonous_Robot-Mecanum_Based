@@ -9,10 +9,11 @@ Organizes:
 from __future__ import annotations
 
 import glob
+import re
 import time
 from typing import Any, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtWidgets import (
     QCheckBox,
     QFrame,
@@ -34,6 +35,8 @@ from robot_ui.kiosk.pages.system_status.components import (
 from robot_ui.kiosk.pages.system_status.contracts import HealthStatus
 from robot_ui.kiosk.pages.system_status.theme import KioskTheme
 
+ANSI_REGEX = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
 
 class ROS2SystemDetailScreen(QWidget):
     """Screen 2: ROS 2 System & Layer Management Screen."""
@@ -52,7 +55,14 @@ class ROS2SystemDetailScreen(QWidget):
         self.setObjectName("ros2SystemDetailScreen")
         self.icons = icons or {}
         self.layer_rows: dict[str, dict[str, Any]] = {}
+        self._log_queue: list[str] = []
         self._init_ui()
+
+        # Throttled log batching: cập nhật UI mỗi 60ms để chống lag/nghẽn Main Thread
+        self._log_timer = QTimer(self)
+        self._log_timer.setInterval(60)
+        self._log_timer.timeout.connect(self._flush_log_queue)
+        self._log_timer.start()
 
     def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -211,6 +221,7 @@ class ROS2SystemDetailScreen(QWidget):
 
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
+        self.txt_log.document().setMaximumBlockCount(1000)
         self.txt_log.setMinimumHeight(180)
         self.txt_log.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.txt_log.setStyleSheet(f"""
@@ -334,17 +345,37 @@ class ROS2SystemDetailScreen(QWidget):
         self.append_process_log(key, f"Gửi yêu cầu dừng: {name}...")
         self.stop_layer_requested.emit(key)
 
-    def append_process_log(self, layer: str, line: str) -> None:
-        """Thêm dòng log từ tiến trình nền vào khung hiển thị."""
+    def append_process_log(self, layer: str, line: str, flush_now: bool = False) -> None:
+        """Đưa dòng log vào hàng đợi để gom batch cập nhật UI chống giật lag."""
+        clean_line = ANSI_REGEX.sub("", line).strip()
+        if not clean_line:
+            return
         now_str = time.strftime("%H:%M:%S")
-        self.txt_log.append(f"[{now_str}] [{layer}] {line}")
+        self._log_queue.append(f"[{now_str}] [{layer}] {clean_line}")
+        # Nếu yêu cầu flush ngay hoặc hàng đợi vượt 100 dòng, đẩy ngay ra giao diện
+        if flush_now or len(self._log_queue) >= 100:
+            self._flush_log_queue()
+
+    def _flush_log_queue(self) -> None:
+        """Gom các dòng log đang chờ và ghi 1 lần duy nhất vào QTextEdit."""
+        if not self._log_queue:
+            return
+        batch = "\n".join(self._log_queue)
+        self._log_queue.clear()
+        self.txt_log.append(batch)
         if self.chk_autoscroll.isChecked():
             sb = self.txt_log.verticalScrollBar()
             sb.setValue(sb.maximum())
 
     def _clear_log(self) -> None:
+        self._log_queue.clear()
         self.txt_log.clear()
         self.txt_log.setText("[SYSTEM] Đã xóa toàn bộ nhật ký hiển thị.")
+
+    def closeEvent(self, event: Any) -> None:
+        if hasattr(self, "_log_timer") and self._log_timer.isActive():
+            self._log_timer.stop()
+        super().closeEvent(event)
 
     def _on_emergency_cleanup_clicked(self) -> None:
         dialog = DangerousActionDialog(

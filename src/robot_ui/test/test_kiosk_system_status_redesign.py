@@ -152,7 +152,7 @@ def test_detail_screens(app):
     ros2_screen.update_layer_status({"layer_hardware": True, "layer_navigation": False})
     assert ros2_screen.layer_rows["layer_hardware"]["status_lbl"].text() == "RUNNING"
     assert ros2_screen.layer_rows["layer_navigation"]["status_lbl"].text() == "STOPPED"
-    ros2_screen.append_process_log("layer_hardware", "Node started successfully")
+    ros2_screen.append_process_log("layer_hardware", "Node started successfully", flush_now=True)
     assert "layer_hardware" in ros2_screen.txt_log.toPlainText()
     assert "Node started successfully" in ros2_screen.txt_log.toPlainText()
     ros2_screen._clear_log()

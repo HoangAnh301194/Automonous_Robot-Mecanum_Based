@@ -178,3 +178,17 @@ def test_fullscreen_synchronization_across_pages(app):
     sys_cfg.stop()
     for p in pages:
         p.close()
+
+
+def test_serial_port_deduplication():
+    from robot_ui.kiosk.ros_node import KioskRosNode
+    with patch("glob.glob") as mock_glob, patch("os.path.realpath") as mock_real, patch("os.path.exists", return_value=False):
+        mock_glob.side_effect = lambda pat: (
+            ["/dev/serial/by-id/usb-CP2102-port0"] if "by-id" in pat else
+            ["/dev/ttyUSB0"] if "ttyUSB" in pat else []
+        )
+        mock_real.side_effect = lambda p: "/dev/ttyUSB0"
+
+        ports = KioskRosNode._list_serial_ports()
+        assert len(ports) == 1
+        assert ports[0] == "/dev/serial/by-id/usb-CP2102-port0"
