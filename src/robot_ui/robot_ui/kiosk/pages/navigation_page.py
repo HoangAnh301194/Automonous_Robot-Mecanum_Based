@@ -753,6 +753,7 @@ class NavigationPage(QWidget):
     start_patrol_requested = pyqtSignal()
     pause_patrol_requested = pyqtSignal()
     reload_route_requested = pyqtSignal()
+    initial_pose_requested = pyqtSignal()
 
     def __init__(self, icons: dict[str, Path | None], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1210,7 +1211,13 @@ class NavigationPage(QWidget):
             self.stop_button.setIconSize(QSize(24, 24))
         self.stop_button.clicked.connect(self._stop_navigation)
 
+        self.btn_initial_pose = QPushButton("ĐỊNH VỊ GỐC")
+        self.btn_initial_pose.setObjectName("navToolBtn")
+        self.btn_initial_pose.setToolTip("Gửi tọa độ xuất phát /initialpose để AMCL định vị robot tức thì")
+        self.btn_initial_pose.clicked.connect(self._on_initial_pose_clicked)
+
         action_row.addWidget(self.status_label, 1)
+        action_row.addWidget(self.btn_initial_pose)
         action_row.addWidget(self.start_button)
         action_row.addWidget(self.stop_button)
         dash_layout.addLayout(action_row)
@@ -1629,6 +1636,10 @@ class NavigationPage(QWidget):
 
     def _pause_patrol(self) -> None:
         self.pause_patrol_requested.emit()
+
+    def _on_initial_pose_clicked(self) -> None:
+        self.status_label.setText("📍 Đang gửi tọa độ xuất phát ban đầu để định vị robot...")
+        self.initial_pose_requested.emit()
 
     # -------------------------------------------------------------------------
     # Header Badges & Fullscreen

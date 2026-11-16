@@ -10,11 +10,12 @@ import time
 from functools import partial
 from pathlib import Path
 from typing import Any
+import yaml
 
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
-from nav_msgs.msg import OccupancyGrid, Odometry, Path
+from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from nav2_msgs.action import NavigateToPose
 from collections import deque
 import tf2_ros
@@ -116,6 +117,11 @@ class KioskRosNode(Node):
         )
         self.serve_trigger_pub = self.create_publisher(Bool, "/mission/serve_trigger", 10)
         self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
+        self._initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped,
+            "/initialpose",
+            10,
+        )
         self._initial_goal_dist: float | None = None
         self._last_scan_ui_pub = 0.0
         self._last_obs_ui_pub = {"front": 0.0, "rear": 0.0}
@@ -180,7 +186,7 @@ class KioskRosNode(Node):
             10,
         )
         self.create_subscription(Odometry, "/odom", self._on_odom, 20)
-        self.create_subscription(Path, "/plan", self._on_path, 10)
+        self.create_subscription(NavPath, "/plan", self._on_path, 10)
         self.create_subscription(String, "/mission/service_popup_cmd", self._on_service_popup_cmd, 10)
 
         best_effort_qos = QoSProfile(
@@ -361,7 +367,7 @@ class KioskRosNode(Node):
         if not self._have_localized_pose:
             self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
 
-    def _on_path(self, msg: Path) -> None:
+    def _on_path(self, msg: NavPath) -> None:
         poses = msg.poses
         step = max(1, math.ceil(len(poses) / self.PATH_PREVIEW_MAX_POINTS))
         self.signals.path_changed.emit(
@@ -891,8 +897,95 @@ class KioskRosNode(Node):
 
         threading.Thread(target=_save_worker, daemon=True).start()
 
+    def _resolve_start_pose(self) -> dict[str, float]:
+        """Tìm tọa độ xuất phát từ config/locations.yaml (ưu tiên 'khoihanh')."""
+        ws_root = Path(__file__).resolve().parents[4]
+        candidates = [
+            ws_root / "config" / "locations.yaml",
+            Path.home() / "ros2_ws" / "config" / "locations.yaml",
+            Path("/home/a/ros2_ws/config/locations.yaml"),
+            Path("/home/orin/ros2_ws/config/locations.yaml"),
+        ]
+        for p in candidates:
+            if p.is_file():
+                try:
+                    with p.open("r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    if "khoihanh" in data:
+                        kh = data["khoihanh"]
+                        return {
+                            "x": float(kh.get("x", 0.0)),
+                            "y": float(kh.get("y", 0.0)),
+                            "yaw": float(kh.get("yaw", 0.0)),
+                        }
+                    if data:
+                        first_val = next(iter(data.values()))
+                        if isinstance(first_val, dict) and "x" in first_val:
+                            return {
+                                "x": float(first_val.get("x", 0.0)),
+                                "y": float(first_val.get("y", 0.0)),
+                                "yaw": float(first_val.get("yaw", 0.0)),
+                            }
+                except Exception:
+                    pass
+        return {"x": 0.0, "y": 0.0, "yaw": 0.0}
+
+    def publish_initial_pose(
+        self,
+        x: float | None = None,
+        y: float | None = None,
+        yaw: float | None = None,
+    ) -> None:
+        """Phát tọa độ /initialpose lên AMCL để định vị xe ngay lập tức."""
+        if x is None or y is None or yaw is None:
+            pose = self._resolve_start_pose()
+            x = pose.get("x", 0.0)
+            y = pose.get("y", 0.0)
+            yaw = pose.get("yaw", 0.0)
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+
+        msg.pose.pose.orientation.z = math.sin(float(yaw) / 2.0)
+        msg.pose.pose.orientation.w = math.cos(float(yaw) / 2.0)
+
+        cov = [0.0] * 36
+        cov[0] = 0.25
+        cov[7] = 0.25
+        cov[35] = 0.0685
+        msg.pose.covariance = cov
+
+        self._initial_pose_pub.publish(msg)
+        self.get_logger().info(
+            f"[INITIAL POSE] Đã phát /initialpose: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} rad"
+        )
+        self.signals.command_status_changed.emit(
+            "success",
+            f"📍 Đã định vị robot tại ({x:.2f}, {y:.2f})",
+        )
+
+    def schedule_auto_initial_pose(self, delay_sec: float = 3.5) -> None:
+        """Tự động phát /initialpose sau khi Nav2/AMCL đã nạp xong bản đồ."""
+        def _pose_worker():
+            time.sleep(delay_sec)
+            for attempt in range(1, 4):
+                try:
+                    self.publish_initial_pose()
+                    self.get_logger().info(f"[AUTO INITIAL POSE] Lần {attempt}/3: Thả robot thành công.")
+                except Exception as exc:
+                    self.get_logger().warn(f"[AUTO INITIAL POSE] Lỗi lần {attempt}: {exc}")
+                time.sleep(1.0)
+            time.sleep(1.0)
+            self.reload_route()
+
+        threading.Thread(target=_pose_worker, daemon=True).start()
+
     def apply_localization_map(self, map_yaml_path: str, backend: str = "amcl") -> None:
-        """Lưu cấu hình và khởi chạy chế độ định vị với bản đồ được chọn."""
+        """Lưu cấu hình và khởi chạy chế độ định vị với bản đồ được chọn, tự bật Backend & thả robot."""
         self._selected_map_yaml = map_yaml_path
         self._selected_backend = backend
         self.get_logger().info(
@@ -923,8 +1016,19 @@ class KioskRosNode(Node):
                     text=True,
                     preexec_fn=os.setsid,
                 )
+                self._layer_procs["layer2"] = self._localization_proc
+                self._layer_procs["layer_navigation"] = self._localization_proc
+                self._emit_layer_status_snapshot()
             except Exception as exc:
                 self.get_logger().error(f"[KIOSK LOCALIZATION] Lỗi: {exc}")
+
+            # 1. Tự động bật Backend (Layer 5) nếu chưa chạy
+            if not self.is_layer_running("layer5"):
+                self.get_logger().info("[KIOSK LOCALIZATION] Tự động bật Backend (Layer 5)...")
+                self.start_layer("layer5")
+
+            # 2. Tự động thả robot vào vị trí ban đầu cho AMCL
+            self.schedule_auto_initial_pose(delay_sec=3.5)
 
         threading.Thread(target=_loc_worker, daemon=True).start()
 
@@ -1064,15 +1168,74 @@ class KioskRosNode(Node):
         self.signals.system_telemetry_changed.emit(snap)
 
         # Layer states
-        layer_states = {
-            "layer1": bool(self._layer_procs.get("layer1") and self._layer_procs["layer1"].poll() is None),
-            "layer2": bool(self._localization_proc and self._localization_proc.poll() is None)
-            or bool(self._slam_proc and self._slam_proc.poll() is None),
-            "layer3": bool(self._layer_procs.get("layer3") and self._layer_procs["layer3"].poll() is None),
-            "layer4": bool(self._layer_procs.get("layer4") and self._layer_procs["layer4"].poll() is None),
-            "layer5": bool(self._layer_procs.get("layer5") and self._layer_procs["layer5"].poll() is None),
+        self._emit_layer_status_snapshot()
+
+    def _normalize_layer_key(self, layer_key: str) -> str:
+        """Chuẩn hóa khóa tầng tiến trình (hỗ trợ cả key ngắn 'layer1' và semantic 'layer_hardware')."""
+        k = (layer_key or "").strip().lower()
+        if k in ("layer1", "layer_hardware", "hardware"):
+            return "layer1"
+        if k in ("layer2", "layer_navigation", "navigation", "nav2"):
+            return "layer2"
+        if k in ("layer3", "layer_slam", "slam"):
+            return "layer3"
+        if k in ("layer4", "layer_perception", "perception", "ai"):
+            return "layer4"
+        if k in ("layer5", "layer_backend", "backend", "layer_voice_interaction", "voice"):
+            return "layer5"
+        return k
+
+    def is_layer_running(self, layer_key: str) -> bool:
+        """Kiểm tra xem tầng tiến trình có đang chạy thực sự hay không."""
+        norm = self._normalize_layer_key(layer_key)
+        if norm == "layer1":
+            p = self._layer_procs.get("layer1") or self._layer_procs.get("layer_hardware")
+            return bool(p and p.poll() is None)
+        elif norm == "layer2":
+            p = (self._layer_procs.get("layer2")
+                 or self._layer_procs.get("layer_navigation")
+                 or self._localization_proc)
+            return bool(p and p.poll() is None)
+        elif norm == "layer3":
+            p = (self._layer_procs.get("layer3")
+                 or self._layer_procs.get("layer_slam")
+                 or self._slam_proc)
+            return bool(p and p.poll() is None)
+        elif norm == "layer4":
+            p = self._layer_procs.get("layer4") or self._layer_procs.get("layer_perception")
+            return bool(p and p.poll() is None)
+        elif norm == "layer5":
+            p = (self._layer_procs.get("layer5")
+                 or self._layer_procs.get("layer_backend")
+                 or self._layer_procs.get("layer_voice_interaction"))
+            return bool(p and p.poll() is None)
+        p = self._layer_procs.get(layer_key)
+        return bool(p and p.poll() is None)
+
+    def _get_layer_status_dict(self) -> dict[str, bool]:
+        """Tạo từ điển trạng thái chứa đầy đủ cả key đánh số và key ngữ nghĩa."""
+        l1 = self.is_layer_running("layer1")
+        l2 = self.is_layer_running("layer2")
+        l3 = self.is_layer_running("layer3")
+        l4 = self.is_layer_running("layer4")
+        l5 = self.is_layer_running("layer5")
+        return {
+            "layer1": l1,
+            "layer2": l2,
+            "layer3": l3,
+            "layer4": l4,
+            "layer5": l5,
+            "layer_hardware": l1,
+            "layer_navigation": l2,
+            "layer_slam": l3,
+            "layer_perception": l4,
+            "layer_voice_interaction": l5,
+            "layer_backend": l5,
         }
-        self.signals.layer_status_changed.emit(layer_states)
+
+    def _emit_layer_status_snapshot(self) -> None:
+        """Phát tín hiệu trạng thái tức thời của các layer tới giao diện."""
+        self.signals.layer_status_changed.emit(self._get_layer_status_dict())
 
     def test_actuator(self, test_name: str) -> None:
         """Kích hoạt kiểm tra nhanh cơ cấu chấp hành."""
@@ -1118,19 +1281,25 @@ class KioskRosNode(Node):
             threading.Thread(target=_jog_worker, daemon=True).start()
 
     def start_layer(self, layer_key: str) -> None:
-        """Khởi động tầng tiến trình tương ứng."""
-        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key}")
+        """Khởi động tầng tiến trình tương ứng (tự động chuẩn hóa key và auto-bật backend nếu cần)."""
+        norm_key = self._normalize_layer_key(layer_key)
+        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (canonical={norm_key})")
         cmd = ""
         prefix = self._get_ws_prefix()
-        if layer_key == "layer1":
+        if norm_key == "layer1":
             cmd = prefix + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false"
-        elif layer_key == "layer2":
-            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false"
-        elif layer_key == "layer3":
+        elif norm_key == "layer2":
+            map_arg = f"map_yaml:={shlex.quote(self._selected_map_yaml)} " if self._selected_map_yaml else ""
+            cmd = prefix + f"ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:={shlex.quote(self._selected_backend)} use_sim_time:=false {map_arg}use_rviz:=false"
+            # Tự động bật Backend (Layer 5) khi bật Layer 2
+            if not self.is_layer_running("layer5"):
+                self.start_layer("layer5")
+            self.schedule_auto_initial_pose()
+        elif norm_key == "layer3":
             cmd = prefix + "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false"
-        elif layer_key == "layer4":
+        elif norm_key == "layer4":
             cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py"
-        elif layer_key == "layer5":
+        elif norm_key == "layer5":
             cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
         if cmd:
@@ -1143,7 +1312,11 @@ class KioskRosNode(Node):
                         text=True,
                         preexec_fn=os.setsid,
                     )
+                    self._layer_procs[norm_key] = proc
                     self._layer_procs[layer_key] = proc
+                    if norm_key == "layer2":
+                        self._localization_proc = proc
+                    self._emit_layer_status_snapshot()
                 except Exception as exc:
                     self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
 
@@ -1151,9 +1324,12 @@ class KioskRosNode(Node):
 
     def stop_layer(self, layer_key: str) -> None:
         """Dừng tầng tiến trình tương ứng."""
-        proc = self._layer_procs.get(layer_key)
+        norm_key = self._normalize_layer_key(layer_key)
+        self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key} (canonical={norm_key})")
+        proc = self._layer_procs.get(norm_key) or self._layer_procs.get(layer_key)
+        if norm_key == "layer2" and self._localization_proc and self._localization_proc.poll() is None:
+            proc = self._localization_proc
         if proc and proc.poll() is None:
-            self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
             try:
                 pgid = os.getpgid(proc.pid)
                 os.killpg(pgid, signal.SIGINT)
@@ -1162,6 +1338,11 @@ class KioskRosNode(Node):
                     os.killpg(pgid, signal.SIGKILL)
             except Exception:
                 pass
+        self._layer_procs[norm_key] = None
+        self._layer_procs[layer_key] = None
+        if norm_key == "layer2":
+            self._localization_proc = None
+        self._emit_layer_status_snapshot()
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền."""
