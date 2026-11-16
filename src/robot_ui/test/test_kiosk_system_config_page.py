@@ -169,3 +169,50 @@ def test_system_config_preflight_and_icons(app):
         assert "[ĐẠT]" in lbl.text() or "[CHƯA ĐẠT]" in lbl.text()
 
     page.close()
+
+
+def test_ros2_system_live_layer_log_console(app):
+    """Test live layer logging and filtering in ROS2SystemDetailScreen."""
+    page = SystemConfigPage()
+    ros2_screen = page.ros2_screen
+
+    assert hasattr(ros2_screen, "txt_layer_log")
+    assert hasattr(ros2_screen, "_filter_buttons")
+
+    # 1. Append log for Layer 1
+    page.append_layer_log("layer1", "Hoverboard connected on /dev/ttyUSB0")
+    assert "Hoverboard connected" in ros2_screen.txt_layer_log.toPlainText()
+    assert "[LAYER1]" in ros2_screen.txt_layer_log.toPlainText()
+
+    # 2. Append log for Layer 2
+    page.append_layer_log("layer2", "AMCL localization node initialized")
+    assert "AMCL localization node" in ros2_screen.txt_layer_log.toPlainText()
+
+    # 3. Filter by Layer 1 only
+    ros2_screen._set_log_filter("layer1")
+    assert ros2_screen._current_filter == "layer1"
+    content_l1 = ros2_screen.txt_layer_log.toPlainText()
+    assert "Hoverboard connected" in content_l1
+    assert "AMCL localization node" not in content_l1
+
+    # 4. Filter by Layer 2 only
+    ros2_screen._set_log_filter("layer2")
+    assert ros2_screen._current_filter == "layer2"
+    content_l2 = ros2_screen.txt_layer_log.toPlainText()
+    assert "AMCL localization node" in content_l2
+    assert "Hoverboard connected" not in content_l2
+
+    # 5. Clear current log
+    ros2_screen._clear_current_log()
+    assert "Đã xóa" in ros2_screen.txt_layer_log.toPlainText()
+
+    # 6. Switch back to All
+    ros2_screen._set_log_filter("all")
+    assert ros2_screen._current_filter == "all"
+
+    # 7. Auto-scroll toggle
+    initial_scroll = ros2_screen._auto_scroll
+    ros2_screen._toggle_autoscroll()
+    assert ros2_screen._auto_scroll != initial_scroll
+
+    page.close()

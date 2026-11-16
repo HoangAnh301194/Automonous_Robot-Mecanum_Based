@@ -650,6 +650,7 @@ class KioskWindow(QMainWindow):
         signals.system_telemetry_changed.connect(self.system_config_page.update_sensor_telemetry)
         signals.system_telemetry_changed.connect(self.detection_debug_page.update_ai_telemetry)
         signals.layer_status_changed.connect(self.system_config_page.update_layer_status)
+        signals.layer_log_received.connect(self.system_config_page.append_layer_log)
         signals.actuator_test_result.connect(
             lambda name, ok, msg: self.system_config_page.append_console_log(
                 f"[{name.upper()}] {'THÀNH CÔNG' if ok else 'THẤT BẠI'}: {msg}"

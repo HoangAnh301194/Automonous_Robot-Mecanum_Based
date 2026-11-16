@@ -1228,12 +1228,19 @@ class KioskRosNode(Node):
         if cmd:
             def _launch():
                 try:
-                    log_file = open(f"/tmp/ros_layer_{launch_key}.log", "a", encoding="utf-8")
+                    log_path = f"/tmp/ros_layer_{launch_key}.log"
+                    self.signals.layer_log_received.emit(
+                        launch_key, f"--- BẮT ĐẦU KHỞI ĐỘNG [{launch_key.upper()}] ---"
+                    )
+                    self.signals.layer_log_received.emit(
+                        launch_key, f"Lệnh thực thi: {cmd}"
+                    )
                     proc = subprocess.Popen(
                         ["bash", "-c", cmd],
-                        stdout=log_file,
+                        stdout=subprocess.PIPE,
                         stderr=subprocess.STDOUT,
                         text=True,
+                        bufsize=1,
                         preexec_fn=os.setsid,
                     )
                     self._layer_procs[launch_key] = proc
@@ -1241,8 +1248,38 @@ class KioskRosNode(Node):
                     alt_key = self.LAYER_ALIAS_MAP.get(layer_key)
                     if alt_key:
                         self._layer_procs[alt_key] = proc
+
+                    def _read_layer_stream(p=proc, key=launch_key, path=log_path):
+                        try:
+                            with open(path, "a", encoding="utf-8") as f_out:
+                                if p.stdout:
+                                    for line in iter(p.stdout.readline, ""):
+                                        if not line:
+                                            break
+                                        clean_line = line.rstrip()
+                                        f_out.write(clean_line + "\n")
+                                        f_out.flush()
+                                        self.signals.layer_log_received.emit(key, clean_line)
+                        except Exception:
+                            pass
+                        finally:
+                            try:
+                                if p.stdout:
+                                    p.stdout.close()
+                                p.wait(timeout=2.0)
+                            except Exception:
+                                pass
+                            exit_code = p.poll()
+                            self.signals.layer_log_received.emit(
+                                key, f"--- TIẾN TRÌNH [{key.upper()}] ĐÃ DỪNG (Mã thoát: {exit_code}) ---"
+                            )
+
+                    threading.Thread(target=_read_layer_stream, daemon=True).start()
                 except Exception as exc:
                     self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
+                    self.signals.layer_log_received.emit(
+                        launch_key, f"[LỖI KHỞI ĐỘNG]: {exc}"
+                    )
 
             threading.Thread(target=_launch, daemon=True).start()
 
@@ -1250,8 +1287,11 @@ class KioskRosNode(Node):
         """Dừng tầng tiến trình tương ứng (kiểm tra cả alias)."""
         alt_key = self.LAYER_ALIAS_MAP.get(layer_key, "")
         proc = self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
+        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        launch_key = norm_key if norm_key.startswith("layer") and norm_key[5:].isdigit() else layer_key
         if proc and proc.poll() is None:
             self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
+            self.signals.layer_log_received.emit(launch_key, f"Đang gửi tín hiệu dừng tới {layer_key}...")
             try:
                 pgid = os.getpgid(proc.pid)
                 os.killpg(pgid, signal.SIGINT)
@@ -1264,6 +1304,7 @@ class KioskRosNode(Node):
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
+        self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
             "robot_state_publisher",
             "scan_to_scan_filter_chain",
@@ -1303,4 +1344,5 @@ class KioskRosNode(Node):
                 subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=1.0)
             except Exception:
                 pass
+        self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
 

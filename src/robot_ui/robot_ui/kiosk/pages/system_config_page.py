@@ -559,6 +559,11 @@ class SystemConfigPage(QWidget):
         """Append log to diagnostics console output."""
         self.diagnostics_screen.append_console_log(text)
 
+    def append_layer_log(self, layer_key: str, text: str) -> None:
+        """Forward real-time layer output to ROS2SystemDetailScreen."""
+        if hasattr(self, "ros2_screen") and self.ros2_screen:
+            self.ros2_screen.append_layer_log(layer_key, text)
+
     def update_fullscreen_button(self, is_fullscreen: bool) -> None:
         """Update single button icon and tooltip alternating between fullscreen and windowed mode."""
         if is_fullscreen:

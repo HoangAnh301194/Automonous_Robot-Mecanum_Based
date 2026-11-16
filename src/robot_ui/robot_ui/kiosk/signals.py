@@ -37,6 +37,7 @@ class KioskSignals(QObject):
     system_telemetry_changed = pyqtSignal(dict)           # Cảm biến, TF, Pin 36V, AI
     host_telemetry_changed = pyqtSignal(dict)             # Jetson CPU, GPU, RAM, Disk, IP, WiFi
     layer_status_changed = pyqtSignal(dict)               # Trạng thái các tầng tiến trình
+    layer_log_received = pyqtSignal(str, str)             # (layer_key, log_line)
     preflight_step_updated = pyqtSignal(str, bool, str)   # (step_key, is_ok, message)
     actuator_test_result = pyqtSignal(str, bool, str)     # (test_key, is_ok, message)
 

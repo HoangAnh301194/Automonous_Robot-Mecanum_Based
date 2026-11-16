@@ -9,15 +9,18 @@ Organizes:
 from __future__ import annotations
 
 import glob
+import time
 from typing import Any, Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
     QScrollArea,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -49,6 +52,18 @@ class ROS2SystemDetailScreen(QWidget):
         self.setObjectName("ros2SystemDetailScreen")
         self.icons = icons or {}
         self.layer_rows: dict[str, dict[str, Any]] = {}
+        self._logs_by_layer: dict[str, list[str]] = {
+            "all": [],
+            "layer1": [],
+            "layer2": [],
+            "layer3": [],
+            "layer4": [],
+            "layer5": [],
+            "system": [],
+        }
+        self._current_filter: str = "all"
+        self._auto_scroll: bool = True
+        self._filter_buttons: dict[str, QPushButton] = {}
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -159,7 +174,86 @@ class ROS2SystemDetailScreen(QWidget):
 
         c_layout.addWidget(card_layers)
 
-        # B. THIẾT BỊ NGOẠI VI & CỔNG SERIAL
+        # B. NHẬT KÝ TIẾN TRÌNH LAYER (LIVE LOG CONSOLE)
+        card_log, log_layout = create_section_card("NHẬT KÝ TIẾN TRÌNH LAYER (LIVE LOG CONSOLE)", "#10B981")
+
+        # Filter and control toolbar
+        filter_bar = QHBoxLayout()
+        filter_bar.setSpacing(6)
+
+        filters = [
+            ("all", "Tất Cả"),
+            ("layer1", "L1: Phần Cứng"),
+            ("layer2", "L2: Điều Hướng"),
+            ("layer3", "L3: SLAM"),
+            ("layer4", "L4: AI Vision"),
+            ("layer5", "L5: Giọng Nói"),
+        ]
+
+        for f_key, f_label in filters:
+            btn_f = QPushButton(f_label)
+            btn_f.setFixedHeight(28)
+            btn_f.setCursor(Qt.PointingHandCursor)
+            btn_f.clicked.connect(lambda _, k=f_key: self._set_log_filter(k))
+            filter_bar.addWidget(btn_f)
+            self._filter_buttons[f_key] = btn_f
+
+        filter_bar.addStretch()
+
+        self.btn_autoscroll = QPushButton("Cuộn: BẬT")
+        self.btn_autoscroll.setFixedHeight(28)
+        self.btn_autoscroll.setCursor(Qt.PointingHandCursor)
+        self.btn_autoscroll.clicked.connect(self._toggle_autoscroll)
+        self._update_autoscroll_style()
+        filter_bar.addWidget(self.btn_autoscroll)
+
+        btn_clear = QPushButton("Xóa Log")
+        btn_clear.setFixedHeight(28)
+        btn_clear.setCursor(Qt.PointingHandCursor)
+        btn_clear.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                color: {KioskTheme.COLOR_TEXT_MUTED};
+                border-radius: 4px;
+                padding: 0 10px;
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                color: #ffffff;
+                background-color: {KioskTheme.COLOR_CRITICAL_BG};
+                border-color: {KioskTheme.COLOR_CRITICAL};
+            }}
+        """)
+        btn_clear.clicked.connect(self._clear_current_log)
+        filter_bar.addWidget(btn_clear)
+
+        log_layout.addLayout(filter_bar)
+
+        self.txt_layer_log = QTextEdit()
+        self.txt_layer_log.setReadOnly(True)
+        self.txt_layer_log.setMinimumHeight(150)
+        self.txt_layer_log.setMaximumHeight(230)
+        self.txt_layer_log.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: #06090e;
+                color: #10b981;
+                font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
+                font-size: 11px;
+                line-height: 1.4;
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+        """)
+        self.txt_layer_log.setText("[CONSOLE] Hệ thống sẵn sàng. Bấm BẬT ở một Layer để xem luồng khởi động tiến trình...")
+        log_layout.addWidget(self.txt_layer_log)
+
+        c_layout.addWidget(card_log)
+        self._update_filter_button_styles()
+
+        # C. THIẾT BỊ NGOẠI VI & CỔNG SERIAL
         card_ports, port_layout = create_section_card("THIẾT BỊ NGOẠI VI & ĐƯỜNG TRUYỀN SERIAL", "#38BDF8")
         ports_row = QHBoxLayout()
         ports_row.setSpacing(10)
@@ -263,6 +357,124 @@ class ROS2SystemDetailScreen(QWidget):
         total_layers = len(self.layer_rows)
         header_st = HealthStatus.RUNNING if active_count > 0 else HealthStatus.STOPPED
         self.header.set_status(f"{active_count}/{total_layers} ACTIVE", header_st)
+
+    def _normalize_layer_key(self, raw_key: str) -> str:
+        k = raw_key.lower().strip()
+        if k in self.LAYER_NAME_MAP:
+            return k
+        rev_map = {v: k for k, v in self.LAYER_NAME_MAP.items()}
+        if k in rev_map:
+            return rev_map[k]
+        if k.startswith("layer") and k[5:].isdigit():
+            return k
+        return "all" if k in ("all", "system") else k
+
+    def append_layer_log(self, layer_key: str, text: str) -> None:
+        """Thêm dòng log mới từ tiến trình Layer và hiển thị lên console."""
+        norm_key = self._normalize_layer_key(layer_key)
+        now_str = time.strftime("%H:%M:%S")
+        prefix = norm_key.upper() if norm_key != "all" else "SYSTEM"
+        formatted_line = f"[{now_str}] [{prefix}] {text}"
+
+        for target_key in ("all", norm_key):
+            if target_key not in self._logs_by_layer:
+                self._logs_by_layer[target_key] = []
+            buf = self._logs_by_layer[target_key]
+            buf.append(formatted_line)
+            if len(buf) > 300:
+                buf.pop(0)
+
+        if self._current_filter in ("all", norm_key):
+            self.txt_layer_log.append(formatted_line)
+            if self._auto_scroll:
+                cursor = self.txt_layer_log.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                self.txt_layer_log.setTextCursor(cursor)
+
+    def _set_log_filter(self, filter_key: str) -> None:
+        self._current_filter = filter_key
+        self._update_filter_button_styles()
+        logs = self._logs_by_layer.get(filter_key, [])
+        if not logs:
+            self.txt_layer_log.setText(f"[CONSOLE] Chưa có log cho {filter_key.upper()}.")
+        else:
+            self.txt_layer_log.setPlainText("\n".join(logs))
+            if self._auto_scroll:
+                cursor = self.txt_layer_log.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                self.txt_layer_log.setTextCursor(cursor)
+
+    def _update_filter_button_styles(self) -> None:
+        for k, btn in self._filter_buttons.items():
+            if k == self._current_filter:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: #064e3b;
+                        border: 1px solid #10b981;
+                        color: #10b981;
+                        border-radius: 4px;
+                        font-weight: 700;
+                        font-size: 11px;
+                        padding: 0 8px;
+                    }}
+                """)
+            else:
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                        border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                        color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                        border-radius: 4px;
+                        font-weight: 500;
+                        font-size: 11px;
+                        padding: 0 8px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {KioskTheme.COLOR_SURFACE_ACTIVE};
+                        border-color: {KioskTheme.COLOR_ACCENT};
+                    }}
+                """)
+
+    def _toggle_autoscroll(self) -> None:
+        self._auto_scroll = not self._auto_scroll
+        self._update_autoscroll_style()
+
+    def _update_autoscroll_style(self) -> None:
+        if self._auto_scroll:
+            self.btn_autoscroll.setText("Cuộn: BẬT")
+            self.btn_autoscroll.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #064e3b;
+                    border: 1px solid #10b981;
+                    color: #10b981;
+                    border-radius: 4px;
+                    padding: 0 8px;
+                    font-size: 11px;
+                    font-weight: 700;
+                }}
+            """)
+        else:
+            self.btn_autoscroll.setText("Cuộn: TẮT")
+            self.btn_autoscroll.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                    border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                    color: {KioskTheme.COLOR_TEXT_MUTED};
+                    border-radius: 4px;
+                    padding: 0 8px;
+                    font-size: 11px;
+                    font-weight: 600;
+                }}
+            """)
+
+    def _clear_current_log(self) -> None:
+        if self._current_filter == "all":
+            for k in self._logs_by_layer:
+                self._logs_by_layer[k].clear()
+        else:
+            if self._current_filter in self._logs_by_layer:
+                self._logs_by_layer[self._current_filter].clear()
+        self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
 
     def _on_rescan_ports(self) -> None:
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
