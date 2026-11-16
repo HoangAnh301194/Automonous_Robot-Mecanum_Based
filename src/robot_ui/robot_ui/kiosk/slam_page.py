@@ -1297,6 +1297,26 @@ class SlamMapPage(QWidget):
             self.fullscreen_button.setText("🗖")
             self.fullscreen_button.setToolTip("Toàn màn hình (F11)")
 
+    def set_map(self, map_data: dict[str, Any]) -> None:
+        """Cập nhật dữ liệu bản đồ thời gian thực lên live map widget."""
+        if hasattr(self, "live_map_widget") and self.live_map_widget is not None:
+            self.live_map_widget.set_map(map_data)
+
+    def set_pose(self, pose: dict[str, Any]) -> None:
+        """Cập nhật vị trí robot lên live map widget."""
+        if hasattr(self, "live_map_widget") and self.live_map_widget is not None:
+            self.live_map_widget.set_pose(pose)
+
+    def set_scan_points(self, points: list[tuple[float, float]]) -> None:
+        """Cập nhật các điểm laser LiDAR lên live map widget."""
+        if hasattr(self, "live_map_widget") and self.live_map_widget is not None:
+            self.live_map_widget.set_scan_points(points)
+
+    def set_obstacle_points(self, side: str, points: list[tuple[float, float]]) -> None:
+        """Cập nhật các điểm chướng ngại vật từ camera độ sâu lên live map widget."""
+        if hasattr(self, "live_map_widget") and self.live_map_widget is not None:
+            self.live_map_widget.set_obstacle_points(side, points)
+
     def set_slam_status(self, is_running: bool, message: str = "") -> None:
         self._is_slam_running = is_running
         self.btn_start_slam.setEnabled(not is_running)

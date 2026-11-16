@@ -835,26 +835,50 @@ class KioskRosNode(Node):
         return cmd + " && "
 
     def start_slam(self) -> None:
-        """Khởi chạy node SLAM mapping qua launch file real_slam.launch.py."""
+        """Khởi chạy node SLAM mapping qua launch file real_slam.launch.py.
+
+        Tự động kiểm tra và khởi chạy Layer 1 (phần cứng LiDAR & Odometry) nếu chưa chạy,
+        đảm bảo slam_toolbox có dữ liệu /scan và TF để xây dựng map (chuẩn hóa theo gui_v3).
+        """
         if self._slam_proc and self._slam_proc.poll() is None:
             self.get_logger().info("[KIOSK SLAM] Tiến trình SLAM đang chạy rồi.")
             self.signals.slam_status_changed.emit(True, "SLAM đang chạy")
             return
 
-        cmd = self._get_ws_prefix() + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
-        self.get_logger().info(f"[KIOSK SLAM] START: {cmd}")
-        try:
-            self._slam_proc = subprocess.Popen(
-                ["bash", "-c", cmd],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                preexec_fn=os.setsid,
-            )
-            self.signals.slam_status_changed.emit(True, "Đã khởi động SLAM Mapping")
-        except Exception as exc:
-            self.get_logger().error(f"[KIOSK SLAM] Lỗi khởi chạy SLAM: {exc}")
-            self.signals.slam_status_changed.emit(False, f"Lỗi khởi động SLAM: {exc}")
+        def _slam_startup_worker() -> None:
+            # 1. Tự động kiểm tra và kích hoạt Layer 1 nếu chưa chạy
+            l1_proc = self._layer_procs.get("layer1")
+            if not l1_proc or l1_proc.poll() is not None:
+                self.get_logger().info(
+                    "[KIOSK SLAM] Layer 1 (Hardware) chưa chạy. Tự động khởi động Layer 1 trước..."
+                )
+                self.signals.slam_status_changed.emit(True, "Đang khởi động phần cứng LiDAR & Odometry...")
+                self.start_layer("layer1")
+                time.sleep(1.5)
+
+            cmd = self._get_ws_prefix() + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+            self.get_logger().info(f"[KIOSK SLAM] START: {cmd}")
+            try:
+                log_path = "/tmp/ros_slam.log"
+                with open(log_path, "a", encoding="utf-8") as f_init:
+                    f_init.write(f"\n--- BẮT ĐẦU SLAM MAPPING ({time.strftime('%Y-%m-%d %H:%M:%S')}) ---\n")
+                    f_init.write(f"Lệnh: {cmd}\n")
+                    f_init.flush()
+
+                log_out = open(log_path, "a", encoding="utf-8")
+                self._slam_proc = subprocess.Popen(
+                    ["bash", "-c", cmd],
+                    stdout=log_out,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    preexec_fn=os.setsid,
+                )
+                self.signals.slam_status_changed.emit(True, "Đã khởi động SLAM Mapping")
+            except Exception as exc:
+                self.get_logger().error(f"[KIOSK SLAM] Lỗi khởi chạy SLAM: {exc}")
+                self.signals.slam_status_changed.emit(False, f"Lỗi khởi động SLAM: {exc}")
+
+        threading.Thread(target=_slam_startup_worker, daemon=True).start()
 
     def stop_slam(self) -> None:
         """Dừng tiến trình SLAM một cách an toàn."""
@@ -1215,7 +1239,17 @@ class KioskRosNode(Node):
         cmd = ""
         prefix = self._get_ws_prefix()
         if launch_key == "layer1":
-            cmd = prefix + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false"
+            from robot_ui.kiosk.serial_resolver import detect_serial_ports
+
+            hb_port, lidar_port, detect_method = detect_serial_ports()
+            self.get_logger().info(
+                f"[LAYER 1] Auto-detected serial ports ({detect_method}): Hoverboard={hb_port}, LiDAR={lidar_port}"
+            )
+            cmd = (
+                prefix
+                + f"ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
+            )
         elif launch_key == "layer2":
             cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false"
         elif launch_key == "layer3":

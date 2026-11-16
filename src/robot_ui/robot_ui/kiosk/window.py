@@ -668,7 +668,9 @@ class KioskWindow(QMainWindow):
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
         signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
+        signals.scan_points_changed.connect(self.slam_page.set_scan_points)
         signals.obstacle_points_changed.connect(self.navigation_page.set_obstacle_points)
+        signals.obstacle_points_changed.connect(self.slam_page.set_obstacle_points)
         signals.service_popup_cmd.connect(self._on_service_popup_cmd)
         # LLM signals
         signals.llm_response_ready.connect(self._receive_llm_response)
