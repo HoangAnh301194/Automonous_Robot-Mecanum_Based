@@ -19,6 +19,8 @@ from nav_msgs.msg import OccupancyGrid, Odometry, Path as NavPath
 from nav2_msgs.action import NavigateToPose
 from collections import deque
 import tf2_ros
+import rclpy
+import rclpy.time
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.qos import (
@@ -156,6 +158,9 @@ class KioskRosNode(Node):
         self._people_count = 0
         self._closest_person_dist: float | None = None
         self._layer_procs: dict[str, subprocess.Popen] = {}
+        self._force_swap_ports: bool = False
+        self._selected_operation_mode: str = "slam_mapping"
+        self._selected_odom_source: str = "hoverboard"
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -841,23 +846,72 @@ class KioskRosNode(Node):
                 dedup.append(p)
         return dedup
 
+    @staticmethod
+    def _is_esp32_port(port: str, baudrate: int = 115200, timeout: float = 0.1) -> bool:
+        """Thăm dò dữ liệu serial thực tế giống hệt gui_v3 để nhận diện ESP32/Hoverboard."""
+        try:
+            import serial
+        except ImportError:
+            return False
+        ser = None
+        try:
+            ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
+            ser.reset_input_buffer()
+            start_time = time.time()
+            while time.time() - start_time < 0.6:
+                raw = ser.read(64)
+                if not raw:
+                    continue
+                if b"\xcd\xab" in raw or b"\xab\xcd" in raw:
+                    return True
+                if b"ets Jun" in raw or b"rst:0x" in raw or b"boot:" in raw:
+                    return True
+                if b"V:" in raw or b"E," in raw:
+                    return True
+        except Exception:
+            return False
+        finally:
+            if ser is not None:
+                try:
+                    ser.close()
+                except Exception:
+                    pass
+        return False
+
     def _detect_esp_lidar_ports(self) -> tuple[str, str, str]:
+        """Tự động phát hiện cổng ESP32 và LiDAR chuẩn xác như gui_v3."""
         esp_alias, lidar_alias = "/dev/esp32", "/dev/lidar"
         if os.path.exists(esp_alias) and os.path.exists(lidar_alias):
-            return esp_alias, lidar_alias, "udev_alias"
+            esp_p, lidar_p = esp_alias, lidar_alias
+            if self._force_swap_ports:
+                return lidar_p, esp_p, "swap_override"
+            return esp_p, lidar_p, "udev_alias"
+
         ports = self._list_serial_ports()
         if not ports:
-            return "/dev/ttyUSB0", "/dev/ttyUSB1", "fallback_defaults"
+            esp_p, lidar_p = "/dev/ttyUSB0", "/dev/ttyUSB1"
+            if self._force_swap_ports:
+                return lidar_p, esp_p, "swap_override"
+            return esp_p, lidar_p, "fallback_defaults"
 
         esp_port, lidar_port = None, None
         for port in ports:
             key = os.path.basename(port).lower()
-            if lidar_port is None and ("rplidar" in key or "slamtec" in key or "lidar" in key):
+            # SLAMTEC RPLIDAR trên Jetson dùng chip Silicon Labs CP2102
+            if lidar_port is None and (
+                "rplidar" in key or "slamtec" in key or "lidar" in key or "cp210" in key or "silicon_labs" in key
+            ):
                 lidar_port = port
-            if esp_port is None and ("esp32" in key or "esp" in key or "cp210" in key):
+            if esp_port is None and ("esp32" in key or "esp" in key):
                 esp_port = port
 
-        # If esp_port not identified, choose first available
+        # Thăm dò byte thực tế nếu chưa phát hiện bằng tên udev (giống gui_v3)
+        if esp_port is None:
+            for port in ports:
+                if self._is_esp32_port(port):
+                    esp_port = port
+                    break
+
         if esp_port is None:
             for port in ports:
                 if port.endswith("ttyUSB0") or port.endswith("ttyACM0"):
@@ -866,7 +920,7 @@ class KioskRosNode(Node):
         if esp_port is None:
             esp_port = ports[0]
 
-        # Ensure lidar_port is a DIFFERENT physical hardware device
+        # Đảm bảo lidar_port trỏ tới thiết bị vật lý KHÁC esp_port
         esp_real = os.path.realpath(esp_port)
         if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
             lidar_port = None
@@ -875,11 +929,26 @@ class KioskRosNode(Node):
                     lidar_port = port
                     break
 
-        # Fallback if no separate lidar port exists
+        # Fallback nếu chỉ có 1 cổng
         if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
             lidar_port = "/dev/ttyUSB1" if esp_real != "/dev/ttyUSB1" else "/dev/ttyUSB0"
 
+        if self._force_swap_ports:
+            return lidar_port, esp_port, "swap_override"
+
         return esp_port, lidar_port, "scan"
+
+    def swap_serial_ports(self) -> tuple[str, str, str]:
+        """Hoán đổi vị trí giữa cổng Hoverboard/ESP32 và cổng LiDAR."""
+        self._force_swap_ports = not self._force_swap_ports
+        esp, lidar, src = self._detect_esp_lidar_ports()
+        self.get_logger().info(f"[SERIAL] Đảo cổng thành công: ESP={esp}, LiDAR={lidar} (nguồn: {src})")
+        self.signals.process_log_received.emit("SERIAL", f"[SERIAL] Đã đảo cổng cấu hình: ESP={esp}, LiDAR={lidar}")
+        return esp, lidar, src
+
+    def get_detected_ports(self) -> tuple[str, str, str]:
+        """Trả về tuple (esp_port, lidar_port, detect_src)."""
+        return self._detect_esp_lidar_ports()
 
     def start_slam(self) -> None:
         """Khởi chạy node SLAM mapping qua launch file real_slam.launch.py."""
@@ -1014,7 +1083,7 @@ class KioskRosNode(Node):
 
             cmd = (
                 self._get_ws_prefix()
-                + f"ros2 launch mo_hinh real_localization_nav2.launch.py "
+                + "ros2 launch mo_hinh real_localization_nav2.launch.py "
                 + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
                 + f"map_yaml:={shlex.quote(map_yaml_path)} use_rviz:=false"
             )
@@ -1315,7 +1384,7 @@ class KioskRosNode(Node):
             )
             cmd = (
                 prefix
-                + f"ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
                 + f"hoverboard_port:={shlex.quote(esp_port)} esp_port:={shlex.quote(esp_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif target_key == "layer_navigation":
@@ -1412,6 +1481,46 @@ class KioskRosNode(Node):
             self._slam_proc = None
             self.signals.slam_status_changed.emit(False, "Đã dừng SLAM Mapping")
 
+    def start_all_layers(self, mode: str = "slam_mapping", map_path: str = "", backend: str = "amcl") -> None:
+        """Khởi động toàn bộ hệ thống giống hệt nút Start All trong gui_v3."""
+        self.get_logger().info(f"[START ALL] Bắt đầu khởi động toàn bộ: mode={mode}, backend={backend}, map={map_path}")
+        self.signals.process_log_received.emit("SYSTEM", f"[START ALL] Bắt đầu quy trình khởi động toàn bộ (Mode: {mode})...")
+
+        if map_path:
+            self._selected_map_yaml = map_path
+        if backend:
+            self._selected_backend = backend
+
+        # Bước 1: Khởi động Layer 1 (Hardware / Odom)
+        self.start_layer("layer_hardware")
+
+        # Bước 2: Chờ 1200ms rồi tự động khởi động tiếp Layer 2 (giống gui_v3: QTimer.singleShot(1200, self._start_all_layer2))
+        def _start_layer2_delayed():
+            time.sleep(1.2)
+            clean_mode = mode.lower()
+            if "slam" in clean_mode or "mapping" in clean_mode:
+                self.get_logger().info("[START ALL] Bước 2: Tự động khởi động Layer 2 (SLAM Mapping)...")
+                self.signals.process_log_received.emit("SYSTEM", "[START ALL] Bước 2: Tự động khởi động Layer 2 (SLAM Mapping)...")
+                self.start_layer("layer_slam")
+            else:
+                self.get_logger().info(f"[START ALL] Bước 2: Tự động khởi động Layer 2 (Localization Nav2 - Backend: {self._selected_backend})...")
+                self.signals.process_log_received.emit("SYSTEM", f"[START ALL] Bước 2: Tự động khởi động Layer 2 (Localization Nav2 - Backend: {self._selected_backend})...")
+                self.start_layer("layer_navigation")
+
+        threading.Thread(target=_start_layer2_delayed, daemon=True).start()
+
+    def stop_all_layers(self) -> None:
+        """Dừng toàn bộ mọi tầng tiến trình giống nút Stop All trong gui_v3."""
+        self.get_logger().info("[STOP ALL] Yêu cầu dừng toàn bộ các tầng tiến trình...")
+        self.signals.process_log_received.emit("SYSTEM", "[STOP ALL] Đang dừng toàn bộ các tầng tiến trình...")
+        for key in list(self._layer_procs.keys()):
+            self.stop_layer(key)
+        self.stop_slam()
+        if self._localization_proc and self._localization_proc.poll() is None:
+            self._terminate_proc_group("layer_navigation", self._localization_proc)
+            self._localization_proc = None
+        self.signals.process_log_received.emit("SYSTEM", "[STOP ALL] Đã dừng toàn bộ tiến trình.")
+
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
@@ -1466,4 +1575,3 @@ class KioskRosNode(Node):
             except Exception:
                 pass
         self.signals.process_log_received.emit("EMERGENCY", "[EMERGENCY CLEANUP] Hoàn tất dọn dẹp các tiến trình.")
-

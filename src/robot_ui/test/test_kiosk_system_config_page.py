@@ -169,3 +169,65 @@ def test_system_config_preflight_and_icons(app):
         assert "[ĐẠT]" in lbl.text() or "[CHƯA ĐẠT]" in lbl.text()
 
     page.close()
+
+
+def test_ros2_system_gui_v3_master_controls(app):
+    missing = Path("/nonexistent-asset")
+    page = SystemConfigPage(home_icon=missing, back_icon=missing, emergency_icon=missing)
+    ros2_screen = page.ros2_screen
+
+    start_all_mock = MagicMock()
+    stop_all_mock = MagicMock()
+    swap_ports_mock = MagicMock()
+    rescan_ports_mock = MagicMock()
+
+    page.start_all_requested.connect(start_all_mock)
+    page.stop_all_requested.connect(stop_all_mock)
+    page.swap_ports_requested.connect(swap_ports_mock)
+    page.rescan_ports_requested.connect(rescan_ports_mock)
+
+    # 1. Mode selector tests
+    assert ros2_screen.cmb_operation_mode.count() == 2
+    # Default is SLAM Mapping: backend disabled, map selector hidden
+    assert not ros2_screen.cmb_backend.isEnabled()
+    assert ros2_screen.map_row_widget.isHidden()
+
+    # Switch to Localization Nav2
+    ros2_screen.cmb_operation_mode.setCurrentIndex(1)
+    assert ros2_screen.cmb_backend.isEnabled()
+    assert not ros2_screen.map_row_widget.isHidden()
+
+    # 2. Start All button
+    ros2_screen.btn_start_all.click()
+    assert start_all_mock.called
+    args = start_all_mock.call_args[0]
+    assert args[0] == "localization"
+
+    # Switch back to SLAM
+    ros2_screen.cmb_operation_mode.setCurrentIndex(0)
+    ros2_screen.btn_start_all.click()
+    args_slam = start_all_mock.call_args[0]
+    assert args_slam[0] == "slam_mapping"
+
+    # 3. Stop All button
+    ros2_screen.btn_stop_all.click()
+    assert stop_all_mock.called
+
+    # 4. Port operations
+    ros2_screen.btn_swap_ports.click()
+    assert swap_ports_mock.called
+
+    ros2_screen.btn_rescan_ports.click()
+    assert rescan_ports_mock.called
+
+    # 5. Port info update
+    ros2_screen.set_detected_ports("/dev/ttyUSB0", "/dev/ttyUSB1", "scan")
+    assert "/dev/ttyUSB0" in ros2_screen.lbl_esp_port.text()
+    assert "/dev/ttyUSB1" in ros2_screen.lbl_lidar_port.text()
+    assert "scan" in ros2_screen.lbl_ports_info.text()
+
+    if hasattr(page, "_telemetry_worker") and page._telemetry_worker.isRunning():
+        page._telemetry_worker.stop()
+        page._telemetry_worker.wait(1000)
+    page.close()
+
