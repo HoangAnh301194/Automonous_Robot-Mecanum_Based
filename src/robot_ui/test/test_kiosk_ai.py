@@ -157,7 +157,9 @@ class TestKioskAI(unittest.TestCase):
 
     def test_9router_autostart_existing_docker_container(self):
         inspect = Mock(returncode=0, stdout="false\n")
-        with patch("robot_ui.kiosk.router_process._port_open",
+        with tempfile.TemporaryDirectory() as folder, \
+             patch("robot_ui.kiosk.router_process.Path.home", return_value=Path(folder)), \
+             patch("robot_ui.kiosk.router_process._port_open",
                    side_effect=[False, True]), \
              patch("robot_ui.kiosk.router_process.shutil.which",
                    side_effect=lambda name: "/usr/bin/docker"
