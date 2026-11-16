@@ -4,6 +4,21 @@
 probe, Kiosk, ROS topics, or robot launch. The intended future runtime is an
 openWakeWord ONNX classifier. Nothing here is a trained Souta model yet.
 
+## Source layout (refactored)
+
+The user-facing command remains `python souta_kws.py <command>`.
+The CLI is now a thin wrapper around purpose-specific modules:
+
+- `kws_core/audio.py`: WAV validation, recording, framing, augmentation.
+- `kws_core/dataset.py`: speaker/session-disjoint manifests.
+- `kws_core/features.py`: openWakeWord embedding extraction.
+- `kws_core/trainer.py`: PyTorch MLP and ONNX export.
+- `kws_core/evaluation.py`: streaming scoring, calibration, test evaluation.
+- `kws_core/constants.py`: sample rate, window size, split labels.
+
+The existing model input, file paths, CLI flags, and output formats are unchanged.
+The old Vosk runtime and Kiosk worker are not touched.
+
 ## Architecture
 
 16 kHz mono PCM -> openWakeWord frozen mel ONNX -> frozen speech embedding ONNX
