@@ -349,6 +349,10 @@ class ROS2SystemDetailScreen(QWidget):
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
                 else:
                     lbl.set_status("STOPPED", HealthStatus.STOPPED)
+                if "start_btn" in self.layer_rows[k]:
+                    self.layer_rows[k]["start_btn"].setEnabled(not is_on)
+                if "stop_btn" in self.layer_rows[k]:
+                    self.layer_rows[k]["stop_btn"].setEnabled(is_on)
 
         active_count = sum(
             1 for row in self.layer_rows.values()
@@ -477,10 +481,19 @@ class ROS2SystemDetailScreen(QWidget):
         self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
 
     def _on_rescan_ports(self) -> None:
+        try:
+            from robot_ui.kiosk.serial_resolver import detect_serial_ports
+            hb, lidar, method = detect_serial_ports()
+            res_str = f"Hoverboard: {hb} | LiDAR: {lidar} ({method})"
+        except Exception:
+            res_str = ""
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         unique_ports = list(dict.fromkeys(ports))
-        ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện cổng serial khả dụng"
-        self.lbl_ports_info.setText(f"Cổng phát hiện: {ports_str}")
+        ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện"
+        if res_str:
+            self.lbl_ports_info.setText(f"{res_str} | Tất cả cổng: {ports_str}")
+        else:
+            self.lbl_ports_info.setText(f"Cổng phát hiện: {ports_str}")
 
     def _on_swap_ports(self) -> None:
         self.lbl_ports_info.setText("Đã yêu cầu đảo cổng cấu hình Serial Hoverboard/ESP32.")

@@ -829,7 +829,8 @@ class KioskRosNode(Node):
         ws_root = FilePath(__file__).resolve().parents[4]
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
         ws_setup = ws_root / "install" / "setup.bash"
-        cmd = f"source '{ros_setup}'"
+        domain_id = os.environ.get("ROS_DOMAIN_ID", "94")
+        cmd = f"export ROS_DOMAIN_ID={domain_id} && source '{ros_setup}'"
         if ws_setup.is_file():
             cmd += f" && source '{ws_setup}'"
         return cmd + " && "
@@ -854,7 +855,8 @@ class KioskRosNode(Node):
                 )
                 self.signals.slam_status_changed.emit(True, "Đang khởi động phần cứng LiDAR & Odometry...")
                 self.start_layer("layer1")
-                time.sleep(1.5)
+                # Đợi phần cứng khởi động và kích hoạt controller (tối thiểu 4.0s)
+                time.sleep(4.0)
 
             cmd = self._get_ws_prefix() + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
             self.get_logger().info(f"[KIOSK SLAM] START: {cmd}")
@@ -873,6 +875,8 @@ class KioskRosNode(Node):
                     text=True,
                     preexec_fn=os.setsid,
                 )
+                self._layer_procs["layer3"] = self._slam_proc
+                self._layer_procs["layer_slam"] = self._slam_proc
                 self.signals.slam_status_changed.emit(True, "Đã khởi động SLAM Mapping")
             except Exception as exc:
                 self.get_logger().error(f"[KIOSK SLAM] Lỗi khởi chạy SLAM: {exc}")
@@ -884,6 +888,9 @@ class KioskRosNode(Node):
         """Dừng tiến trình SLAM một cách an toàn."""
         if not self._slam_proc or self._slam_proc.poll() is not None:
             self.get_logger().info("[KIOSK SLAM] SLAM chưa chạy hoặc đã dừng.")
+            self._slam_proc = None
+            self._layer_procs.pop("layer3", None)
+            self._layer_procs.pop("layer_slam", None)
             self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
             return
 
@@ -902,7 +909,9 @@ class KioskRosNode(Node):
             self.get_logger().warning(f"[KIOSK SLAM] Dừng SLAM gặp lỗi: {exc}")
         finally:
             self._slam_proc = None
-            self.signals.slam_status_changed.emit(False, "Đã dừng SLAM Mapping")
+            self._layer_procs.pop("layer3", None)
+            self._layer_procs.pop("layer_slam", None)
+            self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
 
     def save_map(self, map_stem: str) -> None:
         """Thực hiện lưu bản đồ kép (AMCL YAML + PoseGraph serialize) trên background thread."""
@@ -1255,7 +1264,7 @@ class KioskRosNode(Node):
         elif launch_key == "layer3":
             cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
-            cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py"
+            cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py use_sim_time:=false"
         elif launch_key == "layer5":
             cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
@@ -1282,6 +1291,11 @@ class KioskRosNode(Node):
                     alt_key = self.LAYER_ALIAS_MAP.get(layer_key)
                     if alt_key:
                         self._layer_procs[alt_key] = proc
+                    if launch_key == "layer3":
+                        self._slam_proc = proc
+                        self.signals.slam_status_changed.emit(True, "SLAM đang chạy")
+                    elif launch_key == "layer2":
+                        self._localization_proc = proc
 
                     def _read_layer_stream(p=proc, key=launch_key, path=log_path):
                         try:
@@ -1334,6 +1348,15 @@ class KioskRosNode(Node):
                     os.killpg(pgid, signal.SIGKILL)
             except Exception:
                 pass
+        self._layer_procs.pop(launch_key, None)
+        self._layer_procs.pop(layer_key, None)
+        if alt_key:
+            self._layer_procs.pop(alt_key, None)
+        if launch_key == "layer3" or layer_key in ("layer3", "layer_slam"):
+            self._slam_proc = None
+            self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
+        elif launch_key == "layer2" or layer_key in ("layer2", "layer_navigation"):
+            self._localization_proc = None
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
