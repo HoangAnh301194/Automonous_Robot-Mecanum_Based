@@ -64,8 +64,8 @@ class HardwareDetailScreen(QWidget):
             subtitle="Giám sát Tài nguyên Máy chủ Jetson, Ắc quy 36V & Kết nối Mạng",
             back_callback=self.back_requested.emit,
             back_icon_path=self.icons.get("back"),
-            status_text="HEALTHY",
-            status=HealthStatus.HEALTHY,
+            status_text="ĐANG KIỂM TRA...",
+            status=HealthStatus.UNKNOWN,
         )
         layout.addLayout(self.header)
 
@@ -79,8 +79,8 @@ class HardwareDetailScreen(QWidget):
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setSpacing(12)
 
-        # A. NGUỒN ĐIỆN ẮC QUY 36V
-        card_power, p_layout = create_section_card("NGUỒN ĐIỆN ẮC QUY 36V (DEEP BATTERY TELEMETRY)", "#22C55E")
+        # A. NGUỒN ĐIỆN ẮC QUY 36V & NƯỚC
+        card_power, p_layout = create_section_card("NGUỒN ĐIỆN ẮC QUY 36V & BÌNH PHỤC VỤ NƯỚC", "#22C55E")
         p_row = QHBoxLayout()
         p_row.setSpacing(14)
 
@@ -105,17 +105,27 @@ class HardwareDetailScreen(QWidget):
         self.lbl_bat_sub.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px;")
         bat_detail_col.addWidget(self.lbl_bat_sub)
         p_row.addLayout(bat_detail_col, stretch=1)
-
         p_layout.addLayout(p_row)
-        c_layout.addWidget(card_power)
 
-        # Hidden compatibility labels for existing tests
-        self.lbl_water_val = QLabel("2.4 L")
-        self.lbl_water_val.hide()
-        self.lbl_kettle_status = QLabel("")
-        self.lbl_kettle_status.hide()
-        self.lbl_water_sub = QLabel("")
-        self.lbl_water_sub.hide()
+        # Sub-row hiển thị thông số Bình Nước & Khay Ấm
+        water_row = QHBoxLayout()
+        water_row.setSpacing(14)
+        self.lbl_water_val = QLabel("-- L")
+        self.lbl_water_val.setStyleSheet(f"color: {KioskTheme.COLOR_ACCENT}; font-size: 18px; font-weight: 800; min-width: 80px;")
+        water_row.addWidget(self.lbl_water_val)
+
+        w_col = QVBoxLayout()
+        w_col.setSpacing(2)
+        self.lbl_kettle_status = QLabel("Khay ấm: Đang kiểm tra...")
+        self.lbl_kettle_status.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-size: 11px; font-weight: bold;")
+        self.lbl_water_sub = QLabel("Mực nước bình chứa: --")
+        self.lbl_water_sub.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 10px;")
+        w_col.addWidget(self.lbl_kettle_status)
+        w_col.addWidget(self.lbl_water_sub)
+        water_row.addLayout(w_col, stretch=1)
+        p_layout.addLayout(water_row)
+
+        c_layout.addWidget(card_power)
 
         # B. PROCESS MONITOR (GIÁM SÁT TIẾN TRÌNH CPU & RAM)
         card_proc, proc_layout = create_section_card("GIÁM SÁT TIẾN TRÌNH HỆ THỐNG (PROCESS MONITOR)", "#38BDF8")
@@ -297,6 +307,16 @@ class HardwareDetailScreen(QWidget):
             self._last_top_processes = snap.top_processes
         if hasattr(self, "table_proc") and not self.table_proc.isHidden() and self._last_top_processes:
             self._update_process_table(self._last_top_processes)
+
+        # Update Header Health status
+        if cpu_t >= 85.0 or snap.ram_pct >= 95.0:
+            self.header.set_status("CRITICAL", HealthStatus.CRITICAL)
+        elif cpu_t >= 75.0 or snap.ram_pct >= 85.0 or not snap.router_ok:
+            self.header.set_status("CẢNH BÁO", HealthStatus.WARNING)
+        elif cpu_t > 0:
+            self.header.set_status("HEALTHY", HealthStatus.HEALTHY)
+        else:
+            self.header.set_status("ĐANG KHỞI TẠO", HealthStatus.UNKNOWN)
 
     def _toggle_proc_table(self) -> None:
         """Toggle Process Monitor visibility."""

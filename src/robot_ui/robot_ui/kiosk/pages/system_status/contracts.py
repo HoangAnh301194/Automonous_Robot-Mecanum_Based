@@ -181,6 +181,14 @@ def compute_overall_health(
         return HealthStatus.CRITICAL, criticals[0], criticals + warnings
     if warnings:
         return HealthStatus.WARNING, warnings[0], warnings
-    if sensors.lidar_hz > 5.0 and sensors.tf_map_odom_ok and power.battery_percent >= 25.0:
-        return HealthStatus.HEALTHY, "Hệ thống hoạt động bình thường, robot sẵn sàng", []
-    return HealthStatus.UNKNOWN, "Hệ thống đang khởi tạo hoặc chờ dữ liệu telemetry", []
+    
+    # Chuẩn xác minh nghiêm ngặt trước khi tuyên bố robot HEALTHY
+    has_lidar = sensors.lidar_hz >= 5.0
+    has_odom = (sensors.odom_hz >= 5.0) or sensors.tf_odom_base_ok
+    has_tf = sensors.tf_map_odom_ok and sensors.tf_odom_base_ok
+    has_power = power.battery_percent >= 25.0
+    has_host = (host.cpu_temp == 0.0 or 0 < host.cpu_temp < 75.0) and host.ram_pct < 85.0
+
+    if has_lidar and has_odom and has_tf and has_power and has_host:
+        return HealthStatus.HEALTHY, "Hệ thống hoạt động bình thường, toàn bộ cảm biến & phần cứng sẵn sàng", []
+    return HealthStatus.UNKNOWN, "Hệ thống đang khởi tạo hoặc chưa đủ dữ liệu telemetry cảm biến", []

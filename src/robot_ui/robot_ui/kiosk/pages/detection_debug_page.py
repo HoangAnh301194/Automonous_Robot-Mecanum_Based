@@ -414,14 +414,15 @@ class DetectionDebugPage(QWidget):
             self.list_people.addItem("Không có người trong phạm vi phát hiện.")
         else:
             for idx in range(1, cnt + 1):
-                p_dist = dist if idx == 1 and dist is not None else (1.5 + idx * 0.7)
-                flag = " [CẢN ĐƯỜNG]" if p_dist < 1.8 else " [AN TOÀN]"
-                item_text = f"Mục tiêu #{idx}: Cự ly ~{p_dist:.2f} m{flag}"
-                item = QListWidgetItem(item_text)
-                if p_dist < 1.8:
-                    item.setForeground(QColor("#ef4444"))
+                if idx == 1 and dist is not None:
+                    flag = " [CẢN ĐƯỜNG]" if dist < 1.8 else " [AN TOÀN]"
+                    item_text = f"Mục tiêu #{idx}: Cự ly ~{dist:.2f} m{flag}"
+                    item = QListWidgetItem(item_text)
+                    item.setForeground(QColor("#ef4444" if dist < 1.8 else "#22c55e"))
                 else:
-                    item.setForeground(QColor("#22c55e"))
+                    item_text = f"Mục tiêu #{idx}: Cự ly -- m (Không có cự ly 3D)"
+                    item = QListWidgetItem(item_text)
+                    item.setForeground(QColor("#94a3b8"))
                 self.list_people.addItem(item)
 
     def update_fullscreen_button(self, is_fullscreen: bool) -> None:

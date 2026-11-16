@@ -62,8 +62,8 @@ class ROS2SystemDetailScreen(QWidget):
             subtitle="Quản lý 5 Layer Kiến trúc, Cổng Serial & Khôi phục Khẩn cấp",
             back_callback=self.back_requested.emit,
             back_icon_path=self.icons.get("back"),
-            status_text="5/5 ACTIVE",
-            status=HealthStatus.HEALTHY,
+            status_text="0/5 ACTIVE",
+            status=HealthStatus.STOPPED,
         )
         layout.addLayout(self.header)
 
@@ -113,7 +113,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addLayout(title_box)
             rl.addStretch()
 
-            lbl_st = StatusPill("RUNNING", HealthStatus.RUNNING)
+            lbl_st = StatusPill("STOPPED", HealthStatus.STOPPED)
             rl.addWidget(lbl_st)
 
             btn_start = QPushButton("BẬT")
@@ -237,15 +237,32 @@ class ROS2SystemDetailScreen(QWidget):
         # Initial ports scan
         self._on_rescan_ports()
 
+    LAYER_NAME_MAP = {
+        "layer1": "layer_hardware",
+        "layer2": "layer_navigation",
+        "layer3": "layer_slam",
+        "layer4": "layer_perception",
+        "layer5": "layer_voice_interaction",
+    }
+
     def update_layer_status(self, layers_state: dict[str, bool]) -> None:
-        """Update visual indicators for layer processes."""
-        for key, is_on in layers_state.items():
-            if key in self.layer_rows:
-                lbl = self.layer_rows[key]["status_lbl"]
+        """Cập nhật trạng thái hiển thị cho từng Layer và Header counter."""
+        for raw_k, is_on in layers_state.items():
+            k = self.LAYER_NAME_MAP.get(raw_k, raw_k)
+            if k in self.layer_rows:
+                lbl = self.layer_rows[k]["status_lbl"]
                 if is_on:
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
                 else:
                     lbl.set_status("STOPPED", HealthStatus.STOPPED)
+
+        active_count = sum(
+            1 for row in self.layer_rows.values()
+            if row["status_lbl"].text() == "RUNNING"
+        )
+        total_layers = len(self.layer_rows)
+        header_st = HealthStatus.RUNNING if active_count > 0 else HealthStatus.STOPPED
+        self.header.set_status(f"{active_count}/{total_layers} ACTIVE", header_st)
 
     def _on_rescan_ports(self) -> None:
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))

@@ -52,6 +52,7 @@ class SystemOverviewScreen(QWidget):
         super().__init__(parent)
         self.setObjectName("systemOverviewScreen")
         self.icons = icons or {}
+        self._current_warnings: list[str] = []
 
         self._init_ui()
 
@@ -146,6 +147,7 @@ class SystemOverviewScreen(QWidget):
         self.btn_warning_link = QPushButton("Chi tiết")
         self.btn_warning_link.setFixedHeight(28)
         self.btn_warning_link.setStyleSheet(f"background: {KioskTheme.COLOR_SURFACE}; color: {KioskTheme.COLOR_ACCENT}; font-size: 11px; font-weight: bold; padding: 2px 8px; border-radius: 4px;")
+        self.btn_warning_link.clicked.connect(self._on_warning_detail_clicked)
         wb_layout.addWidget(self.btn_warning_link)
         self.warning_bar.hide()
         layout.addWidget(self.warning_bar)
@@ -181,8 +183,8 @@ class SystemOverviewScreen(QWidget):
             title="ROS 2 System",
             subtitle="Nodes · 5 Layers · Serial Ports",
             icon_path=self.icons.get("settings"),
-            status_text="RUNNING",
-            status=HealthStatus.RUNNING,
+            status_text="STOPPED",
+            status=HealthStatus.STOPPED,
         )
         self.card_ros2.clicked.connect(lambda: self.navigate_to_module.emit("ros2"))
         grid.addWidget(self.card_ros2, 1, 0)
@@ -192,8 +194,8 @@ class SystemOverviewScreen(QWidget):
             title="Diagnostics",
             subtitle="Pre-Flight Check · Quick Tests",
             icon_path=self.icons.get("settings"),
-            status_text="READY",
-            status=HealthStatus.HEALTHY,
+            status_text="STANDBY",
+            status=HealthStatus.UNKNOWN,
         )
         self.card_diagnostics.clicked.connect(lambda: self.navigate_to_module.emit("diagnostics"))
         grid.addWidget(self.card_diagnostics, 1, 1)
@@ -268,6 +270,7 @@ class SystemOverviewScreen(QWidget):
             self.badge_loc.lbl_val.setStyleSheet(f"color: {KioskTheme.COLOR_CRITICAL}; font-size: 11px; font-weight: 800;")
 
         # 3. Dynamic Warning Bar
+        self._current_warnings = warnings
         if warnings:
             self.lbl_warning_text.setText(f"Cảnh báo: {warnings[0]}")
             self.warning_bar.show()
@@ -284,3 +287,17 @@ class SystemOverviewScreen(QWidget):
             HealthStatus.WARNING if host.cpu_temp >= 75 else HealthStatus.HEALTHY
         )
         self.card_hardware.set_status(h_health.value, h_health, f"Jetson: {host.cpu_temp:.1f}°C | CPU: {host.cpu_pct:.0f}%")
+
+    def _on_warning_detail_clicked(self) -> None:
+        """Route to appropriate detail screen based on top warning."""
+        if not self._current_warnings:
+            return
+        w = self._current_warnings[0].lower()
+        if any(k in w for k in ("pin", "nhiệt độ", "ram", "disk", "nước", "gateway", "bình")):
+            self.navigate_to_module.emit("hardware")
+        elif any(k in w for k in ("lidar", "camera", "tf", "vật cản", "ai", "yolo")):
+            self.navigate_to_module.emit("sensors")
+        elif any(k in w for k in ("layer", "tiến trình", "ros")):
+            self.navigate_to_module.emit("ros2")
+        else:
+            self.navigate_to_module.emit("sensors")

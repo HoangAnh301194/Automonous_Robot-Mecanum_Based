@@ -9,6 +9,7 @@ Features:
 """
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Optional
 
@@ -158,15 +159,7 @@ class DiagnosticsDetailScreen(QWidget):
         test_grid = QGridLayout()
         test_grid.setSpacing(10)
 
-        # 1. Pump
-        btn_pump = QPushButton("Test Bơm Nước (1.5s)")
-        btn_pump.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
-        btn_pump.setCursor(Qt.PointingHandCursor)
-        btn_pump.setStyleSheet("background-color: #0284c7; color: white; font-weight: bold; border-radius: 6px; font-size: 12px;")
-        btn_pump.clicked.connect(lambda: self._trigger_test("pump"))
-        test_grid.addWidget(btn_pump, 0, 0)
-
-        # 2. Speaker
+        # 1. Speaker
         btn_speaker = QPushButton("Test Loa / Âm Thanh")
         btn_speaker.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         btn_speaker.setCursor(Qt.PointingHandCursor)
@@ -176,23 +169,15 @@ class DiagnosticsDetailScreen(QWidget):
             btn_speaker.setIcon(QIcon(spk_pm))
             btn_speaker.setIconSize(QSize(20, 20))
         btn_speaker.clicked.connect(lambda: self._trigger_test("speaker"))
-        test_grid.addWidget(btn_speaker, 0, 1)
+        test_grid.addWidget(btn_speaker, 0, 0)
 
-        # 3. LED/Buzzer
-        btn_buzzer = QPushButton("Test Đèn LED / Còi (2s)")
-        btn_buzzer.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
-        btn_buzzer.setCursor(Qt.PointingHandCursor)
-        btn_buzzer.setStyleSheet("background-color: #d97706; color: white; font-weight: bold; border-radius: 6px; font-size: 12px;")
-        btn_buzzer.clicked.connect(lambda: self._trigger_test("led_buzzer"))
-        test_grid.addWidget(btn_buzzer, 1, 0)
-
-        # 4. Motor Jog (Has Confirmation Dialog)
+        # 2. Motor Jog (Has Confirmation Dialog)
         btn_jog = QPushButton("Test Nhích Xe (Jog 5cm)")
         btn_jog.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         btn_jog.setCursor(Qt.PointingHandCursor)
         btn_jog.setStyleSheet("background-color: #059669; color: white; font-weight: bold; border-radius: 6px; font-size: 12px;")
         btn_jog.clicked.connect(self._on_jog_motor_clicked)
-        test_grid.addWidget(btn_jog, 1, 1)
+        test_grid.addWidget(btn_jog, 0, 1)
 
         test_layout.addLayout(test_grid)
 
@@ -267,7 +252,7 @@ class DiagnosticsDetailScreen(QWidget):
             k = steps[self._preflight_step]
             _, lbl_st = self.preflight_items[k]
 
-            is_ok = True
+            is_ok = False
             if k == "bat":
                 is_ok = self._last_power.battery_percent >= 25.0
             elif k == "water":
@@ -276,8 +261,16 @@ class DiagnosticsDetailScreen(QWidget):
                 is_ok = self._last_sensors.lidar_hz >= 8.0
             elif k == "tf":
                 is_ok = self._last_sensors.tf_map_odom_ok and self._last_sensors.tf_odom_base_ok
+            elif k == "nav2":
+                is_ok = self._last_sensors.tf_map_odom_ok and (self._last_sensors.odom_hz >= 5.0)
+            elif k == "audio":
+                is_ok = bool(self._last_host.stt_ok) or os.path.exists("/dev/snd")
             elif k == "cams":
-                is_ok = self._last_sensors.cam_front_hz > 2.0 and self._last_sensors.cam_rear_hz > 2.0
+                is_ok = (
+                    self._last_sensors.cam_front_hz > 2.0
+                    and self._last_sensors.cam_rear_hz > 2.0
+                    and self._last_sensors.cam_ai_hz > 2.0
+                )
 
             if is_ok:
                 lbl_st.setText("[ĐẠT]")

@@ -28,12 +28,17 @@ from rclpy.qos import (
     qos_profile_sensor_data,
 )
 from sensor_msgs.msg import BatteryState, Image, LaserScan
-from std_msgs.msg import Bool, Float64, String
+from std_msgs.msg import Bool, Float32, Float64, String
 from std_srvs.srv import Trigger
 
 from robot_interfaces.action import DirectGo
 from robot_interfaces.msg import NavigationStatus, RobotStatus
 from robot_interfaces.srv import GetLocation, GetLocationList
+
+try:
+    from robot_interfaces.msg import TrackedPersonArray
+except ImportError:
+    TrackedPersonArray = None
 
 from robot_ui.kiosk.signals import KioskSignals
 
@@ -148,11 +153,12 @@ class KioskRosNode(Node):
         self._battery_raw_v = 36.0
         self._battery_source = "robot_status"
         self._water_liter = 0.0
-        self._kettle_present = True
+        self._kettle_present = False
         self._is_waving = False
         self._yolo_active = False
         self._people_count = 0
         self._closest_person_dist: float | None = None
+        self._last_ai_rx = 0.0
         self._layer_procs: dict[str, subprocess.Popen] = {}
 
         self._tf_buffer = tf2_ros.Buffer()
@@ -234,6 +240,19 @@ class KioskRosNode(Node):
             self._on_wave_detected,
             10,
         )
+        if TrackedPersonArray is not None:
+            self.create_subscription(
+                TrackedPersonArray,
+                "/perception/tracked_people",
+                self._on_tracked_people,
+                10,
+            )
+        self.create_subscription(
+            Float32,
+            "/mission/person_distance_preview",
+            self._on_person_distance_preview,
+            10,
+        )
         self.create_subscription(
             Twist,
             "/cmd_vel",
@@ -252,6 +271,10 @@ class KioskRosNode(Node):
             self._connected = True
             self.get_logger().info("Đã kết nối với Robot backend (nhận được /robot_status).")
             self.signals.connection_changed.emit(True)
+        if hasattr(msg, "water_liter"):
+            self._water_liter = float(msg.water_liter)
+        if hasattr(msg, "kettle_present"):
+            self._kettle_present = bool(msg.kettle_present)
         self.signals.robot_status_changed.emit(
             {
                 "battery_percent": float(msg.battery_percent),
@@ -260,7 +283,8 @@ class KioskRosNode(Node):
                 "localization_ok": bool(msg.localization_ok),
                 "odom_ok": bool(msg.odom_ok),
                 "water_low": bool(msg.water_low),
-                "water_liter": float(msg.water_liter),
+                "water_liter": self._water_liter,
+                "kettle_present": self._kettle_present,
                 "robot_state": str(msg.robot_state),
                 "current_location": str(msg.current_location),
             }
@@ -601,15 +625,22 @@ class KioskRosNode(Node):
             self.signals.command_status_changed.emit("error", "Không thể tới điểm đến")
 
     def cancel_navigation(self) -> None:
-        """Hủy hành trình điều hướng hiện tại."""
+        """Hủy hành trình điều hướng hiện tại một cách an toàn mà không kích hoạt Emergency Stop."""
         self.get_logger().info("[NAV] Yêu cầu hủy hành trình điều hướng từ UI.")
         if self._goal_handle is not None:
             try:
                 self._goal_handle.cancel_goal_async()
-            except Exception:
-                pass
+            except Exception as exc:
+                self.get_logger().warn(f"[NAV] Lỗi khi gửi cancel goal: {exc}")
             self._goal_handle = None
-        self.trigger_emergency_stop()
+        # Dừng robot êm bằng cách phát vận tốc 0 vào /cmd_vel
+        try:
+            stop_twist = Twist()
+            self.cmd_vel_pub.publish(stop_twist)
+        except Exception:
+            pass
+        self.signals.navigation_status_changed.emit("CANCELLED")
+        self.signals.command_status_changed.emit("warning", "Đã dừng hành trình")
 
     def trigger_emergency_stop(self) -> None:
         """Dừng khẩn cấp toàn diện: phanh tức thì, hủy mọi Goal Nav2/DirectGo và kích hoạt P0 Emergency trong BT."""
@@ -998,6 +1029,24 @@ class KioskRosNode(Node):
     def _on_wave_detected(self, msg: Bool) -> None:
         self._is_waving = bool(msg.data)
 
+    def _on_tracked_people(self, msg: Any) -> None:
+        self._last_ai_rx = time.monotonic()
+        self._yolo_active = True
+        people = getattr(msg, "people", [])
+        self._people_count = len(people)
+        distances: list[float] = []
+        for p in people:
+            d = getattr(p, "distance", 0.0)
+            if d > 0.0:
+                distances.append(float(d))
+        self._closest_person_dist = min(distances) if distances else None
+
+    def _on_person_distance_preview(self, msg: Float32) -> None:
+        self._last_ai_rx = time.monotonic()
+        d = float(msg.data)
+        if d > 0.0:
+            self._closest_person_dist = d
+
     def _emit_battery_water(self) -> None:
         self.signals.robot_status_changed.emit(
             {
@@ -1012,6 +1061,10 @@ class KioskRosNode(Node):
 
     def _publish_system_telemetry(self) -> None:
         now = time.monotonic()
+        if (now - self._last_ai_rx) > 3.0:
+            self._yolo_active = False
+            self._people_count = 0
+            self._closest_person_dist = None
         with self._dbg_lock:
             def _get_hz(k: str) -> float:
                 entry = self._topic_stats.get(k)
@@ -1062,95 +1115,141 @@ class KioskRosNode(Node):
         }
         self.signals.system_telemetry_changed.emit(snap)
 
-        # Layer states
+        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự
+        is_l1 = bool(
+            (self._layer_procs.get("layer1") and self._layer_procs["layer1"].poll() is None)
+            or (self._layer_procs.get("layer_hardware") and self._layer_procs["layer_hardware"].poll() is None)
+        )
+        is_l2 = bool(
+            (self._layer_procs.get("layer2") and self._layer_procs["layer2"].poll() is None)
+            or (self._layer_procs.get("layer_navigation") and self._layer_procs["layer_navigation"].poll() is None)
+            or (self._localization_proc and self._localization_proc.poll() is None)
+        )
+        is_l3 = bool(
+            (self._layer_procs.get("layer3") and self._layer_procs["layer3"].poll() is None)
+            or (self._layer_procs.get("layer_slam") and self._layer_procs["layer_slam"].poll() is None)
+            or (self._slam_proc and self._slam_proc.poll() is None)
+        )
+        is_l4 = bool(
+            (self._layer_procs.get("layer4") and self._layer_procs["layer4"].poll() is None)
+            or (self._layer_procs.get("layer_perception") and self._layer_procs["layer_perception"].poll() is None)
+        )
+        is_l5 = bool(
+            (self._layer_procs.get("layer5") and self._layer_procs["layer5"].poll() is None)
+            or (self._layer_procs.get("layer_voice_interaction") and self._layer_procs["layer_voice_interaction"].poll() is None)
+        )
+
         layer_states = {
-            "layer1": bool(self._layer_procs.get("layer1") and self._layer_procs["layer1"].poll() is None),
-            "layer2": bool(self._localization_proc and self._localization_proc.poll() is None)
-            or bool(self._slam_proc and self._slam_proc.poll() is None),
-            "layer3": bool(self._layer_procs.get("layer3") and self._layer_procs["layer3"].poll() is None),
-            "layer4": bool(self._layer_procs.get("layer4") and self._layer_procs["layer4"].poll() is None),
-            "layer5": bool(self._layer_procs.get("layer5") and self._layer_procs["layer5"].poll() is None),
+            "layer_hardware": is_l1,
+            "layer_navigation": is_l2,
+            "layer_slam": is_l3,
+            "layer_perception": is_l4,
+            "layer_voice_interaction": is_l5,
+            "layer1": is_l1,
+            "layer2": is_l2,
+            "layer3": is_l3,
+            "layer4": is_l4,
+            "layer5": is_l5,
         }
         self.signals.layer_status_changed.emit(layer_states)
 
     def test_actuator(self, test_name: str) -> None:
-        """Kích hoạt kiểm tra nhanh cơ cấu chấp hành."""
+        """Kích hoạt kiểm tra an toàn cơ cấu chấp hành (đã loại bỏ Pump và LED/Buzzer)."""
         self.get_logger().info(f"[TEST ACTUATOR] Kích hoạt: {test_name}")
-        if test_name == "pump":
-            msg = Bool()
-            msg.data = True
-            self.serve_trigger_pub.publish(msg)
-
-            def _turn_off():
-                time.sleep(1.5)
-                m2 = Bool()
-                m2.data = False
-                self.serve_trigger_pub.publish(m2)
-                self.signals.actuator_test_result.emit("pump", True, "Đã xả bơm 1.5 giây hoàn tất.")
-
-            threading.Thread(target=_turn_off, daemon=True).start()
-        elif test_name == "speaker":
+        if test_name == "speaker":
             def _sound_worker():
+                sound_file = "/usr/share/sounds/freedesktop/stereo/complete.oga"
                 try:
-                    subprocess.run(
-                        ["paplay", "/usr/share/sounds/freedesktop/stereo/complete.oga"],
+                    res = subprocess.run(
+                        ["paplay", sound_file],
                         capture_output=True,
-                        timeout=2.0,
+                        text=True,
+                        timeout=3.0,
                     )
-                except Exception:
-                    pass
-                self.signals.actuator_test_result.emit("speaker", True, "Đã phát âm thanh kiểm tra loa ngoài.")
+                    if res.returncode == 0:
+                        self.signals.actuator_test_result.emit("speaker", True, "Đã phát âm thanh kiểm tra loa ngoài thành công.")
+                    else:
+                        self.signals.actuator_test_result.emit("speaker", False, f"Lỗi paplay (mã {res.returncode}): {res.stderr.strip()}")
+                except Exception as exc:
+                    self.signals.actuator_test_result.emit("speaker", False, f"Không thể phát loa: {exc}")
 
             threading.Thread(target=_sound_worker, daemon=True).start()
-        elif test_name == "led_buzzer":
-            self.signals.actuator_test_result.emit("led_buzzer", True, "Đã phát tín hiệu đèn LED / còi cảnh báo.")
         elif test_name == "jog_motor":
             def _jog_worker():
-                tw = Twist()
-                tw.linear.x = 0.05
-                self.cmd_vel_pub.publish(tw)
-                time.sleep(1.0)
-                stop_tw = Twist()
-                self.cmd_vel_pub.publish(stop_tw)
-                self.signals.actuator_test_result.emit("jog_motor", True, "Đã nhích xe 5cm an toàn và phanh dừng.")
+                try:
+                    tw = Twist()
+                    tw.linear.x = 0.05
+                    self.cmd_vel_pub.publish(tw)
+                    time.sleep(1.0)
+                    stop_tw = Twist()
+                    self.cmd_vel_pub.publish(stop_tw)
+                    self.signals.actuator_test_result.emit("jog_motor", True, "Đã nhích xe 5cm an toàn và phanh dừng.")
+                except Exception as exc:
+                    self.signals.actuator_test_result.emit("jog_motor", False, f"Lỗi nhích xe: {exc}")
 
             threading.Thread(target=_jog_worker, daemon=True).start()
+        else:
+            self.get_logger().warn(f"[TEST ACTUATOR] Bỏ qua test không hợp lệ hoặc đã loại bỏ: {test_name}")
+
+    LAYER_ALIAS_MAP = {
+        "layer_hardware": "layer1",
+        "layer_navigation": "layer2",
+        "layer_slam": "layer3",
+        "layer_perception": "layer4",
+        "layer_voice_interaction": "layer5",
+        "layer1": "layer_hardware",
+        "layer2": "layer_navigation",
+        "layer3": "layer_slam",
+        "layer4": "layer_perception",
+        "layer5": "layer_voice_interaction",
+    }
 
     def start_layer(self, layer_key: str) -> None:
-        """Khởi động tầng tiến trình tương ứng."""
-        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key}")
+        """Khởi động tầng tiến trình tương ứng (hỗ trợ cả alias ngữ nghĩa và số thứ tự)."""
+        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        launch_key = norm_key if norm_key.startswith("layer") and norm_key[5:].isdigit() else layer_key
+        if not (launch_key.startswith("layer") and launch_key[5:].isdigit()):
+            launch_key = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
+
+        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (launch_key={launch_key})")
         cmd = ""
         prefix = self._get_ws_prefix()
-        if layer_key == "layer1":
+        if launch_key == "layer1":
             cmd = prefix + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false"
-        elif layer_key == "layer2":
+        elif launch_key == "layer2":
             cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false"
-        elif layer_key == "layer3":
+        elif launch_key == "layer3":
             cmd = prefix + "ros2 launch nav2_bringup navigation_launch.py use_sim_time:=false"
-        elif layer_key == "layer4":
+        elif launch_key == "layer4":
             cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py"
-        elif layer_key == "layer5":
+        elif launch_key == "layer5":
             cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
         if cmd:
             def _launch():
                 try:
+                    log_file = open(f"/tmp/ros_layer_{launch_key}.log", "a", encoding="utf-8")
                     proc = subprocess.Popen(
                         ["bash", "-c", cmd],
-                        stdout=subprocess.PIPE,
+                        stdout=log_file,
                         stderr=subprocess.STDOUT,
                         text=True,
                         preexec_fn=os.setsid,
                     )
+                    self._layer_procs[launch_key] = proc
                     self._layer_procs[layer_key] = proc
+                    alt_key = self.LAYER_ALIAS_MAP.get(layer_key)
+                    if alt_key:
+                        self._layer_procs[alt_key] = proc
                 except Exception as exc:
                     self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
 
             threading.Thread(target=_launch, daemon=True).start()
 
     def stop_layer(self, layer_key: str) -> None:
-        """Dừng tầng tiến trình tương ứng."""
-        proc = self._layer_procs.get(layer_key)
+        """Dừng tầng tiến trình tương ứng (kiểm tra cả alias)."""
+        alt_key = self.LAYER_ALIAS_MAP.get(layer_key, "")
+        proc = self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
         if proc and proc.poll() is None:
             self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
             try:

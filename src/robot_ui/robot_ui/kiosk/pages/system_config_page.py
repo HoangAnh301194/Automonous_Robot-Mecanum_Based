@@ -124,9 +124,9 @@ class HostTelemetryWorker(QThread):
         except Exception:
             pass
 
-        # 5. WiFi SSID & Signal
-        wifi_ssid = "Connected"
-        wifi_signal_pct = 80
+        # 5. WiFi SSID & Signal (Đọc trực tiếp từ interface mạng)
+        wifi_ssid = "Chưa kết nối"
+        wifi_signal_pct = 0
         try:
             with open("/proc/net/wireless", "r", encoding="utf-8") as f:
                 lines = f.readlines()
@@ -135,8 +135,12 @@ class HostTelemetryWorker(QThread):
                     if len(parts) >= 4:
                         link_qual = float(parts[2].replace(".", ""))
                         wifi_signal_pct = min(100, int((link_qual / 70.0) * 100))
+                        wifi_ssid = "Wi-Fi Connected"
         except Exception:
             pass
+        if wifi_signal_pct == 0 and local_ip not in ("127.0.0.1", ""):
+            wifi_ssid = "Ethernet (Có dây)"
+            wifi_signal_pct = 100
 
         # 6. AI Services Connectivity (9Router & Voice STT)
         router_ok = False
@@ -162,20 +166,25 @@ class HostTelemetryWorker(QThread):
             stt_ok = True
         except Exception:
             stt_ok = False
-            # Fallback to DNS 8.8.8.8 check if domain resolution or port 443 timed out
-            try:
-                t0 = time.monotonic()
-                sock_d = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock_d.settimeout(0.8)
-                sock_d.connect(("8.8.8.8", 53))
-                sock_d.close()
-                stt_latency_ms = int((time.monotonic() - t0) * 1000)
-                stt_ok = True
-            except Exception:
-                stt_ok = False
 
         cloud_ok = stt_ok
         cloud_latency_ms = stt_latency_ms
+
+        # Real Jetson GPU percentage from sysfs
+        real_gpu_pct = 0.0
+        for gpu_path in (
+            "/sys/devices/gpu.0/load",
+            "/sys/devices/platform/17000000.gpu/load",
+            "/sys/devices/platform/gpu.0/load",
+        ):
+            if os.path.exists(gpu_path):
+                try:
+                    with open(gpu_path, "r", encoding="utf-8") as gf:
+                        raw_val = float(gf.read().strip())
+                        real_gpu_pct = (raw_val / 10.0) if raw_val > 100.0 else raw_val
+                        break
+                except Exception:
+                    pass
 
         # 7. Top Processes for Process Monitor
         top_procs = []
@@ -205,7 +214,7 @@ class HostTelemetryWorker(QThread):
         return {
             "cpu_pct": cpu_pct,
             "cpu_temp": cpu_temp,
-            "gpu_pct": cpu_pct * 0.8,
+            "gpu_pct": real_gpu_pct,
             "gpu_temp": gpu_temp or cpu_temp,
             "ram_used_gb": ram_used_gb,
             "ram_total_gb": ram_total_gb,

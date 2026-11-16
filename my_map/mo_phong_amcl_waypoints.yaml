@@ -3,14 +3,36 @@ locations:
   khoihanh:
     x: 0.0
     y: 0.0
-    yaw: 0.0
+    yaw: 1.7045972944598744
     note: Trạm xuất phát mô phỏng
+  diem1:
+    x: -0.254
+    y: 1.887
+    yaw: 0.5010386856461619
+    note: Điểm tuần tra 1
+  diem2:
+    x: 2.642
+    y: 3.473
+    yaw: -2.2211265530002344
+    note: Điểm tuần tra 2
 routes:
   patrol_route:
-    - khoihanh
+  - khoihanh
+  - diem1
+  - diem2
 waypoints:
-  - name: khoihanh
-    x: 0.0
-    y: 0.0
-    yaw: 0.0
-    note: Trạm xuất phát mô phỏng
+- name: khoihanh
+  x: 0.0
+  y: 0.0
+  yaw: 1.7045972944598744
+  note: Trạm xuất phát mô phỏng
+- name: diem1
+  x: -0.254
+  y: 1.887
+  yaw: 0.5010386856461619
+  note: Điểm tuần tra 1
+- name: diem2
+  x: 2.642
+  y: 3.473
+  yaw: -2.2211265530002344
+  note: Điểm tuần tra 2

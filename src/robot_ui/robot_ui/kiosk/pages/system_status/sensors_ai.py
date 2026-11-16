@@ -61,8 +61,8 @@ class SensorsAIDetailScreen(QWidget):
             subtitle="Theo dõi Tần số Cảm biến, TF Tree & Khối Thị giác Máy tính",
             back_callback=self.back_requested.emit,
             back_icon_path=self.icons.get("back"),
-            status_text="HEALTHY",
-            status=HealthStatus.HEALTHY,
+            status_text="ĐANG KIỂM TRA...",
+            status=HealthStatus.UNKNOWN,
         )
         layout.addLayout(self.header)
 
@@ -90,12 +90,12 @@ class SensorsAIDetailScreen(QWidget):
         cams_grid.addWidget(self.card_cam_ai, 0, 2)
         cams_layout.addLayout(cams_grid)
 
-        # RQT Image View Launcher buttons for each camera
+        # RQT Image View Launcher buttons for each camera (Touch Target >= 44px)
         rqt_row = QHBoxLayout()
         rqt_row.setSpacing(10)
 
         self.btn_rqt_cam_f = QPushButton("Xem RQT Cam Trước")
-        self.btn_rqt_cam_f.setFixedHeight(34)
+        self.btn_rqt_cam_f.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         self.btn_rqt_cam_f.setCursor(Qt.PointingHandCursor)
         self.btn_rqt_cam_f.setStyleSheet(f"""
             QPushButton {{
@@ -109,11 +109,11 @@ class SensorsAIDetailScreen(QWidget):
             }}
             QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ACTIVE}; border-color: {KioskTheme.COLOR_ACCENT}; }}
         """)
-        self.btn_rqt_cam_f.clicked.connect(lambda: self._launch_rqt_image_view("/camera/front/image_raw"))
+        self.btn_rqt_cam_f.clicked.connect(lambda: self._launch_rqt_image_view("/front_camera/depth/image_raw"))
         rqt_row.addWidget(self.btn_rqt_cam_f)
 
         self.btn_rqt_cam_r = QPushButton("Xem RQT Cam Sau")
-        self.btn_rqt_cam_r.setFixedHeight(34)
+        self.btn_rqt_cam_r.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         self.btn_rqt_cam_r.setCursor(Qt.PointingHandCursor)
         self.btn_rqt_cam_r.setStyleSheet(f"""
             QPushButton {{
@@ -127,11 +127,11 @@ class SensorsAIDetailScreen(QWidget):
             }}
             QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ACTIVE}; border-color: {KioskTheme.COLOR_ACCENT}; }}
         """)
-        self.btn_rqt_cam_r.clicked.connect(lambda: self._launch_rqt_image_view("/camera/rear/image_raw"))
+        self.btn_rqt_cam_r.clicked.connect(lambda: self._launch_rqt_image_view("/rear_camera/depth/image_raw"))
         rqt_row.addWidget(self.btn_rqt_cam_r)
 
-        self.btn_rqt_cam_ai = QPushButton("Xem RQT Cam AI (YOLO)")
-        self.btn_rqt_cam_ai.setFixedHeight(34)
+        self.btn_rqt_cam_ai = QPushButton("Xem RQT Cam AI RGB")
+        self.btn_rqt_cam_ai.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         self.btn_rqt_cam_ai.setCursor(Qt.PointingHandCursor)
         self.btn_rqt_cam_ai.setStyleSheet(f"""
             QPushButton {{
@@ -145,8 +145,26 @@ class SensorsAIDetailScreen(QWidget):
             }}
             QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ACTIVE}; border-color: #a855f7; }}
         """)
-        self.btn_rqt_cam_ai.clicked.connect(lambda: self._launch_rqt_image_view("/ai/image_detected"))
+        self.btn_rqt_cam_ai.clicked.connect(lambda: self._launch_rqt_image_view("/ai_camera/color/image_raw"))
         rqt_row.addWidget(self.btn_rqt_cam_ai)
+
+        self.btn_rqt_pose = QPushButton("Xem RQT Pose (Skeleton)")
+        self.btn_rqt_pose.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
+        self.btn_rqt_pose.setCursor(Qt.PointingHandCursor)
+        self.btn_rqt_pose.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                color: #38bdf8;
+                font-weight: bold;
+                font-size: 11px;
+                padding: 0 8px;
+            }}
+            QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ACTIVE}; border-color: #38bdf8; }}
+        """)
+        self.btn_rqt_pose.clicked.connect(lambda: self._launch_rqt_image_view("/pose/image_debug"))
+        rqt_row.addWidget(self.btn_rqt_pose)
 
         cams_layout.addLayout(rqt_row)
         c_layout.addWidget(card_cams)
@@ -251,6 +269,14 @@ class SensorsAIDetailScreen(QWidget):
             self.card_person.update_data(p_val, p_sub, HealthStatus.WARNING if snap.closest_person_dist < 1.8 else HealthStatus.HEALTHY)
         else:
             self.card_person.update_data("-- m", "Không phát hiện người", HealthStatus.UNKNOWN)
+
+        all_ok = bool(snap.lidar_hz >= 5.0 and snap.odom_hz >= 5.0 and snap.tf_map_odom_ok and snap.tf_odom_base_ok)
+        if all_ok:
+            self.header.set_status("HEALTHY", HealthStatus.HEALTHY)
+        elif snap.lidar_hz > 0:
+            self.header.set_status("CẢNH BÁO", HealthStatus.WARNING)
+        else:
+            self.header.set_status("CHƯA SẴN SÀNG", HealthStatus.CRITICAL)
 
     def _launch_rqt_image_view(self, topic: str) -> None:
         """Launch rqt_image_view process detached in background."""
