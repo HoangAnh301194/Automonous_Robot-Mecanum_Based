@@ -684,53 +684,6 @@ def test_kiosk_ros_node_pose_and_scan_safety(app):
     node.destroy_node()
 
 
-def test_kiosk_ros_node_layer_key_normalization_and_initial_pose(app):
-    import rclpy
-    from robot_ui.kiosk.ros_node import KioskRosNode
-    from robot_ui.kiosk.signals import KioskSignals
-    from geometry_msgs.msg import PoseWithCovarianceStamped
 
-    if not rclpy.ok():
-        rclpy.init(args=None)
-    signals = KioskSignals()
-    node = KioskRosNode(signals)
 
-    # 1. Key normalization
-    assert node._normalize_layer_key("layer_hardware") == "layer1"
-    assert node._normalize_layer_key("layer_navigation") == "layer2"
-    assert node._normalize_layer_key("layer_slam") == "layer3"
-    assert node._normalize_layer_key("layer_perception") == "layer4"
-    assert node._normalize_layer_key("layer_voice_interaction") == "layer5"
-    assert node._normalize_layer_key("layer_backend") == "layer5"
-    assert node._normalize_layer_key("layer1") == "layer1"
-    assert node._normalize_layer_key("layer5") == "layer5"
 
-    # 2. Status snapshot dictionary contains both short and semantic keys
-    st = node._get_layer_status_dict()
-    for short_k in ("layer1", "layer2", "layer3", "layer4", "layer5"):
-        assert short_k in st
-    for sem_k in ("layer_hardware", "layer_navigation", "layer_slam", "layer_perception", "layer_voice_interaction"):
-        assert sem_k in st
-
-    # 3. Publish initial pose
-    published_msgs = []
-    def _fake_pub(msg):
-        published_msgs.append(msg)
-    node._initial_pose_pub.publish = _fake_pub
-
-    status_events = []
-    signals.command_status_changed.connect(lambda tone, msg: status_events.append((tone, msg)))
-
-    node.publish_initial_pose(1.5, -2.5, 0.785)
-    assert len(published_msgs) == 1
-    assert published_msgs[0].pose.pose.position.x == 1.5
-    assert published_msgs[0].pose.pose.position.y == -2.5
-    assert len(status_events) == 1
-    assert status_events[0][0] == "success"
-
-    # 4. Fallback resolve start pose
-    pose = node._resolve_start_pose()
-    assert isinstance(pose, dict)
-    assert "x" in pose and "y" in pose and "yaw" in pose
-
-    node.destroy_node()

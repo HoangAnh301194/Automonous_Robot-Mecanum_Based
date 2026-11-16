@@ -622,7 +622,6 @@ class KioskWindow(QMainWindow):
         self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
         self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
         self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
-        self.navigation_page.initial_pose_requested.connect(lambda: self.ros_node.publish_initial_pose())
         self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.slam_page.home_requested.connect(self.return_to_home)
         self.slam_page.back_requested.connect(self.go_back)

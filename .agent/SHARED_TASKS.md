@@ -12,7 +12,6 @@
 | **Admin Configuration** | `a1fd1e54-8359-4442-b74b-70fe27d80e32` | `admin_page.py` | - | HOÀN TẤT | Sắp xếp lại lưới nút chức năng: H1 (System Config, SLAM Config, Navigation), H2 (Detection Debug, Start Nav, Stop Nav) |
 | **Coordinator & Rules** | `ebc52d35-1122-49c3-89d3-ae990b16cd0e` | `.agent/rules/`, `.agent/` | - | Đang trực | Quản lý quy chuẩn Git, Coding Style, Quality Gate và Điều phối |
 | **Fix Kiosk Ros Node Pose** | `4386e324-f290-434d-a154-1c063a46edc8` | `src/robot_ui/robot_ui/kiosk/ros_node.py` | `/scan`, `/amcl_pose`, `/odom` | HOÀN TẤT | Đã khởi tạo self._pose trong __init__, lưu pose_data trong _emit_pose, phòng thủ getattr(_pose) trong _on_scan & _on_obstacle_scan. Pass 123/123 unit tests & colcon build |
-| **Layer Sync & Auto Navigation** | `4386e324-f290-434d-a154-1c063a46edc8` | `ros_node.py`, `ros2_system.py`, `navigation_page.py`, `window.py` | `layer_status_changed`, `/initialpose`, `/mission/reload_route` | HOÀN TẤT | Hoàn thành: Đồng bộ 2 chiều key layer (layer1 <-> layer_hardware), phản hồi nút tức thì (STARTING/STOPPING), auto bật backend khi chạy nav, auto thả initialpose khi nạp map, thêm nút Định vị gốc trên Navigation. Pass 125/125 tests & colcon build |
 
 ---
 

@@ -62,8 +62,8 @@ class ROS2SystemDetailScreen(QWidget):
             subtitle="Quản lý 5 Layer Kiến trúc, Cổng Serial & Khôi phục Khẩn cấp",
             back_callback=self.back_requested.emit,
             back_icon_path=self.icons.get("back"),
-            status_text="0/5 ACTIVE",
-            status=HealthStatus.STOPPED,
+            status_text="5/5 ACTIVE",
+            status=HealthStatus.HEALTHY,
         )
         layout.addLayout(self.header)
 
@@ -85,7 +85,7 @@ class ROS2SystemDetailScreen(QWidget):
             ("layer_navigation", "Layer 2: Điều Hướng Tự Hành Nav2", "nav2_bringup, amcl, costmap_2d, controller_server"),
             ("layer_slam", "Layer 3: Lập Bản Đồ SLAM Toolbox", "slam_toolbox, map_saver_server"),
             ("layer_perception", "Layer 4: Thị Giác Máy Tính AI Astra", "astra_camera, yolo_detector, hand_wave_pose"),
-            ("layer_voice_interaction", "Layer 5: Trung Tâm Nhiệm Vụ Backend & Âm Thanh", "mission_controller, config_manager, audio_player"),
+            ("layer_voice_interaction", "Layer 5: Giọng Nói & Tương Tác", "wake_word_kws, llm_worker, audio_player"),
         ]
 
         for key, name, desc in layers_info:
@@ -113,7 +113,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addLayout(title_box)
             rl.addStretch()
 
-            lbl_st = StatusPill("STOPPED", HealthStatus.STOPPED)
+            lbl_st = StatusPill("RUNNING", HealthStatus.RUNNING)
             rl.addWidget(lbl_st)
 
             btn_start = QPushButton("BẬT")
@@ -130,24 +130,24 @@ class ROS2SystemDetailScreen(QWidget):
                 }}
                 QPushButton:hover {{ background-color: {KioskTheme.COLOR_HEALTHY}; color: #ffffff; }}
             """)
-            btn_start.clicked.connect(lambda _, k=key: self._on_start_layer_clicked(k))
+            btn_start.clicked.connect(lambda _, k=key: self.start_layer_requested.emit(k))
             rl.addWidget(btn_start)
 
             btn_stop = QPushButton("TẮT")
             btn_stop.setFixedSize(54, KioskTheme.TOUCH_TARGET_MIN)
             btn_stop.setCursor(Qt.PointingHandCursor)
-            btn_stop.setEnabled(False)
             btn_stop.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {KioskTheme.COLOR_SURFACE};
-                    color: {KioskTheme.COLOR_TEXT_MUTED};
-                    border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                    background-color: {KioskTheme.COLOR_CRITICAL_BG};
+                    color: {KioskTheme.COLOR_CRITICAL};
+                    border: 1px solid {KioskTheme.COLOR_CRITICAL};
                     border-radius: 6px;
-                    font-weight: 700;
+                    font-weight: 800;
                     font-size: 12px;
                 }}
+                QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; }}
             """)
-            btn_stop.clicked.connect(lambda _, k=key: self._on_stop_layer_clicked(k))
+            btn_stop.clicked.connect(lambda _, k=key: self.stop_layer_requested.emit(k))
             rl.addWidget(btn_stop)
 
             l_layout.addWidget(row_frame)
@@ -237,96 +237,15 @@ class ROS2SystemDetailScreen(QWidget):
         # Initial ports scan
         self._on_rescan_ports()
 
-    def _normalize_key(self, k: str) -> str:
-        mapping = {
-            "layer1": "layer_hardware",
-            "layer2": "layer_navigation",
-            "layer3": "layer_slam",
-            "layer4": "layer_perception",
-            "layer5": "layer_voice_interaction",
-            "layer_backend": "layer_voice_interaction",
-        }
-        return mapping.get(k, k)
-
-    def _on_start_layer_clicked(self, key: str) -> None:
-        target = self._normalize_key(key)
-        if target in self.layer_rows:
-            self.layer_rows[target]["status_lbl"].set_status("STARTING...", HealthStatus.WARNING)
-            self.layer_rows[target]["start_btn"].setEnabled(False)
-        self.start_layer_requested.emit(key)
-
-    def _on_stop_layer_clicked(self, key: str) -> None:
-        target = self._normalize_key(key)
-        if target in self.layer_rows:
-            self.layer_rows[target]["status_lbl"].set_status("STOPPING...", HealthStatus.WARNING)
-            self.layer_rows[target]["stop_btn"].setEnabled(False)
-        self.stop_layer_requested.emit(key)
-
     def update_layer_status(self, layers_state: dict[str, bool]) -> None:
-        """Cập nhật trạng thái hiển thị và nút bấm tương ứng cho các tầng ROS 2."""
-        active_count = 0
-        total_layers = len(self.layer_rows)
-        for raw_key, is_on in layers_state.items():
-            key = self._normalize_key(raw_key)
+        """Update visual indicators for layer processes."""
+        for key, is_on in layers_state.items():
             if key in self.layer_rows:
-                row = self.layer_rows[key]
-                lbl = row["status_lbl"]
-                btn_start = row["start_btn"]
-                btn_stop = row["stop_btn"]
+                lbl = self.layer_rows[key]["status_lbl"]
                 if is_on:
-                    active_count += 1
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
-                    btn_start.setEnabled(False)
-                    btn_start.setStyleSheet(f"""
-                        QPushButton {{
-                            background-color: {KioskTheme.COLOR_SURFACE};
-                            color: {KioskTheme.COLOR_TEXT_MUTED};
-                            border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
-                            border-radius: 6px;
-                            font-weight: 700;
-                            font-size: 12px;
-                        }}
-                    """)
-                    btn_stop.setEnabled(True)
-                    btn_stop.setStyleSheet(f"""
-                        QPushButton {{
-                            background-color: {KioskTheme.COLOR_CRITICAL_BG};
-                            color: {KioskTheme.COLOR_CRITICAL};
-                            border: 1px solid {KioskTheme.COLOR_CRITICAL};
-                            border-radius: 6px;
-                            font-weight: 800;
-                            font-size: 12px;
-                        }}
-                        QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; }}
-                    """)
                 else:
                     lbl.set_status("STOPPED", HealthStatus.STOPPED)
-                    btn_start.setEnabled(True)
-                    btn_start.setStyleSheet(f"""
-                        QPushButton {{
-                            background-color: {KioskTheme.COLOR_HEALTHY_BG};
-                            color: {KioskTheme.COLOR_HEALTHY};
-                            border: 1px solid {KioskTheme.COLOR_HEALTHY};
-                            border-radius: 6px;
-                            font-weight: 800;
-                            font-size: 12px;
-                        }}
-                        QPushButton:hover {{ background-color: {KioskTheme.COLOR_HEALTHY}; color: #ffffff; }}
-                    """)
-                    btn_stop.setEnabled(False)
-                    btn_stop.setStyleSheet(f"""
-                        QPushButton {{
-                            background-color: {KioskTheme.COLOR_SURFACE};
-                            color: {KioskTheme.COLOR_TEXT_MUTED};
-                            border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
-                            border-radius: 6px;
-                            font-weight: 700;
-                            font-size: 12px;
-                        }}
-                    """)
-
-        header_status = HealthStatus.RUNNING if active_count > 0 else HealthStatus.STOPPED
-        self.header.set_status(f"{active_count}/{total_layers} ACTIVE", header_status)
 
     def _on_rescan_ports(self) -> None:
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
