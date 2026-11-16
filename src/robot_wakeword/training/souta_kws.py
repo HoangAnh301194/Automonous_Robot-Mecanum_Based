@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 # Public re-exports preserve imports in existing test_pipeline.py and scripts.
+from kws_core.constants import SAMPLE_RATE, WINDOW, HOP, CATEGORIES, SPLITS
 from kws_core.audio import read_wav, write_wav, record, window_audio, augment_pcm
 from kws_core.dataset import group_assignment, prepare, load_manifest
 from kws_core.features import get_feature_extractor, extract
