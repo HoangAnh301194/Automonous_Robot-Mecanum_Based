@@ -533,6 +533,7 @@ class KioskWindow(QMainWindow):
             wait_icon=icon_path("service_wait.png"),
             continue_icon=icon_path("service_continue.png"),
             service_icon=icon_path("service.png"),
+            mascot_image=icon_path("mochi_service_light.jpg"),
         )
         slam_icons = {
             "home": icon_path("homeIcon.png"),
@@ -738,7 +739,7 @@ class KioskWindow(QMainWindow):
 
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        self.idle_page.video.set_video(self.emotions.path("idle"))
+        self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)

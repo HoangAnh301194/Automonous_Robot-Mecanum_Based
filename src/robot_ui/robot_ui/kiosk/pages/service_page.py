@@ -1,11 +1,80 @@
-"""Robot dining and beverage service selection page."""
+"""PTIT Mochi light-theme Service page with native, accessible Qt touch controls."""
 from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QSize, pyqtSignal
-from PyQt5.QtGui import QIcon, QPixmap
-from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import Qt, QRect, QSize, pyqtSignal
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+
+
+class ServiceMascotCanvas(QWidget):
+    """Draw the artwork without distortion and align hit regions to its eye buttons."""
+
+    def __init__(self, image_file: Path | None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._image = QPixmap(str(image_file)) if image_file and image_file.is_file() else QPixmap()
+        self.setMinimumHeight(290)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.wait_button = self._make_button("Phục vụ", "wait")
+        self.continue_button = self._make_button("Hoàn tất", "continue")
+        self.set_selected(None)
+
+    def _make_button(self, label: str, mode: str) -> QPushButton:
+        btn = QPushButton(self)
+        btn.setObjectName("serviceMascotButton")
+        btn.setProperty("mode", mode)
+        btn.setAccessibleName(label)
+        btn.setToolTip(label)
+        btn.setCursor(Qt.PointingHandCursor)
+        btn.setFocusPolicy(Qt.StrongFocus)
+        if self._image.isNull():
+            btn.setText(label)
+        return btn
+
+    def _art_rect(self) -> QRect:
+        side = max(1, min(self.width(), self.height()))
+        return QRect((self.width()-side)//2, (self.height()-side)//2, side, side)
+
+    def resizeEvent(self, event) -> None:
+        rect = self._art_rect()
+        for button, x_fraction in ((self.wait_button, .184), (self.continue_button, .535)):
+            button.setGeometry(
+                rect.x() + round(rect.width()*x_fraction),
+                rect.y() + round(rect.height()*.360),
+                max(44, round(rect.width()*.29)),
+                max(44, round(rect.height()*.260)),
+            )
+            button.raise_()
+        super().resizeEvent(event)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+        if not self._image.isNull():
+            painter.setRenderHint(QPainter.SmoothPixmapTransform)
+            painter.drawPixmap(self._art_rect(), self._image)
+
+    def set_selected(self, mode: str | None) -> None:
+        for btn, ident, base in (
+            (self.wait_button, "wait", "#0764b2"),
+            (self.continue_button, "continue", "#198b40"),
+        ):
+            selected = mode == ident
+            btn.setProperty("selected", selected)
+            if self._image.isNull():
+                btn.setStyleSheet(
+                    "QPushButton { background: " + base + "; color: white;"
+                    " border: 3px solid " + ("#b32632" if selected else base) +
+                    "; border-radius: 16px; font-size: 19px; font-weight: 700; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    "QPushButton { background: transparent; border: " +
+                    ("3px solid #b32632" if selected else "0px solid transparent") +
+                    "; border-radius: 18px; }"
+                    "QPushButton:focus { border: 3px solid #b32632; }"
+                )
 
 
 class ServicePage(QWidget):
@@ -16,13 +85,10 @@ class ServicePage(QWidget):
 
     def __init__(
         self,
-        back_icon: Path | None = None,
-        wait_icon: Path | None = None,
-        continue_icon: Path | None = None,
-        service_icon: Path | None = None,
-        home_icon: Path | None = None,
-        emergency_icon: Path | None = None,
-        parent: QWidget | None = None,
+        back_icon: Path | None = None, wait_icon: Path | None = None,
+        continue_icon: Path | None = None, service_icon: Path | None = None,
+        home_icon: Path | None = None, emergency_icon: Path | None = None,
+        parent: QWidget | None = None, mascot_image: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("servicePage")
@@ -30,261 +96,76 @@ class ServicePage(QWidget):
         self._selected_mode: str | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 14, 20, 16)
-        root.setSpacing(10)
-
-        # 1. Header (Nền đen #080808)
-        header = QFrame()
+        root.setContentsMargins(20, 12, 20, 14)
+        root.setSpacing(8)
+        header = QFrame(self)
         header.setObjectName("serviceHeader")
-        header.setMinimumHeight(64)
-        header.setMaximumHeight(72)
+        header.setFixedHeight(62)
         header_layout = QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 8, 12, 8)
-        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(12, 7, 12, 7)
+        header_layout.setSpacing(9)
 
-        # Nút Home bên trái
-        self.home_button = QPushButton()
-        self.home_button.setObjectName("serviceHomeButton")
-        self.home_button.setCursor(Qt.PointingHandCursor)
-        self.home_button.setFixedSize(46, 46)
-        self.home_button.setToolTip("Về màn hình chính")
-        if home_icon and Path(home_icon).is_file():
-            self.home_button.setIcon(QIcon(str(home_icon)))
-            self.home_button.setIconSize(QSize(28, 28))
-        else:
-            self.home_button.setText("🏠")
-            self.home_button.setStyleSheet("font-size: 22px;")
-        self.home_button.clicked.connect(self.home_requested.emit)
-        header_layout.addWidget(self.home_button)
-
-        # Nút Dừng khẩn cấp
-        self.emergency_button = QPushButton()
-        self.emergency_button.setObjectName("serviceEmergencyButton")
-        self.emergency_button.setCursor(Qt.PointingHandCursor)
-        self.emergency_button.setFixedSize(46, 46)
-        self.emergency_button.setToolTip("DỪNG KHẨN CẤP")
-        if emergency_icon and Path(emergency_icon).is_file():
-            self.emergency_button.setIcon(QIcon(str(emergency_icon)))
-            self.emergency_button.setIconSize(QSize(36, 36))
-        else:
-            self.emergency_button.setText("🛑")
-            self.emergency_button.setStyleSheet("font-size: 24px;")
-        self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
-        header_layout.addWidget(self.emergency_button)
-
-        # Nút Back bên trái
-        self.back_button = QPushButton()
-        self.back_button.setObjectName("serviceBackButton")
-        self.back_button.setCursor(Qt.PointingHandCursor)
-        self.back_button.setFixedSize(46, 46)
-        self.back_button.setToolTip("Quay lại")
-        if back_icon and Path(back_icon).is_file():
-            self.back_button.setIcon(QIcon(str(back_icon)))
-            self.back_button.setIconSize(QSize(28, 28))
-        else:
-            self.back_button.setText("‹")
-            self.back_button.setStyleSheet("color: #ffb32c; font-size: 28px; font-weight: 700;")
-        self.back_button.clicked.connect(self.back_requested.emit)
-        header_layout.addWidget(self.back_button)
-
-        # Tiêu đề & Subtitle
-        heading = QVBoxLayout()
-        heading.setSpacing(2)
-        title = QLabel("SERVICE")
-        title.setObjectName("serviceHeaderTitle")
-        subtitle = QLabel("Souta Robot · Phục vụ nước")
-        subtitle.setObjectName("serviceHeaderSubtitle")
-        heading.addWidget(title)
-        heading.addWidget(subtitle)
-        header_layout.addLayout(heading)
-
-        header_layout.addStretch(1)
-
-        # Icon ly nước nhỏ bên phải nếu có service.png
-        if service_icon and Path(service_icon).is_file():
-            service_lbl = QLabel()
-            service_lbl.setObjectName("serviceHeaderIcon")
-            service_lbl.setFixedSize(36, 36)
-            service_lbl.setAlignment(Qt.AlignCenter)
-            pm = QPixmap(str(service_icon))
-            if not pm.isNull():
-                service_lbl.setPixmap(pm.scaled(28, 28, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            header_layout.addWidget(service_lbl)
-
-        root.addWidget(header)
-
-        # 2. Main Content
-        root.addStretch(1)
-
-        center_vbox = QVBoxLayout()
-        center_vbox.setSpacing(6)
-        center_vbox.setAlignment(Qt.AlignCenter)
-
-        main_title = QLabel("Dịch vụ phục vụ nước")
-        main_title.setObjectName("serviceMainTitle")
-        main_title.setAlignment(Qt.AlignCenter)
-        center_vbox.addWidget(main_title)
-
-        instruction = QLabel("Vui lòng lựa chọn chức năng bên dưới")
-        instruction.setObjectName("serviceInstruction")
-        instruction.setAlignment(Qt.AlignCenter)
-        center_vbox.addWidget(instruction)
-
-        root.addLayout(center_vbox)
-        root.addSpacing(16)
-
-        # Hai button lớn nằm ngang, kích thước tương đương nhau, căn giữa cửa sổ
-        cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(24)
-        cards_layout.setAlignment(Qt.AlignCenter)
-
-        def make_service_card(
-            icon_file: Path | None,
-            title_text: str,
-            desc_text: str,
-            mode_id: str,
-        ) -> QPushButton:
+        def action_button(obj: str, label: str, icon: Path | None) -> QPushButton:
             btn = QPushButton()
-            btn.setObjectName("serviceCard")
-            btn.setProperty("mode", mode_id)
-            btn.setProperty("selected", False)
+            btn.setObjectName(obj)
+            btn.setFixedSize(46, 46)
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setFixedSize(280, 180)
-
-            btn_layout = QVBoxLayout(btn)
-            btn_layout.setContentsMargins(16, 16, 16, 16)
-            btn_layout.setSpacing(8)
-            btn_layout.setAlignment(Qt.AlignCenter)
-
-            icon_lbl = QLabel()
-            icon_lbl.setObjectName("serviceCardIcon")
-            icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            icon_lbl.setFixedSize(72, 72)
-            icon_lbl.setAlignment(Qt.AlignCenter)
-            if icon_file and Path(icon_file).is_file():
-                pm = QPixmap(str(icon_file))
-                if not pm.isNull():
-                    icon_lbl.setPixmap(pm.scaled(68, 68, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            btn_layout.addWidget(icon_lbl, 0, Qt.AlignCenter)
-
-            t_lbl = QLabel(title_text)
-            t_lbl.setObjectName("serviceCardTitle")
-            t_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            t_lbl.setAlignment(Qt.AlignCenter)
-            btn_layout.addWidget(t_lbl, 0, Qt.AlignCenter)
-
-            d_lbl = QLabel(desc_text)
-            d_lbl.setObjectName("serviceCardDesc")
-            d_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
-            d_lbl.setAlignment(Qt.AlignCenter)
-            btn_layout.addWidget(d_lbl, 0, Qt.AlignCenter)
-
-            btn.clicked.connect(lambda: self._select_mode(mode_id))
+            btn.setAccessibleName(label)
+            btn.setToolTip(label)
+            if icon and icon.is_file():
+                btn.setIcon(QIcon(str(icon)))
+                btn.setIconSize(QSize(30, 30))
+            else:
+                btn.setText("‹" if label == "Quay lại" else ("!" if label == "Dừng khẩn cấp" else "⌂"))
             return btn
 
-        # Button 1 — Chờ phục vụ
-        self.btn_wait = make_service_card(
-            wait_icon,
-            "CHỜ PHỤC VỤ",
-            "Chế độ chờ phục vụ khách",
-            "wait",
-        )
+        self.home_button = action_button("serviceHomeButton", "Trang chủ", home_icon)
+        self.home_button.clicked.connect(self.home_requested.emit)
+        header_layout.addWidget(self.home_button)
+        self.back_button = action_button("serviceBackButton", "Quay lại", back_icon)
+        self.back_button.clicked.connect(self.back_requested.emit)
+        header_layout.addWidget(self.back_button)
+        heading = QLabel("DỊCH VỤ PHỤC VỤ NƯỚC")
+        heading.setObjectName("serviceHeaderTitle")
+        header_layout.addWidget(heading)
+        header_layout.addStretch(1)
+        self.emergency_button = action_button("serviceEmergencyButton", "Dừng khẩn cấp", emergency_icon)
+        self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
+        header_layout.addWidget(self.emergency_button)
+        root.addWidget(header)
 
-        # Button 2 — Hoàn tất & tiếp tục
-        self.btn_continue = make_service_card(
-            continue_icon,
-            "HOÀN TẤT & TIẾP TỤC",
-            "Xác nhận kết thúc phục vụ",
-            "continue",
-        )
-
-        cards_layout.addWidget(self.btn_wait)
-        cards_layout.addWidget(self.btn_continue)
-        root.addLayout(cards_layout)
-
-        root.addStretch(2)
-
-        # 3. Footer
-        footer = QLabel("Đã kết nối điều khiển robot · Nhấn nút để kích hoạt")
+        self.mascot_canvas = ServiceMascotCanvas(mascot_image, self)
+        self.btn_wait = self.mascot_canvas.wait_button
+        self.btn_continue = self.mascot_canvas.continue_button
+        self.btn_wait.clicked.connect(lambda: self._select_mode("wait"))
+        self.btn_continue.clicked.connect(lambda: self._select_mode("continue"))
+        root.addWidget(self.mascot_canvas, 1)
+        footer = QLabel("Phục vụ: bắt đầu phục vụ nước    ·    Hoàn tất: kết thúc phục vụ")
         footer.setObjectName("serviceFooter")
         footer.setAlignment(Qt.AlignCenter)
         root.addWidget(footer)
 
         self.setStyleSheet("""
-            QWidget#servicePage {
-                background-color: #080808;
+            QWidget#servicePage { background-color: #ffffff; }
+            QFrame#serviceHeader { background: #ffffff; border: 1px solid #dbe4ef; border-radius: 12px; }
+            QLabel#serviceHeaderTitle { color: #b32632; font-size: 19px; font-weight: 800; }
+            QPushButton#serviceHomeButton, QPushButton#serviceBackButton {
+                background: #f2f5fa; border: 1px solid #dbe4ef; border-radius: 10px;
             }
-            QFrame#serviceHeader {
-                background-color: #080808;
-                border-bottom: 1px solid #1c1c1c;
-                border-radius: 8px;
+            QPushButton#serviceHomeButton:hover, QPushButton#serviceBackButton:hover {
+                background: #e9eff7; border-color: #b32632;
             }
-            QPushButton#serviceBackButton {
-                background: #171717;
-                border: 1px solid #3a3a3a;
-                border-radius: 11px;
+            QPushButton#serviceEmergencyButton {
+                background: #fff0f2; border: 1px solid #f4c9d0; border-radius: 10px;
             }
-            QPushButton#serviceBackButton:hover {
-                background: #242424;
-                border-color: #4f4f4f;
-            }
-            QPushButton#serviceBackButton:pressed {
-                background: #2b2b2b;
-            }
-            QLabel#serviceHeaderTitle {
-                color: #ffffff;
-                font-size: 16px;
-                font-weight: 700;
-            }
-            QLabel#serviceHeaderSubtitle {
-                color: #8d8d8d;
-                font-size: 11px;
-            }
-            QLabel#serviceMainTitle {
-                color: #ffffff;
-                font-size: 20px;
-                font-weight: 700;
-            }
-            QLabel#serviceInstruction {
-                color: #9a9a9a;
-                font-size: 13px;
-            }
-            QPushButton#serviceCard {
-                background-color: #1C1C1C;
-                border: 1px solid #404040;
-                border-radius: 14px;
-            }
-            QPushButton#serviceCard:hover {
-                background-color: #242424;
-                border-color: #555555;
-            }
-            QPushButton#serviceCard[selected="true"] {
-                background-color: #262626;
-                border: 2px solid #ffb32c;
-            }
-            QLabel#serviceCardTitle {
-                color: #ffffff;
-                font-size: 16px;
-                font-weight: 700;
-            }
-            QLabel#serviceCardDesc {
-                color: #a0a0a0;
-                font-size: 12px;
-            }
-            QLabel#serviceFooter {
-                color: #777777;
-                font-size: 12px;
-            }
+            QLabel#serviceFooter { color: #627185; font-size: 13px; }
         """)
 
     def _select_mode(self, mode: str, emit_signal: bool = True) -> None:
+        if mode not in {"wait", "continue"}:
+            return
         self._selected_mode = mode
-        self.btn_wait.setProperty("selected", mode == "wait")
-        self.btn_continue.setProperty("selected", mode == "continue")
-        self.btn_wait.style().unpolish(self.btn_wait)
-        self.btn_wait.style().polish(self.btn_wait)
-        self.btn_continue.style().unpolish(self.btn_continue)
-        self.btn_continue.style().polish(self.btn_continue)
+        self.mascot_canvas.set_selected(mode)
         if emit_signal:
             self.mode_selected.emit(mode)
 
@@ -296,9 +177,4 @@ class ServicePage(QWidget):
 
     def reset_selection(self) -> None:
         self._selected_mode = None
-        self.btn_wait.setProperty("selected", False)
-        self.btn_continue.setProperty("selected", False)
-        self.btn_wait.style().unpolish(self.btn_wait)
-        self.btn_wait.style().polish(self.btn_wait)
-        self.btn_continue.style().unpolish(self.btn_continue)
-        self.btn_continue.style().polish(self.btn_continue)
+        self.mascot_canvas.set_selected(None)

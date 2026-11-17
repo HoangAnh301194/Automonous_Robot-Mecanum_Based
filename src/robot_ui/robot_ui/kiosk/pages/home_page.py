@@ -17,6 +17,7 @@ class VideoBackground(QWidget):
         super().__init__(parent)
         self._capture: cv2.VideoCapture | None = None
         self._pixmap = QPixmap()
+        self._static_image = QPixmap()
         self._path: Path | None = None
         self._display_scale = 0.9
         self._vertical_offset_px = 0
@@ -56,7 +57,15 @@ class VideoBackground(QWidget):
         self._vertical_offset_px = offset_px
         self.update()
 
+    def set_static_image(self, path: Path) -> None:
+        """Static light-theme mascot, without OpenCV video decode/loop."""
+        self.stop()
+        self._static_image = QPixmap(str(path))
+        self.update()
+
     def set_video(self, path: Path) -> None:
+        if not self._static_image.isNull():
+            return
         if self._path == path and self._capture is not None:
             return
         self.stop()
@@ -124,12 +133,22 @@ class VideoBackground(QWidget):
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#000000"))
+        painter.fillRect(self.rect(), QColor("#ffffff"))
+        if not self._static_image.isNull():
+            image = self._static_image.scaled(
+                max(1, round(self.width() * self._display_scale)),
+                max(1, round(self.height() * self._display_scale)),
+                Qt.KeepAspectRatio, Qt.SmoothTransformation,
+            )
+            x = (self.width() - image.width()) // 2
+            y = (self.height() - image.height()) // 2 + self._vertical_offset_px
+            painter.drawPixmap(x, y, image)
+            return
         if not self._pixmap.isNull():
             x = (self.width() - self._pixmap.width()) // 2
             y = (self.height() - self._pixmap.height()) // 2 + self._vertical_offset_px
             painter.drawPixmap(x, y, self._pixmap)
-        painter.fillRect(self.rect(), QColor(0, 0, 0, 22))
+        # Light theme: no dark overlay on idle mascot.
 
     def closeEvent(self, event: Any) -> None:
         self.stop()
