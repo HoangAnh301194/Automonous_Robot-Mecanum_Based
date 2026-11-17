@@ -172,18 +172,18 @@ class VolumeSliderWidget(QFrame):
 
         self.setStyleSheet("""
             QFrame#volumeSliderWidget {
-                background: #1c1c1c;
+                background: #f3f6fa;
                 border: 1px solid #383838;
                 border-radius: 12px;
             }
             QLabel#volumeLabel {
-                color: #ffb32c;
+                color: #b32632;
                 font-size: 12px;
                 font-weight: 700;
             }
             QSlider#volumeSlider::groove:horizontal {
                 height: 8px;
-                background: #2b2b2b;
+                background: #e8eef4;
                 border-radius: 4px;
             }
             QSlider#volumeSlider::sub-page:horizontal {
@@ -352,7 +352,7 @@ class ChatPage(QWidget):
             back.setIconSize(QSize(28, 28))
         else:
             back.setText("‹")
-            back.setStyleSheet("color: #ffb32c; font-size: 29px; font-weight: 700;")
+            back.setStyleSheet("color: #b32632; font-size: 29px; font-weight: 700;")
         back.clicked.connect(self.back_requested.emit)
         header_layout.addWidget(back)
 

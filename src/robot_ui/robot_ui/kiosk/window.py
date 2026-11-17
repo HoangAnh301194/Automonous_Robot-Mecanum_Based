@@ -67,9 +67,7 @@ QLabel#homeTelemetryBadge {
     font-size: 11px;
     font-weight: 700;
 }
-QLabel#homeTelemetryBadge {
-    background: rgba(15, 22, 27, 185);
-}
+QLabel#homeTelemetryBadge { background: rgba(255, 255, 255, 220); color: #253448; }
 QFrame#bottomNavigation {
     background: transparent;
     border: none;
@@ -86,18 +84,12 @@ QPushButton#kioskNavButton:checked {
     background: transparent;
     border-bottom: 3px solid #d97800;
 }
-QPushButton#kioskNavButton[dark="true"] {
-    color: white;
-}
-QPushButton#kioskNavButton[dark="true"]:checked {
-    color: #ffb32c;
-    border-bottom: 3px solid #ffb32c;
-}
+
 QPushButton#kioskNavButton:pressed {
     background: transparent;
 }
 QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeButton, QPushButton#navBackButton {
-    background: #1e293b;
+    background: #eaf0f7;
     border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
 }
@@ -194,7 +186,7 @@ QPushButton#dangerButton {
 }
 QLineEdit#chatInput {
     color: #f2f2f2;
-    background: #111111;
+    background: #ffffff;
     border: 1px solid #383838;
     border-radius: 11px;
     padding: 0 15px;
@@ -231,20 +223,20 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0;
 }
 QWidget#navigationPage {
-    background: #000000;
+    background: #f7f9fc;
 }
 QFrame#navControlBar {
-    background: #0d0d0d;
-    border: 1px solid #2d2d2d;
+    background: #ffffff;
+    border: 1px solid #d6e0e9;
     border-radius: 13px;
 }
 QPushButton#navHomeButton {
-    background: #171717;
-    border: 1px solid #3a3a3a;
+    background: #f4f7fb;
+    border: 1px solid #d2dde8;
     border-radius: 9px;
 }
 QPushButton#navHomeButton:pressed {
-    background: #2b2b2b;
+    background: #e8eef4;
 }
 QLabel#navClock {
     color: #eeeeee;
@@ -263,7 +255,7 @@ QLabel#navPrompt[tone="error"] {
     color: #ff667d;
 }
 QLabel#navPrompt[tone="success"] {
-    color: #4ae1a1;
+    color: #19754c;
 }
 QPushButton#navStartButton, QPushButton#navStopButton {
     background: transparent;
@@ -271,20 +263,20 @@ QPushButton#navStartButton, QPushButton#navStopButton {
     padding: 0;
 }
 QWidget#chatPage, QWidget#chatMessageContainer, QWidget#chatMessageRow {
-    background: #000000;
+    background: #f7f9fc;
 }
 QFrame#chatHeader, QFrame#chatInputBar {
-    background: #0d0d0d;
-    border: 1px solid #2d2d2d;
+    background: #ffffff;
+    border: 1px solid #d6e0e9;
     border-radius: 13px;
 }
 QLabel#chatHeaderIcon {
-    background: #171717;
-    border: 1px solid #3a3a3a;
+    background: #f4f7fb;
+    border: 1px solid #d2dde8;
     border-radius: 9px;
 }
 QLabel#chatTitle {
-    color: #f4f4f4;
+    color: #1d2938;
     font-size: 15px;
     font-weight: 700;
 }
@@ -293,16 +285,16 @@ QLabel#chatSubtitle {
     font-size: 11px;
 }
 QPushButton#chatSpeakerButton {
-    background: #171717;
-    border: 1px solid #3a3a3a;
+    background: #f4f7fb;
+    border: 1px solid #d2dde8;
     border-radius: 11px;
 }
 QPushButton#chatSpeakerButton:pressed {
-    background: #2b2b2b;
+    background: #e8eef4;
 }
 QPushButton#chatStopSpeakingButton {
     color: #ff667d;
-    background: #241014;
+    background: #fff0f2;
     border: 1px solid #5a1d28;
     border-radius: 11px;
     padding: 6px 12px;
@@ -317,9 +309,9 @@ QFrame#suggestionContainer {
     border: none;
 }
 QPushButton#suggestionChip {
-    color: #e2e8f0;
-    background: #141414;
-    border: 1px solid #2e2e2e;
+    color: #263747;
+    background: #f3f6fa;
+    border: 1px solid #d6e0e9;
     border-radius: 12px;
     padding: 9px 12px;
     font-size: 13px;
@@ -332,8 +324,8 @@ QPushButton#suggestionChip:pressed {
     border-color: #ffb32c;
 }
 QFrame#typingBubble {
-    background: #181818;
-    border: 1px solid #282828;
+    background: #f3f6fa;
+    border: 1px solid #e1e8ef;
     border-radius: 12px;
 }
 QLabel#typingText {
@@ -342,12 +334,12 @@ QLabel#typingText {
     font-style: italic;
 }
 QPushButton#chatMicButton {
-    background: #181818;
-    border: 2px solid #3a3a3a;
+    background: #f3f6fa;
+    border: 2px solid #d2dde8;
     border-radius: 50px;
 }
 QPushButton#chatMicButton:hover {
-    background: #282828;
+    background: #e1e8ef;
     border-color: #ffb32c;
 }
 QPushButton#chatMicButton:pressed {
@@ -360,7 +352,7 @@ QPushButton#chatMicButton[listening="true"] {
 }
 QPushButton#chatMicButton:disabled {
     background: #101010;
-    border-color: #222222;
+    border-color: #dae3ec;
     border-radius: 50px;
 }
 QPushButton#chatSendButton {
@@ -379,7 +371,7 @@ QPushButton#chatSendButton:disabled {
     background: #28241b;
 }
 QLabel#llmStatus {
-    color: #4ae1a1;
+    color: #19754c;
     background: #111a14;
     border: 1px solid #1e3827;
     border-radius: 9px;
@@ -388,7 +380,7 @@ QLabel#llmStatus {
     font-weight: 700;
 }
 QLabel#llmStatus[state="busy"] {
-    color: #ffb32c;
+    color: #b32632;
     background: #1d1810;
     border-color: #4b3b20;
 }
@@ -399,30 +391,30 @@ QLabel#llmStatus[state="offline"] {
 }
 QLabel#llmStatus[state="error"] {
     color: #ff667d;
-    background: #261115;
+    background: #fff0f2;
     border-color: #5a1d28;
 }
 QFrame#chatConversation {
-    background: #080808;
-    border: 1px solid #292929;
+    background: #ffffff;
+    border: 1px solid #dce4ec;
     border-radius: 14px;
 }
 QScrollArea#chatScroll, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {
-    background: #080808;
+    background: #ffffff;
     border: none;
 }
 QFrame#robotBubble {
-    background: #181818;
-    border: 1px solid #282828;
+    background: #f3f6fa;
+    border: 1px solid #e1e8ef;
     border-radius: 12px;
 }
 QFrame#userBubble {
-    background: #2a1d08;
+    background: #fff3e8;
     border: 1px solid #6b4606;
     border-radius: 12px;
 }
 QLabel#robotBubbleSender {
-    color: #ffb32c;
+    color: #b32632;
     font-size: 10px;
     font-weight: 700;
 }
@@ -432,7 +424,7 @@ QLabel#userBubbleSender {
     font-weight: 700;
 }
 QLabel#bubbleText {
-    color: #ededed;
+    color: #263747;
     font-size: 16px;
 }
 """
@@ -815,7 +807,7 @@ class KioskWindow(QMainWindow):
         self._sync_console_active_state()
 
         self.bottom_navigation.setVisible(page_id == "home")
-        self.bottom_navigation.set_dark_background(True)
+        self.bottom_navigation.set_dark_background(False)
         self.bottom_navigation.set_active("home")
         if self.bottom_navigation.isVisible():
             self.bottom_navigation.raise_()

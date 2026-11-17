@@ -53,7 +53,7 @@ class BottomNavigation(QFrame):
         super().__init__(parent)
         self.setObjectName("bottomNavigation")
         self._buttons: dict[str, NavButton] = {}
-        self._dark_background = True
+        self._dark_background = False
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(10)

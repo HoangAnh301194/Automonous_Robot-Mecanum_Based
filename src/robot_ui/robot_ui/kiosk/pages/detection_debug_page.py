@@ -89,7 +89,7 @@ class DetectionDebugPage(QWidget):
             self.btn_home.setIconSize(QSize(26, 26))
         else:
             self.btn_home.setText("Home")
-            self.btn_home.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700;")
+            self.btn_home.setStyleSheet("color: #5c6e80; font-size: 11px; font-weight: 700;")
         self.btn_home.clicked.connect(self.home_requested.emit)
         bar_layout.addWidget(self.btn_home)
 
@@ -121,7 +121,7 @@ class DetectionDebugPage(QWidget):
             self.btn_back.setIconSize(QSize(28, 28))
         else:
             self.btn_back.setText("<")
-            self.btn_back.setStyleSheet("color: #f6c16a; font-size: 20px; font-weight: 700;")
+            self.btn_back.setStyleSheet("color: #b32632; font-size: 20px; font-weight: 700;")
         self.btn_back.clicked.connect(self.back_requested.emit)
         bar_layout.addWidget(self.btn_back)
 
@@ -129,9 +129,9 @@ class DetectionDebugPage(QWidget):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         lbl_title = QLabel("DETECTION & AI VISION DEBUG")
-        lbl_title.setStyleSheet("color: #f6c16a; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;")
+        lbl_title.setStyleSheet("color: #b32632; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;")
         lbl_sub = QLabel("Chẩn đoán Nhận diện Tư thế Pose, Khung xương & Khuôn mặt thời gian thực")
-        lbl_sub.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        lbl_sub.setStyleSheet("color: #5c6e80; font-size: 11px;")
         title_box.addWidget(lbl_title)
         title_box.addWidget(lbl_sub)
         bar_layout.addLayout(title_box)
@@ -181,11 +181,11 @@ class DetectionDebugPage(QWidget):
                 background-color: {KioskTheme.COLOR_SURFACE};
                 border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
                 border-radius: 8px;
-                color: #e0e0e0;
+                color: #263747;
                 font-size: 18px;
                 font-weight: 700;
             }}
-            QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ALT}; color: #f6c16a; }}
+            QPushButton:hover {{ background-color: {KioskTheme.COLOR_SURFACE_ALT}; color: #b32632; }}
         """)
         self.btn_fullscreen.clicked.connect(self.fullscreen_toggle_requested.emit)
         self.update_fullscreen_button(is_fullscreen=True)
@@ -214,7 +214,7 @@ class DetectionDebugPage(QWidget):
         pose_layout.setSpacing(10)
 
         lbl_pose_head = QLabel("1. KHỐI POSE & HUMAN TRACKING (TƯ THẾ & NGƯỜI)")
-        lbl_pose_head.setStyleSheet("color: #a855f7; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;")
+        lbl_pose_head.setStyleSheet("color: #7f39b2; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;")
         pose_layout.addWidget(lbl_pose_head)
 
         # Button to launch RQT image view
@@ -224,7 +224,7 @@ class DetectionDebugPage(QWidget):
         self.btn_launch_rqt_pose.setStyleSheet("""
             QPushButton {{
                 background-color: #6b21a8;
-                color: #ffffff;
+                color: #1d2938;
                 font-weight: 800;
                 font-size: 13px;
                 border: none;
@@ -245,9 +245,9 @@ class DetectionDebugPage(QWidget):
         box_cnt.setStyleSheet(f"background: {KioskTheme.COLOR_SURFACE_ALT}; border-radius: 6px; padding: 8px;")
         bc_l = QVBoxLayout(box_cnt)
         bc_l.setContentsMargins(4, 4, 4, 4)
-        bc_l.addWidget(QLabel("Số Người Nhận Diện", styleSheet="color: #94a3b8; font-size: 10px; font-weight: bold;"))
+        bc_l.addWidget(QLabel("Số Người Nhận Diện", styleSheet="color: #5c6e80; font-size: 10px; font-weight: bold;"))
         self.lbl_people_count = QLabel("0 người")
-        self.lbl_people_count.setStyleSheet("color: #38bdf8; font-size: 18px; font-weight: 800;")
+        self.lbl_people_count.setStyleSheet("color: #126da8; font-size: 18px; font-weight: 800;")
         bc_l.addWidget(self.lbl_people_count)
         t_grid.addWidget(box_cnt, 0, 0)
 
@@ -256,7 +256,7 @@ class DetectionDebugPage(QWidget):
         box_wave.setStyleSheet(f"background: {KioskTheme.COLOR_SURFACE_ALT}; border-radius: 6px; padding: 8px;")
         bw_l = QVBoxLayout(box_wave)
         bw_l.setContentsMargins(4, 4, 4, 4)
-        bw_l.addWidget(QLabel("Cử Chỉ Vẫy Tay", styleSheet="color: #94a3b8; font-size: 10px; font-weight: bold;"))
+        bw_l.addWidget(QLabel("Cử Chỉ Vẫy Tay", styleSheet="color: #5c6e80; font-size: 10px; font-weight: bold;"))
         self.lbl_wave_state = QLabel("KHÔNG VẪY")
         self.lbl_wave_state.setStyleSheet(f"color: {KioskTheme.COLOR_HEALTHY}; font-size: 18px; font-weight: 800;")
         bw_l.addWidget(self.lbl_wave_state)
@@ -267,7 +267,7 @@ class DetectionDebugPage(QWidget):
         box_dist.setStyleSheet(f"background: {KioskTheme.COLOR_SURFACE_ALT}; border-radius: 6px; padding: 8px;")
         bd_l = QVBoxLayout(box_dist)
         bd_l.setContentsMargins(4, 4, 4, 4)
-        bd_l.addWidget(QLabel("Cự Ly Người Gần Nhất", styleSheet="color: #94a3b8; font-size: 10px; font-weight: bold;"))
+        bd_l.addWidget(QLabel("Cự Ly Người Gần Nhất", styleSheet="color: #5c6e80; font-size: 10px; font-weight: bold;"))
         self.lbl_closest_dist = QLabel("-- m")
         self.lbl_closest_dist.setStyleSheet(f"color: {KioskTheme.COLOR_ACCENT}; font-size: 18px; font-weight: 800;")
         bd_l.addWidget(self.lbl_closest_dist)
@@ -277,13 +277,13 @@ class DetectionDebugPage(QWidget):
 
         # Details list of detected people
         lbl_list_head = QLabel("Danh Sách Người Trong Tầm Quan Sát:")
-        lbl_list_head.setStyleSheet("color: #e2e8f0; font-size: 11px; font-weight: bold;")
+        lbl_list_head.setStyleSheet("color: #263747; font-size: 11px; font-weight: bold;")
         pose_layout.addWidget(lbl_list_head)
 
         self.list_people = QListWidget()
         self.list_people.setStyleSheet(f"""
             QListWidget {{
-                background-color: #0b0f15;
+                background-color: #ffffff;
                 color: {KioskTheme.COLOR_TEXT_PRIMARY};
                 border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
                 border-radius: 6px;
@@ -318,7 +318,7 @@ class DetectionDebugPage(QWidget):
         face_layout.setSpacing(12)
 
         lbl_face_head = QLabel("2. KHỐI FACE RECOGNITION (NHẬN DIỆN KHUÔN MẶT)")
-        lbl_face_head.setStyleSheet("color: #38bdf8; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;")
+        lbl_face_head.setStyleSheet("color: #126da8; font-size: 13px; font-weight: 800; letter-spacing: 0.5px;")
         face_layout.addWidget(lbl_face_head)
 
         status_box = QFrame()
@@ -327,7 +327,7 @@ class DetectionDebugPage(QWidget):
         sb_l.setSpacing(8)
 
         lbl_badge = QLabel("[ TÍNH NĂNG ĐANG PHÁT TRIỂN / COMING SOON ]")
-        lbl_badge.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 800;")
+        lbl_badge.setStyleSheet("color: #126da8; font-size: 12px; font-weight: 800;")
         sb_l.addWidget(lbl_badge)
 
         lbl_desc = QLabel(
@@ -335,7 +335,7 @@ class DetectionDebugPage(QWidget):
             "nhân viên vận hành, nhận diện danh tính và tự động chào hỏi thông minh qua hệ thống LLM Souta."
         )
         lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet("color: #94a3b8; font-size: 12px; line-height: 1.4;")
+        lbl_desc.setStyleSheet("color: #5c6e80; font-size: 12px; line-height: 1.4;")
         sb_l.addWidget(lbl_desc)
         face_layout.addWidget(status_box)
 

@@ -356,7 +356,7 @@ class DangerousActionDialog(QDialog):
 
         btn_confirm = QPushButton(action_button_text)
         btn_confirm.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
-        btn_confirm.setStyleSheet(f"background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; border-radius: 6px; font-weight: bold;")
+        btn_confirm.setStyleSheet(f"background-color: {KioskTheme.COLOR_CRITICAL}; color: #1d2938; border-radius: 6px; font-weight: bold;")
         btn_confirm.clicked.connect(self.accept)
 
         btn_row.addWidget(btn_cancel)

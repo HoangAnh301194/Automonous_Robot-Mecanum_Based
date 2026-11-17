@@ -307,7 +307,7 @@ class SystemConfigPage(QWidget):
             self.btn_home.setIconSize(QSize(26, 26))
         else:
             self.btn_home.setText("Home")
-            self.btn_home.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700;")
+            self.btn_home.setStyleSheet("color: #5c6e80; font-size: 11px; font-weight: 700;")
         self.btn_home.clicked.connect(self.home_requested.emit)
         bar_layout.addWidget(self.btn_home)
 
@@ -339,7 +339,7 @@ class SystemConfigPage(QWidget):
             self.btn_back.setIconSize(QSize(28, 28))
         else:
             self.btn_back.setText("<")
-            self.btn_back.setStyleSheet("color: #f6c16a; font-size: 20px; font-weight: 700;")
+            self.btn_back.setStyleSheet("color: #b32632; font-size: 20px; font-weight: 700;")
         self.btn_back.clicked.connect(self._on_back_clicked)
         bar_layout.addWidget(self.btn_back)
 
@@ -347,9 +347,9 @@ class SystemConfigPage(QWidget):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         self.lbl_title = QLabel("SYSTEM CONFIG")
-        self.lbl_title.setStyleSheet("color: #f6c16a; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;")
+        self.lbl_title.setStyleSheet("color: #b32632; font-size: 16px; font-weight: 800; letter-spacing: 0.5px;")
         self.lbl_sub = QLabel("Giám sát cảm biến, tài nguyên phần cứng, tiến trình ROS 2 & tự chẩn đoán")
-        self.lbl_sub.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_sub.setStyleSheet("color: #5c6e80; font-size: 11px;")
         title_box.addWidget(self.lbl_title)
         title_box.addWidget(self.lbl_sub)
         bar_layout.addLayout(title_box)
@@ -370,7 +370,7 @@ class SystemConfigPage(QWidget):
             self.lbl_wifi_icon.setPixmap(w_pm)
         wb_l.addWidget(self.lbl_wifi_icon)
         self.lbl_ip = QLabel("127.0.0.1")
-        self.lbl_ip.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: bold; font-family: monospace;")
+        self.lbl_ip.setStyleSheet("color: #126da8; font-size: 11px; font-weight: bold; font-family: monospace;")
         wb_l.addWidget(self.lbl_ip)
         bar_layout.addWidget(self.wifi_badge)
 
