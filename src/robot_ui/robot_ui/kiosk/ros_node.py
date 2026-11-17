@@ -115,6 +115,7 @@ class KioskRosNode(Node):
     def __init__(self, signals: KioskSignals) -> None:
         super().__init__("robot_ui_kiosk")
         self.signals = signals
+        self._pose: dict[str, Any] = {}
         self._direct_go_client = ActionClient(
             self,
             DirectGo,
@@ -433,20 +434,20 @@ class KioskRosNode(Node):
 
     def _emit_pose(self, pose: Any, frame_id: str, source: str) -> None:
         orientation = pose.orientation
-        self.signals.pose_changed.emit(
-            {
-                "source": source,
-                "frame_id": frame_id,
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
-                "yaw": quaternion_to_yaw(
-                    orientation.x,
-                    orientation.y,
-                    orientation.z,
-                    orientation.w,
-                ),
-            }
-        )
+        pose_data = {
+            "source": source,
+            "frame_id": frame_id,
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "yaw": quaternion_to_yaw(
+                orientation.x,
+                orientation.y,
+                orientation.z,
+                orientation.w,
+            ),
+        }
+        self._pose = pose_data
+        self.signals.pose_changed.emit(pose_data)
 
     def _on_amcl_pose(self, msg: PoseWithCovarianceStamped) -> None:
         self._have_localized_pose = True
@@ -1105,7 +1106,7 @@ class KioskRosNode(Node):
                 + "ros2 launch mo_hinh real_localization_nav2.launch.py "
                 + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
                 + f"map_yaml:={shlex.quote(map_yaml_path)} "
-                + f"map_graph:={shlex.quote(graph_path)} use_rviz:=false"
+                + f"map_graph:={shlex.quote(graph_path)} use_rviz:=true"
             )
             self.get_logger().info(f"[KIOSK LOCALIZATION] START: {cmd}")
             try:
@@ -1811,7 +1812,7 @@ class KioskRosNode(Node):
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
-            return prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=false"
+            return prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=true"
         elif launch_key == "layer3":
             return prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
