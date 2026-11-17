@@ -923,7 +923,7 @@ class KioskWindow(QMainWindow):
             print("[robot_ui] SERVICE: Kích hoạt PHỤC VỤ HOÀN TẤT & TIẾP TỤC", flush=True)
             self.ros_node.finish_serving()
             self.signals.command_status_changed.emit("success", "✅ Đã hoàn tất phục vụ. Cảm ơn quý khách!")
-            QTimer.singleShot(700, lambda: self.show_page("home") if self._active_page == "service" else None)
+            QTimer.singleShot(1500, lambda: self.show_page("home"))
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
