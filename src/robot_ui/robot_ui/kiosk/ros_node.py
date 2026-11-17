@@ -112,7 +112,7 @@ class LocalizationState(str, Enum):
 class KioskRosNode(Node):
     """Small ROS adapter dedicated to the native customer UI."""
 
-    MAP_PREVIEW_MAX_DIMENSION = 280
+    MAP_PREVIEW_MAX_DIMENSION = 200
     PATH_PREVIEW_MAX_POINTS = 400
 
     def __init__(self, signals: KioskSignals) -> None:
@@ -397,6 +397,19 @@ class KioskRosNode(Node):
         )
 
     def _on_map(self, msg: OccupancyGrid) -> None:
+        """Nhận /map, throttle 5s và offload xử lý sang daemon thread."""
+        now = time.monotonic()
+        if now - getattr(self, "_last_map_process_time", 0.0) < 5.0:
+            return
+        self._last_map_process_time = now
+        threading.Thread(
+            target=self._process_map,
+            args=(msg,),
+            daemon=True,
+        ).start()
+
+    def _process_map(self, msg: OccupancyGrid) -> None:
+        """Xử lý OccupancyGrid và emit map_changed trên worker thread."""
         width = int(msg.info.width)
         height = int(msg.info.height)
         self.get_logger().info(
