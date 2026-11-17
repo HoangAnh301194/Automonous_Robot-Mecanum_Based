@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export local Souta KWS recordings into a *private* shared dataset clone.
+"""Export local Souta KWS recordings into a labeled folder for ZIP handoff.
 
 Keeps speaker identity consistent across labels, namespaces recorder-generated
 speaker/session IDs with a stable contributor ID, and never exports the local
@@ -101,7 +101,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--collector", required=True, help="Mã duy nhất của người thu: c01, c02, ...")
     parser.add_argument("--source", type=Path, default=SOURCE_DEFAULT, help="Mặc định: training/data/raw")
-    parser.add_argument("--dest", type=Path, required=True, help="Đường dẫn đến PRIVATE-DATASET-REPO/data/raw")
+    parser.add_argument("--dest", type=Path, required=True, help="Thư mục đầu ra của ZIP, ví dụ: ~/souta_kws_exports/c01/dataset/raw")
     args = parser.parse_args(argv)
     try:
         copied, skipped = export_recordings(args.source, args.dest, args.collector)
@@ -110,7 +110,7 @@ def main(argv=None) -> int:
         return 2
     print(f"Xuất thành công: {copied} file mới, {skipped} file đã có (giống nội dung).")
     print(f"Thư mục: {args.dest.resolve()}")
-    print("Chưa upload tự động. Chỉ git push sau khi xác nhận repository dataset là PRIVATE.")
+    print("Tiếp theo: nén toàn bộ thư mục dataset/ thành ZIP và gửi qua kênh riêng tư cho người phụ trách.")
     return 0
 
 
