@@ -131,7 +131,8 @@ def test_stt_missing_api_key_raises_runtime_error(monkeypatch):
 
 def test_audio_player_play_stop_mute():
     import time
-    player = AudioPlayer()
+    with patch("robot_ui.kiosk.audio_player.shutil.which", return_value="/usr/bin/mpv"):
+        player = AudioPlayer()
     assert not player.is_playing()
 
     # Muted player will not start playback
@@ -157,7 +158,8 @@ def test_audio_player_play_stop_mute():
 
 def test_audio_player_no_overlapping_playback():
     import time
-    player = AudioPlayer()
+    with patch("robot_ui.kiosk.audio_player.shutil.which", return_value="/usr/bin/mpv"):
+        player = AudioPlayer()
     mock_proc1 = MagicMock()
     mock_proc1.poll.return_value = None
     mock_proc1.wait.side_effect = lambda *args, **kwargs: time.sleep(0.5)
