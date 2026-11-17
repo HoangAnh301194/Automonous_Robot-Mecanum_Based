@@ -204,7 +204,7 @@ class ActionApproachWavingPerson(Action):
     Ưu tiên cao khi phát hiện người giơ tay vẫy:
     1. Nhánh Fallback tự động halt ActionPatrol để hủy goal tuần tra cũ.
     2. Lấy tọa độ 3D người vẫy tay từ AI (chỉ dùng khi position_valid hoặc có preview map).
-    3. Tính điểm đỗ an toàn cách người 0.9m.
+    3. Tính điểm đỗ an toàn cách người 0.7m.
     4. Điều khiển Nav2 chạy lại trước mặt người đó.
     5. Hỗ trợ Dynamic Target Re-planning: Nếu người di chuyển trong lúc robot đang chạy tới,
        hệ thống sẽ tự động điều chỉnh và cập nhật lại đường đi (với bộ lọc chống rung lắc).
@@ -216,11 +216,11 @@ class ActionApproachWavingPerson(Action):
         self.nav2_client = None
         self.goal_handle = None
         self.is_navigating = False
-        self.standoff_distance = 1.20      # Đỗ cách người 1.20m an toàn (tránh kẹt costmap inflation)
-        self.enable_dynamic_replan = False # Snapshot 1-shot goal: chụp tọa độ map 1 lần và đi tới điểm đó
-        self.min_replan_interval = 1.2    # Tối thiểu 1.2s mới cho replan 1 lần
-        self.min_displacement = 0.40      # Người phải di chuyển > 40cm mới cập nhật
-        self.freeze_distance = 1.40       # Dưới 1.4m thì khóa goal, giảm tốc đỗ xe
+        self.standoff_distance = 0.70        # Đỗ cách người 0.70m an toàn (cự ly giao tiếp tự nhiên)
+        self.enable_dynamic_replan = False   # Snapshot 1-shot goal: chụp tọa độ map 1 lần và đi tới điểm đó
+        self.min_replan_interval = 1.2       # Tối thiểu 1.2s mới cho replan 1 lần
+        self.min_displacement = 0.40         # Người phải di chuyển > 40cm mới cập nhật
+        self.freeze_distance = 1.00          # Dưới 1.0m thì khóa goal, giảm tốc đỗ xe
         self.last_replan_time = 0.0
         self.last_goal_pose = None
         self._goal_seq = 0
