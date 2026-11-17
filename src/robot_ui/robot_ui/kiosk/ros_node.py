@@ -149,6 +149,7 @@ class KioskRosNode(Node):
         self._serial_ports_base: tuple[str, str, str] | None = None
         self._serial_swap_override = False
         self._start_all_cancel = threading.Event()
+        self._start_all_gate = threading.Lock()
         self._start_all_thread: threading.Thread | None = None
 
         # System telemetry & Configuration tracking
@@ -1765,7 +1766,10 @@ class KioskRosNode(Node):
             self._record_layer_log("all", f"[START ALL] Mode={selected_mode}, backend={selected_backend}")
             try:
                 start_requested_at = time.monotonic()
-                self.start_layer("layer1")
+                with self._start_all_gate:
+                    if self._start_all_cancel.is_set():
+                        return
+                    self.start_layer("layer1")
                 ready = False
                 deadline = time.monotonic() + 30.0
                 while time.monotonic() < deadline and not self._start_all_cancel.is_set():
@@ -1806,9 +1810,10 @@ class KioskRosNode(Node):
                 if running_opposite is not None and running_opposite.poll() is None:
                     self._record_layer_log("all", f"[START ALL] {opposite} còn chạy; cần dừng trước.")
                     return
-                if not self._start_all_cancel.is_set():
-                    self._record_layer_log("all", f"[START ALL] /odom + /scan ổn; khởi động {target}.")
-                    self.start_layer(target)
+                with self._start_all_gate:
+                    if not self._start_all_cancel.is_set():
+                        self._record_layer_log("all", f"[START ALL] /odom + /scan ổn; khởi động {target}.")
+                        self.start_layer(target)
             except Exception as exc:
                 self.get_logger().error(f"[START ALL] {exc}")
                 self._record_layer_log("all", f"[START ALL] Lỗi: {exc}")
@@ -1820,17 +1825,18 @@ class KioskRosNode(Node):
 
     def stop_all_layers(self) -> None:
         """Cancel pending Start All and stop all managed layers with lifecycle guards."""
-        self._start_all_cancel.set()
-        self._record_layer_log("all", "[STOP ALL] Đang dừng tất cả Layer.")
-        for key in ("layer5", "layer4", "layer3", "layer2", "layer1"):
-            proc = self._layer_procs.get(key)
-            if (
-                proc is not None
-                or key in self._starting_layers
-                or key in self._stopping_layers
-                or key in self._error_layers
-            ):
-                self.stop_layer(key)
+        with self._start_all_gate:
+            self._start_all_cancel.set()
+            self._record_layer_log("all", "[STOP ALL] Đang dừng tất cả Layer.")
+            for key in ("layer5", "layer4", "layer3", "layer2", "layer1"):
+                proc = self._layer_procs.get(key)
+                if (
+                    proc is not None
+                    or key in self._starting_layers
+                    or key in self._stopping_layers
+                    or key in self._error_layers
+                ):
+                    self.stop_layer(key)
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
