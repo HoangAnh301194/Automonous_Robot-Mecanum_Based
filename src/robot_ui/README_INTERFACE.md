@@ -65,6 +65,33 @@ MP4 frames while the static image is active.
 The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 `QT_QPA_PLATFORM=offscreen` is for tests, not physical touch operation.
 
+## ROS 2 System workflow (synced from simulator)
+
+The Admin-only **System Config → ROS 2 System** panel now includes:
+
+- **Start All / Stop All** in addition to per-Layer Start / Stop.
+- **Operation mode** (SLAM Mapping or Localization Nav2), **backend** (AMCL or
+  SLAM Toolbox) and **map YAML** selector for AMCL.
+- **Serial Rescan / Swap** controls. They use the existing
+  `robot_ui.kiosk.serial_resolver` and display the next-launch assignments.
+  Port swapping does **not** hot-swap a driver that is already running.
+- The existing Lord bounded per-Layer Live Log Console, STARTING / STOPPING /
+  ERROR statuses and launch-token cancellation remain intact.
+
+**Start All safety:** Layer 1 is started first. The workflow starts Layer 3
+(SLAM) or Layer 2 (Navigation) only after **fresh /odom and /scan messages**
+arrive from Hardware. It times out after 30 seconds without proceeding when
+the required data is missing. This checks topic reception, not full Nav2
+lifecycle activation: verify Nav2 action server and localization status before
+issuing a real movement goal. Never test real Start All/Stop All or motor tests
+on an unrestrained robot.
+
+The GUI-to-ROS adapter now caps UI updates at approximately 5 Hz for LiDAR,
+10 Hz for odometry pose, and 1 Hz for battery display values. Incoming topic
+callbacks remain active. Jetson Host Telemetry reduces expensive work when
+System Config is hidden. The audio player prefers mpv, then ffplay, with a
+WAV-only aplay fallback.
+
 ## Behaviour and settings
 
 | Setting | Default | Purpose |
