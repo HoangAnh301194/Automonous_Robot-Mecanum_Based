@@ -366,9 +366,11 @@ class InteractiveNavMapWidget(QWidget):
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         self._map = map_data
+        if not self._is_active:
+            self._map_dirty = True
+            return
         self._rebuild_map_image()
-        if self._is_active:
-            self.update()
+        self.update()
 
     def set_pose(self, pose: dict[str, Any]) -> None:
         self._pose = pose

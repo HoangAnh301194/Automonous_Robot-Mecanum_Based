@@ -53,6 +53,7 @@ class HostTelemetryWorker(QThread):
 
     def stop(self) -> None:
         self._running = False
+        self.wait(500)
 
     def run(self) -> None:
         while self._running:
@@ -575,8 +576,27 @@ class SystemConfigPage(QWidget):
         self.diagnostics_screen.cache_telemetry(sensors=self.curr_sensors)
         if not self._is_active:
             return
-        self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
-        self.sensors_screen.update_telemetry(self.curr_sensors)
+        curr = self.stack.currentWidget()
+        if curr == self.overview_screen:
+            self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+            self._update_test_sensor_aliases()
+        elif curr == self.sensors_screen:
+            self.sensors_screen.update_telemetry(self.curr_sensors)
+
+    def _update_test_sensor_aliases(self) -> None:
+        """Cập nhật giá trị hiển thị văn bản cho các alias kiểm thử mà không kích hoạt render card đầy đủ."""
+        if hasattr(self, "lbl_hz_lidar") and self.lbl_hz_lidar is not None:
+            self.lbl_hz_lidar.setText(f"{self.curr_sensors.lidar_hz:.1f} Hz")
+        if hasattr(self, "lbl_hz_odom") and self.lbl_hz_odom is not None:
+            self.lbl_hz_odom.setText(f"{self.curr_sensors.odom_hz:.1f} Hz")
+        if hasattr(self, "lbl_tf_map_odom") and self.lbl_tf_map_odom is not None:
+            self.lbl_tf_map_odom.setText(f"map -> odom: [{'ĐÃ ĐỊNH VỊ' if self.curr_sensors.tf_map_odom_ok else 'MẤT DẤU'}]")
+        if hasattr(self, "lbl_tf_odom_base") and self.lbl_tf_odom_base is not None:
+            self.lbl_tf_odom_base.setText(f"odom -> base: [{'ODOM SỐNG' if self.curr_sensors.tf_odom_base_ok else 'MẤT ODOM'}]")
+        if hasattr(self, "lbl_ai_wave_status") and self.lbl_ai_wave_status is not None:
+            self.lbl_ai_wave_status.setText("ĐANG VẪY" if self.curr_sensors.is_waving else "KHÔNG VẪY")
+        if hasattr(self, "lbl_ai_yolo_status") and self.lbl_ai_yolo_status is not None:
+            self.lbl_ai_yolo_status.setText(f"Nhận diện: {self.curr_sensors.people_count} người")
 
     def update_battery_water(self, data: dict[str, Any]) -> None:
         """Called when robot_status or battery voltage arrives."""
@@ -595,19 +615,38 @@ class SystemConfigPage(QWidget):
 
         if not self._is_active:
             return
-        self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
-        self.hardware_screen.update_power_water(self.curr_power)
+        curr = self.stack.currentWidget()
+        if curr == self.overview_screen:
+            self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+            self._update_test_hardware_aliases()
+        elif curr == self.hardware_screen:
+            self.hardware_screen.update_power_water(self.curr_power)
 
-    def update_layer_status(self, layers_state: dict[str, bool]) -> None:
+    def _update_test_hardware_aliases(self) -> None:
+        """Cập nhật giá trị hiển thị văn bản cho các alias phần cứng mà không render card đầy đủ."""
+        if hasattr(self, "lbl_bat_pct_big") and self.lbl_bat_pct_big is not None:
+            self.lbl_bat_pct_big.setText(f"{self.curr_power.battery_percent:.0f}%")
+        if hasattr(self, "pbar_battery") and self.pbar_battery is not None:
+            self.pbar_battery.setValue(int(self.curr_power.battery_percent))
+        if hasattr(self, "lbl_bat_details") and self.lbl_bat_details is not None:
+            self.lbl_bat_details.setText(
+                f"Điện áp: {self.curr_power.voltage_smooth:.2f}V "
+                f"(Tức thời: {self.curr_power.voltage_raw:.2f}V) | Nguồn: {self.curr_power.voltage_source}"
+            )
+        if hasattr(self, "lbl_water_val") and self.lbl_water_val is not None:
+            self.lbl_water_val.setText(f"{self.curr_power.water_liter:.1f} L")
+
+    def update_layer_status(self, layers_state: dict[str, Any]) -> None:
         """Called when layer execution state changes."""
         self.ros2_screen.update_layer_status(layers_state)
-        # Update ROS 2 System card on the Overview Screen
-        active_count = sum(
-            1 for row in self.ros2_screen.layer_rows.values()
-            if row["status_lbl"].text() == "RUNNING"
-        )
-        total_layers = len(self.ros2_screen.layer_rows) or 5
-        self.overview_screen.update_ros2_status(active_count, total_layers)
+        # Update ROS 2 System card on Overview Screen only if active and showing overview
+        if self._is_active and self.stack.currentWidget() == self.overview_screen:
+            active_count = sum(
+                1 for row in self.ros2_screen.layer_rows.values()
+                if row["status_lbl"].text() == "RUNNING"
+            )
+            total_layers = len(self.ros2_screen.layer_rows) or 5
+            self.overview_screen.update_ros2_status(active_count, total_layers)
 
     def append_console_log(self, text: str) -> None:
         """Append log to diagnostics console output."""
@@ -639,6 +678,12 @@ class SystemConfigPage(QWidget):
     def closeEvent(self, event: Any) -> None:
         self.stop()
         super().closeEvent(event)
+
+    def __del__(self) -> None:
+        try:
+            self.stop()
+        except Exception:
+            pass
 
     def __del__(self) -> None:
         try:

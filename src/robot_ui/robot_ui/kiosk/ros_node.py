@@ -17,6 +17,7 @@ from geometry_msgs.msg import PoseWithCovarianceStamped, Twist
 from nav_msgs.msg import OccupancyGrid, Odometry, Path
 from nav2_msgs.action import NavigateToPose
 from collections import deque
+import rclpy
 import tf2_ros
 from rclpy.action import ActionClient
 from rclpy.node import Node
@@ -160,6 +161,7 @@ class KioskRosNode(Node):
         self._closest_person_dist: float | None = None
         self._last_ai_rx = 0.0
         self._layer_procs: dict[str, subprocess.Popen] = {}
+        self._stopping_layers: set[str] = set()
         self._layer_log_buffers: dict[str, deque[str]] = {
             "all": deque(maxlen=400),
             "layer1": deque(maxlen=400),
@@ -1157,29 +1159,18 @@ class KioskRosNode(Node):
         }
         self.signals.system_telemetry_changed.emit(snap)
 
-        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự
-        is_l1 = bool(
-            (self._layer_procs.get("layer1") and self._layer_procs["layer1"].poll() is None)
-            or (self._layer_procs.get("layer_hardware") and self._layer_procs["layer_hardware"].poll() is None)
-        )
-        is_l2 = bool(
-            (self._layer_procs.get("layer2") and self._layer_procs["layer2"].poll() is None)
-            or (self._layer_procs.get("layer_navigation") and self._layer_procs["layer_navigation"].poll() is None)
-            or (self._localization_proc and self._localization_proc.poll() is None)
-        )
-        is_l3 = bool(
-            (self._layer_procs.get("layer3") and self._layer_procs["layer3"].poll() is None)
-            or (self._layer_procs.get("layer_slam") and self._layer_procs["layer_slam"].poll() is None)
-            or (self._slam_proc and self._slam_proc.poll() is None)
-        )
-        is_l4 = bool(
-            (self._layer_procs.get("layer4") and self._layer_procs["layer4"].poll() is None)
-            or (self._layer_procs.get("layer_perception") and self._layer_procs["layer_perception"].poll() is None)
-        )
-        is_l5 = bool(
-            (self._layer_procs.get("layer5") and self._layer_procs["layer5"].poll() is None)
-            or (self._layer_procs.get("layer_voice_interaction") and self._layer_procs["layer_voice_interaction"].poll() is None)
-        )
+        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự, tôn trọng trạng thái STOPPING
+        def _resolve_layer_state(canonical_key: str, alt_key: str, extra_proc=None):
+            if canonical_key in self._stopping_layers or alt_key in self._stopping_layers:
+                return "STOPPING"
+            proc = self._layer_procs.get(canonical_key) or self._layer_procs.get(alt_key) or extra_proc
+            return bool(proc and proc.poll() is None)
+
+        is_l1 = _resolve_layer_state("layer1", "layer_hardware")
+        is_l2 = _resolve_layer_state("layer2", "layer_navigation", self._localization_proc)
+        is_l3 = _resolve_layer_state("layer3", "layer_slam", self._slam_proc)
+        is_l4 = _resolve_layer_state("layer4", "layer_perception")
+        is_l5 = _resolve_layer_state("layer5", "layer_voice_interaction")
 
         layer_states = {
             "layer_hardware": is_l1,
@@ -1233,6 +1224,14 @@ class KioskRosNode(Node):
         else:
             self.get_logger().warn(f"[TEST ACTUATOR] Bỏ qua test không hợp lệ hoặc đã loại bỏ: {test_name}")
 
+    CANONICAL_LAYER_MAP = {
+        "layer_hardware": "layer1",
+        "layer_navigation": "layer2",
+        "layer_slam": "layer3",
+        "layer_perception": "layer4",
+        "layer_voice_interaction": "layer5",
+    }
+
     LAYER_ALIAS_MAP = {
         "layer_hardware": "layer1",
         "layer_navigation": "layer2",
@@ -1246,14 +1245,22 @@ class KioskRosNode(Node):
         "layer5": "layer_voice_interaction",
     }
 
+    def _canonical_layer_key(self, layer_key: str) -> str:
+        k = layer_key.lower().strip()
+        return self.CANONICAL_LAYER_MAP.get(k, k)
+
     def _record_layer_log(self, layer_key: str, text: str) -> None:
         """Lưu log vào bounded buffer và chỉ phát Qt signal nếu console đang mở."""
-        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        norm_key = self._canonical_layer_key(layer_key)
+        now_str = time.strftime("%H:%M:%S")
+        prefix = norm_key.upper() if norm_key != "all" else "SYSTEM"
+        formatted_line = f"[{now_str}] [{prefix}] {text}"
+
         if norm_key not in self._layer_log_buffers:
             self._layer_log_buffers[norm_key] = deque(maxlen=400)
-        self._layer_log_buffers[norm_key].append(text)
+        self._layer_log_buffers[norm_key].append(formatted_line)
         if norm_key != "all":
-            self._layer_log_buffers["all"].append(f"[{norm_key.upper()}] {text}")
+            self._layer_log_buffers["all"].append(formatted_line)
         if self._console_active:
             self.signals.layer_log_received.emit(norm_key, text)
 
@@ -1263,16 +1270,22 @@ class KioskRosNode(Node):
 
     def get_layer_log_snapshot(self, layer_key: str = "all") -> list[str]:
         """Lấy snapshot danh sách các dòng log gần nhất từ bounded buffer theo layer."""
-        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        norm_key = self._canonical_layer_key(layer_key)
         buf = self._layer_log_buffers.get(norm_key)
         return list(buf) if buf else []
 
     def start_layer(self, layer_key: str) -> None:
         """Khởi động tầng tiến trình tương ứng (hỗ trợ cả alias ngữ nghĩa và số thứ tự)."""
-        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
-        launch_key = norm_key if norm_key.startswith("layer") and norm_key[5:].isdigit() else layer_key
+        launch_key = self._canonical_layer_key(layer_key)
         if not (launch_key.startswith("layer") and launch_key[5:].isdigit()):
             launch_key = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
+
+        if launch_key in self._stopping_layers or layer_key in self._stopping_layers:
+            self.get_logger().warn(
+                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang trong trạng thái STOPPING. "
+                "Không thể khởi động lại cho đến khi tiến trình dừng hoàn toàn!"
+            )
+            return
 
         self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (launch_key={launch_key})")
         cmd = ""
@@ -1368,39 +1381,72 @@ class KioskRosNode(Node):
 
     def stop_layer(self, layer_key: str) -> None:
         """Dừng tầng tiến trình tương ứng (kiểm tra cả alias) không block Qt main thread."""
-        alt_key = self.LAYER_ALIAS_MAP.get(layer_key, "")
-        proc = self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
-        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
-        launch_key = norm_key if norm_key.startswith("layer") and norm_key[5:].isdigit() else layer_key
-        
-        self._layer_procs.pop(launch_key, None)
-        self._layer_procs.pop(layer_key, None)
+        canonical = self._canonical_layer_key(layer_key)
+        alt_key = self.LAYER_ALIAS_MAP.get(canonical, "")
+        launch_key = canonical if canonical.startswith("layer") and canonical[5:].isdigit() else layer_key
+
+        if canonical in self._stopping_layers or layer_key in self._stopping_layers:
+            self.get_logger().warn(f"[LAYER STOP] Tầng {layer_key} đang ở trạng thái STOPPING, bỏ qua yêu cầu trùng lặp.")
+            return
+
+        proc = self._layer_procs.get(canonical) or self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
+
+        # Đánh dấu đang stopping để chặn race condition
+        self._stopping_layers.add(canonical)
+        self._stopping_layers.add(layer_key)
         if alt_key:
-            self._layer_procs.pop(alt_key, None)
-        if launch_key == "layer3" or layer_key in ("layer3", "layer_slam"):
-            self._slam_proc = None
-            self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
-        elif launch_key == "layer2" or layer_key in ("layer2", "layer_navigation"):
-            self._localization_proc = None
+            self._stopping_layers.add(alt_key)
 
-        if proc and proc.poll() is None:
-            self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
-            self._record_layer_log(launch_key, f"Đang gửi tín hiệu dừng tới {layer_key}...")
+        # Báo ngay trạng thái STOPPING lên giao diện để vô hiệu hóa nút bấm
+        stopping_dict = {canonical: "STOPPING", layer_key: "STOPPING"}
+        if alt_key:
+            stopping_dict[alt_key] = "STOPPING"
+        self.signals.layer_status_changed.emit(stopping_dict)
 
-            def _async_terminate(target_proc=proc):
-                try:
+        self.get_logger().info(f"[LAYER STOP] Bắt đầu dừng tầng: {layer_key} (STOPPING)")
+        self._record_layer_log(canonical, f"Đang gửi tín hiệu dừng tới {layer_key} (STOPPING)...")
+
+        def _async_terminate(target_proc=proc, c_key=canonical, orig_key=layer_key, a_key=alt_key, l_key=launch_key):
+            try:
+                if target_proc and target_proc.poll() is None:
                     pgid = os.getpgid(target_proc.pid)
                     os.killpg(pgid, signal.SIGINT)
-                    for _ in range(10):
+                    for _ in range(15):
                         if target_proc.poll() is not None:
                             break
-                        time.sleep(0.05)
+                        time.sleep(0.1)
                     if target_proc.poll() is None:
                         os.killpg(pgid, signal.SIGKILL)
-                except Exception:
-                    pass
+                        try:
+                            target_proc.wait(timeout=1.0)
+                        except Exception:
+                            pass
+            except Exception as exc:
+                self.get_logger().warning(f"[LAYER STOP] Ngoại lệ khi dừng {c_key}: {exc}")
+            finally:
+                self._layer_procs.pop(c_key, None)
+                self._layer_procs.pop(orig_key, None)
+                if a_key:
+                    self._layer_procs.pop(a_key, None)
+                if l_key == "layer3" or c_key in ("layer3", "layer_slam"):
+                    self._slam_proc = None
+                    self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
+                elif l_key == "layer2" or c_key in ("layer2", "layer_navigation"):
+                    self._localization_proc = None
 
-            threading.Thread(target=_async_terminate, daemon=True).start()
+                self._stopping_layers.discard(c_key)
+                self._stopping_layers.discard(orig_key)
+                if a_key:
+                    self._stopping_layers.discard(a_key)
+
+                stopped_dict = {c_key: False, orig_key: False}
+                if a_key:
+                    stopped_dict[a_key] = False
+                self.signals.layer_status_changed.emit(stopped_dict)
+                self._record_layer_log(c_key, f"--- TIẾN TRÌNH [{c_key.upper()}] ĐÃ DỪNG HOÀN TOÀN ---")
+                self.get_logger().info(f"[LAYER STOP] Đã dừng hoàn toàn: {c_key}")
+
+        threading.Thread(target=_async_terminate, daemon=True).start()
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
@@ -1460,6 +1506,7 @@ class KioskRosNode(Node):
                 pass
 
         # Reset bộ nhớ theo dõi tiến trình trong giao diện
+        self._stopping_layers.clear()
         self._layer_procs.clear()
         self._slam_proc = None
         self._localization_proc = None

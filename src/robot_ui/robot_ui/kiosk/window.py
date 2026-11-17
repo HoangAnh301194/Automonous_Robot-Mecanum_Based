@@ -643,6 +643,7 @@ class KioskWindow(QMainWindow):
         self.detection_debug_page.back_requested.connect(self.go_back)
         self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.detection_debug_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.system_config_page.ros2_screen.set_log_provider(self.ros_node.get_layer_log_snapshot)
         self.system_config_page.stack.currentChanged.connect(lambda _: self._sync_console_active_state())
 
         signals.connection_changed.connect(self._on_connection)
@@ -838,13 +839,19 @@ class KioskWindow(QMainWindow):
             self.slam_page.set_wifi(check_wifi_connected())
 
     def _sync_console_active_state(self) -> None:
-        """Đồng bộ cờ hiển thị của Live Log Console tới ROS node."""
+        """Đồng bộ cờ hiển thị của Live Log Console tới ROS node và nạp snapshot log."""
         if not hasattr(self, "system_config_page") or not hasattr(self, "ros_node"):
             return
         is_sys_config = (self._active_page == "system_config")
         is_ros2 = (self.system_config_page.stack.currentWidget() == self.system_config_page.ros2_screen)
         active = is_sys_config and is_ros2
         self.ros_node.set_console_active(active)
+        if hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_console_visible(active)
+            if active:
+                curr_filter = self.system_config_page.ros2_screen._current_filter
+                snap = self.ros_node.get_layer_log_snapshot(curr_filter)
+                self.system_config_page.ros2_screen.sync_log_snapshot_from_backend(snap, curr_filter)
 
     def go_back(self) -> None:
         """Navigate back to the previous screen."""

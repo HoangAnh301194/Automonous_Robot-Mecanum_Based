@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections import deque
 import glob
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QTextCursor
@@ -43,6 +43,7 @@ class ROS2SystemDetailScreen(QWidget):
     start_layer_requested = pyqtSignal(str)
     stop_layer_requested = pyqtSignal(str)
     emergency_cleanup_requested = pyqtSignal()
+    log_filter_changed = pyqtSignal(str)
 
     def __init__(
         self,
@@ -53,6 +54,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.setObjectName("ros2SystemDetailScreen")
         self.icons = icons or {}
         self.layer_rows: dict[str, dict[str, Any]] = {}
+        self._log_snapshot_provider: Optional[Callable[[str], list[str]]] = None
         self._logs_by_layer: dict[str, deque[str]] = {
             "all": deque(maxlen=400),
             "layer1": deque(maxlen=400),
@@ -342,20 +344,33 @@ class ROS2SystemDetailScreen(QWidget):
         "layer5": "layer_voice_interaction",
     }
 
-    def update_layer_status(self, layers_state: dict[str, bool]) -> None:
+    def update_layer_status(self, layers_state: dict[str, Any]) -> None:
         """Cập nhật trạng thái hiển thị cho từng Layer và Header counter."""
         for raw_k, is_on in layers_state.items():
             k = self.LAYER_NAME_MAP.get(raw_k, raw_k)
             if k in self.layer_rows:
                 lbl = self.layer_rows[k]["status_lbl"]
-                if is_on:
+                btn_start = self.layer_rows[k].get("start_btn")
+                btn_stop = self.layer_rows[k].get("stop_btn")
+
+                if is_on == "STOPPING":
+                    lbl.set_status("STOPPING", HealthStatus.WARNING)
+                    if btn_start:
+                        btn_start.setEnabled(False)
+                    if btn_stop:
+                        btn_stop.setEnabled(False)
+                elif is_on is True or is_on == "RUNNING":
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
+                    if btn_start:
+                        btn_start.setEnabled(False)
+                    if btn_stop:
+                        btn_stop.setEnabled(True)
                 else:
                     lbl.set_status("STOPPED", HealthStatus.STOPPED)
-                if "start_btn" in self.layer_rows[k]:
-                    self.layer_rows[k]["start_btn"].setEnabled(not is_on)
-                if "stop_btn" in self.layer_rows[k]:
-                    self.layer_rows[k]["stop_btn"].setEnabled(is_on)
+                    if btn_start:
+                        btn_start.setEnabled(True)
+                    if btn_stop:
+                        btn_stop.setEnabled(False)
 
         active_count = sum(
             1 for row in self.layer_rows.values()
@@ -364,6 +379,19 @@ class ROS2SystemDetailScreen(QWidget):
         total_layers = len(self.layer_rows)
         header_st = HealthStatus.RUNNING if active_count > 0 else HealthStatus.STOPPED
         self.header.set_status(f"{active_count}/{total_layers} ACTIVE", header_st)
+
+    def set_log_provider(self, provider: Optional[Callable[[str], list[str]]]) -> None:
+        """Cấu hình provider hàm lấy snapshot log từ ROS backend node."""
+        self._log_snapshot_provider = provider
+
+    def sync_log_snapshot_from_backend(self, logs: list[str], layer_key: str = "all") -> None:
+        """Đồng bộ toàn bộ danh sách dòng log từ backend vào bộ đệm của widget."""
+        norm_key = self._normalize_layer_key(layer_key)
+        if norm_key not in self._logs_by_layer:
+            self._logs_by_layer[norm_key] = deque(maxlen=400)
+        self._logs_by_layer[norm_key] = deque(logs, maxlen=400)
+        if self._is_console_visible and (self._current_filter in ("all", norm_key)):
+            self._refresh_log_view()
 
     def _normalize_layer_key(self, raw_key: str) -> str:
         k = raw_key.lower().strip()
@@ -408,6 +436,13 @@ class ROS2SystemDetailScreen(QWidget):
 
     def _refresh_log_view(self) -> None:
         """Render lại toàn bộ snapshot log theo bộ lọc hiện tại."""
+        if self._log_snapshot_provider is not None:
+            try:
+                backend_logs = self._log_snapshot_provider(self._current_filter)
+                if backend_logs:
+                    self._logs_by_layer[self._current_filter] = deque(backend_logs, maxlen=400)
+            except Exception:
+                pass
         logs = list(self._logs_by_layer.get(self._current_filter, []))
         if not logs:
             self.txt_layer_log.setText(f"[CONSOLE] Chưa có log cho {self._current_filter.upper()}.")
@@ -422,6 +457,7 @@ class ROS2SystemDetailScreen(QWidget):
         self._current_filter = filter_key
         self._update_filter_button_styles()
         self._refresh_log_view()
+        self.log_filter_changed.emit(filter_key)
 
     def _update_filter_button_styles(self) -> None:
         for k, btn in self._filter_buttons.items():

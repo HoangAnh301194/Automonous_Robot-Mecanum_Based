@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
-from PyQt5.QtCore import QSize, Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QColor, QImage, QPainter, QPixmap
 from PyQt5.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -20,12 +20,36 @@ class VideoBackground(QWidget):
         self._path: Path | None = None
         self._display_scale = 0.9
         self._vertical_offset_px = 0
+        self._cached_target_w = 0
+        self._cached_target_h = 0
+        self._frame_aspect = 0.0
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._read_frame)
         self.setAttribute(Qt.WA_OpaquePaintEvent)
 
+    def _update_target_dims(self) -> None:
+        """Tính toán và lưu cache kích thước hiển thị mục tiêu (giữ tỷ lệ khung hình)."""
+        max_w = max(1, round(self.width() * self._display_scale))
+        max_h = max(1, round(self.height() * self._display_scale))
+        if self._frame_aspect > 0:
+            target_w = max_w
+            target_h = round(target_w / self._frame_aspect)
+            if target_h > max_h:
+                target_h = max_h
+                target_w = round(target_h * self._frame_aspect)
+            self._cached_target_w = max(1, target_w)
+            self._cached_target_h = max(1, target_h)
+        else:
+            self._cached_target_w = max_w
+            self._cached_target_h = max_h
+
+    def resizeEvent(self, event: Any) -> None:
+        self._update_target_dims()
+        super().resizeEvent(event)
+
     def set_display_scale(self, scale: float) -> None:
         self._display_scale = max(0.5, min(1.0, scale))
+        self._update_target_dims()
         self.update()
 
     def set_vertical_offset(self, offset_px: int) -> None:
@@ -43,6 +67,10 @@ class VideoBackground(QWidget):
             self.update()
             return
         self._capture = capture
+        fw = capture.get(cv2.CAP_PROP_FRAME_WIDTH)
+        fh = capture.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        self._frame_aspect = (fw / fh) if (fw > 0 and fh > 0) else 0.0
+        self._update_target_dims()
         fps = capture.get(cv2.CAP_PROP_FPS)
         interval_ms = round(1000.0 / fps) if fps and fps > 1 else 40
         self._timer.start(max(16, interval_ms))
@@ -69,26 +97,29 @@ class VideoBackground(QWidget):
         if not success:
             self._capture.set(cv2.CAP_PROP_POS_FRAMES, 0)
             success, frame = self._capture.read()
-        if not success:
+        if not success or frame is None:
             return
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        height, width, channels = rgb_frame.shape
-        image = QImage(
-            rgb_frame.data,
-            width,
-            height,
-            channels * width,
-            QImage.Format_RGB888,
-        ).copy()
-        target_size = QSize(
-            max(1, round(self.width() * self._display_scale)),
-            max(1, round(self.height() * self._display_scale)),
-        )
-        if target_size.isValid() and not image.isNull():
-            scaled = image.scaled(target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self._pixmap = QPixmap.fromImage(scaled)
+
+        target_w = self._cached_target_w
+        target_h = self._cached_target_h
+        if target_w <= 0 or target_h <= 0:
+            self._update_target_dims()
+            target_w = self._cached_target_w
+            target_h = self._cached_target_h
+
+        # 1. Scale bằng OpenCV SIMD trực tiếp trên numpy frame trước khi đổi hệ màu
+        if target_w > 0 and target_h > 0 and (frame.shape[1] != target_w or frame.shape[0] != target_h):
+            proc_frame = cv2.resize(frame, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
         else:
-            self._pixmap = QPixmap.fromImage(image)
+            proc_frame = frame
+
+        # 2. Chuyển hệ màu trên frame đã thu nhỏ để tiết kiệm xung nhịp CPU
+        rgb_frame = cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB)
+        h, w, ch = rgb_frame.shape
+
+        # 3. Chuyển đổi trực tiếp sang QImage / QPixmap không qua QImage.scaled()
+        image = QImage(rgb_frame.data, w, h, ch * w, QImage.Format_RGB888)
+        self._pixmap = QPixmap.fromImage(image)
         self.update()
 
     def paintEvent(self, event: Any) -> None:
