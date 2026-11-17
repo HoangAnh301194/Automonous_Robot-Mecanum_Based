@@ -1,4 +1,6 @@
 import os
+import subprocess
+import time
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
@@ -6,7 +8,51 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
+def _pre_launch_cleanup() -> None:
+    """Dọn sạch dứt điểm toàn bộ tiến trình ROS 2 cũ còn sót trước khi bật Kiosk."""
+    print("[KIOSK LAUNCH] Đang dọn sạch toàn bộ tiến trình ROS 2 mồ côi trước khi khởi động...")
+    current_pid = os.getpid()
+    cleanup_cmds = [
+        # Dừng mềm trước
+        "pkill -SIGINT -f 'component_container' 2>/dev/null",
+        "pkill -SIGINT -f 'nav2' 2>/dev/null",
+        "pkill -SIGINT -f 'robot_ui_kiosk' 2>/dev/null",
+        "sleep 0.5",
+        # Kill dứt điểm toàn bộ tiến trình ROS 2 và hardware bridge
+        "pkill -9 -f 'component_container' 2>/dev/null",
+        "pkill -9 -f 'nav2_' 2>/dev/null",
+        "pkill -9 -f 'amcl' 2>/dev/null",
+        "pkill -9 -f 'controller_server' 2>/dev/null",
+        "pkill -9 -f 'planner_server' 2>/dev/null",
+        "pkill -9 -f 'bt_navigator' 2>/dev/null",
+        "pkill -9 -f 'lifecycle_manager' 2>/dev/null",
+        "pkill -9 -f 'costmap_2d' 2>/dev/null",
+        "pkill -9 -f 'sllidar' 2>/dev/null",
+        "pkill -9 -f 'scan_to_scan_filter' 2>/dev/null",
+        "pkill -9 -f 'robot_state_publisher' 2>/dev/null",
+        "pkill -9 -f 'ros2_control_node' 2>/dev/null",
+        "pkill -9 -f 'rf2o' 2>/dev/null",
+        "pkill -9 -f 'ekf_node' 2>/dev/null",
+        "pkill -9 -f 'bnoneko' 2>/dev/null",
+        "pkill -9 -f 'esp_bridge' 2>/dev/null",
+        # Dọn sạch log tạm
+        "rm -f /tmp/ros_layer_*.log /tmp/.ros_layer_lock_*",
+    ]
+    # Diệt kiosk cũ nhưng loại trừ PID hiện tại
+    kill_old_kiosk = f"pgrep -f 'robot_ui_kiosk' | grep -v {current_pid} | xargs -r kill -9 2>/dev/null"
+    cleanup_cmds.append(kill_old_kiosk)
+
+    try:
+        subprocess.run(["bash", "-c", "; ".join(cleanup_cmds)], check=False)
+        time.sleep(0.5)
+        print("[KIOSK LAUNCH] Đã hoàn tất dọn sạch hệ thống! Bắt đầu nạp Kiosk GUI.")
+    except Exception as exc:
+        print(f"[KIOSK LAUNCH] Cảnh báo dọn dẹp: {exc}")
+
+
 def generate_launch_description() -> LaunchDescription:
+    _pre_launch_cleanup()
+
     windowed = LaunchConfiguration("windowed")
     hide_cursor = LaunchConfiguration("hide_cursor")
     use_sim_time = LaunchConfiguration("use_sim_time")
