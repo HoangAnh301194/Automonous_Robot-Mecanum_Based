@@ -20,9 +20,11 @@ def package_share() -> Path:
         return Path(__file__).resolve().parents[2]
 
 
-# Unified PTIT light-theme icon palette. Only actionable UI icons are tinted;
-# the school/faculty logos, static Mochi artwork and emergency icon retain
-# their native colors. The originals in souta_robot/ are never overwritten.
+# Tint simple navigation/control glyphs only (gold on the light theme).
+# Large function illustrations (Navigation, SLAM, Start/Stop Navigation,
+# Detection, Status, localization and map actions), school/faculty logos,
+# Mochi artwork and Emergency retain their original multi-colour images.
+# The source files in souta_robot/ are never overwritten.
 ICON_GOLD = "#C58A00"
 ICON_GOLD_ACTIVE = "#D97706"
 
@@ -40,20 +42,10 @@ _LIGHT_GLYPH_NAMES = (
     "speaker_on.png",
     "speaker_off.png",
     "stop_speaking.png",
-    "status.png",
-    "detection.png",
-    "locolization.png",
-    "manual_control.png",
     "service_wait.png",
     "service_continue.png",
     "service.png",
     "welcome.png",
-    "SLAMicon.png",
-    "navigationIcon.png",
-    "startNavigation.png",
-    "stopNavigation.png",
-    "clickGoal.png",
-    "location.png",
     *(f"battery_{pct}.png" for pct in (0, 25, 50, 75, 100)),
 )
 _LIGHT_GLYPH_COLORS = {name: ICON_GOLD for name in _LIGHT_GLYPH_NAMES}
@@ -63,8 +55,8 @@ _LIGHT_GLYPH_COLORS = {name: ICON_GOLD for name in _LIGHT_GLYPH_NAMES}
 def icon_path(filename: str) -> Path:
     """Return a colour-corrected monochrome icon, preserving its alpha channel.
 
-    Recolor actionable PNG glyphs to the unified ochre accent. Source images
-    are not overwritten; generated variants live in a writable temp cache.
+    Tint only simple controls. All full-colour module/mission illustrations
+    return their original asset paths unchanged. Variants are cached in temp.
     """
     source_path = package_share() / "souta_robot" / filename
     color = _LIGHT_GLYPH_COLORS.get(filename)
