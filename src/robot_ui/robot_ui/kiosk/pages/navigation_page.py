@@ -261,19 +261,19 @@ class InteractiveNavMapWidget(QWidget):
         btn_style = """
             QPushButton {
                 background: rgba(17, 20, 24, 220);
-                color: #1d2938;
-                border: 1px solid #dce4ec;
+                color: #f8fafc;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 16px;
                 font-weight: 800;
             }
             QPushButton:hover {
-                background: #dce4ec;
+                background: #242c36;
                 border-color: #f6c16a;
-                color: #1d2938;
+                color: #ffffff;
             }
             QPushButton:pressed {
-                background: #f3f6fa;
+                background: #171c22;
             }
         """
 
@@ -594,7 +594,7 @@ class InteractiveNavMapWidget(QWidget):
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         # Background
-        painter.fillRect(self.rect(), QColor("#ffffff"))
+        painter.fillRect(self.rect(), QColor("#080808"))
 
         if self._map_image.isNull():
             painter.setPen(QColor("#64748b"))
@@ -813,57 +813,57 @@ class NavigationPage(QWidget):
     def _init_ui(self) -> None:
         self.setStyleSheet("""
             QWidget#navigationPage {
-                background-color: #f7f9fc;
+                background-color: #000000;
             }
             QFrame#navHeaderBar {
-                background: #ffffff;
-                border: 1px solid #dce4ec;
+                background: #0f1318;
+                border: 1px solid #242c36;
                 border-radius: 12px;
             }
             QLabel#navTitle {
-                color: #b32632;
+                color: #f6c16a;
                 font-size: 16px;
                 font-weight: 800;
                 letter-spacing: 0.5px;
             }
             QLabel#navSubtitle {
-                color: #5c6e80;
+                color: #94a3b8;
                 font-size: 11px;
                 font-weight: 500;
             }
             QLabel#navClock {
-                color: #506176;
+                color: #cbd5e1;
                 font-size: 12px;
                 font-weight: 700;
             }
             QWidget#navHeaderBadge {
-                background: #f3f6fa;
-                border: 1px solid #dce4ec;
+                background: #171c22;
+                border: 1px solid #242c36;
                 border-radius: 8px;
             }
             QLabel#navBadgeText {
-                color: #263747;
+                color: #e2e8f0;
                 font-size: 11px;
                 font-weight: 700;
             }
             QPushButton#navFullscreenButton {
-                background: #f3f6fa;
-                color: #506176;
-                border: 1px solid #dce4ec;
+                background: #171c22;
+                color: #cbd5e1;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 16px;
                 font-weight: 700;
             }
             QPushButton#navFullscreenButton:hover {
-                background: #dce4ec;
+                background: #242c36;
                 border-color: #f6c16a;
-                color: #1d2938;
+                color: #ffffff;
             }
             /* Segmented Mode Switcher */
             QPushButton#navModeTab {
-                background: #f3f6fa;
-                color: #5c6e80;
-                border: 1px solid #dce4ec;
+                background: #171c22;
+                color: #94a3b8;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: 700;
@@ -871,8 +871,8 @@ class NavigationPage(QWidget):
                 min-height: 28px;
             }
             QPushButton#navModeTab:hover {
-                color: #1d2938;
-                background: #dce4ec;
+                color: #f8fafc;
+                background: #242c36;
             }
             QPushButton#navModeTab[active="true"] {
                 background: #2563eb;
@@ -914,16 +914,16 @@ class NavigationPage(QWidget):
                 background: #b45309;
             }
             QPushButton#navToolBtn {
-                background: #f3f6fa;
-                color: #263747;
-                border: 1px solid #dce4ec;
+                background: #171c22;
+                color: #e2e8f0;
+                border: 1px solid #242c36;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 700;
                 padding: 6px 12px;
             }
             QPushButton#navToolBtn:hover {
-                background: #dce4ec;
+                background: #242c36;
                 border-color: #f6c16a;
             }
             QPushButton#navToolBtn[toggled_on="true"] {
@@ -932,16 +932,16 @@ class NavigationPage(QWidget):
                 border-color: #60a5fa;
             }
             QFrame#navDashboardCard {
-                background: #ffffff;
-                border: 1px solid #dce4ec;
+                background: #0f1318;
+                border: 1px solid #242c36;
                 border-radius: 10px;
                 padding: 6px;
             }
             QTableWidget {
-                background: #ffffff;
-                color: #1d2938;
-                gridline-color: #dce4ec;
-                border: 1px solid #dce4ec;
+                background: #080808;
+                color: #f1f5f9;
+                gridline-color: #242c36;
+                border: 1px solid #242c36;
                 border-radius: 8px;
                 font-size: 11px;
             }
@@ -950,8 +950,8 @@ class NavigationPage(QWidget):
                 color: #ffffff;
             }
             QHeaderView::section {
-                background: #f3f6fa;
-                color: #506176;
+                background: #171c22;
+                color: #cbd5e1;
                 font-size: 11px;
                 font-weight: 700;
                 border: none;
@@ -996,7 +996,7 @@ class NavigationPage(QWidget):
             self.home_button.setIconSize(QSize(26, 26))
         else:
             self.home_button.setText("Home")
-            self.home_button.setStyleSheet("color: #5c6e80; font-size: 11px; font-weight: 700;")
+            self.home_button.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700;")
         self.home_button.clicked.connect(self.home_requested.emit)
         bar_layout.addWidget(self.home_button)
 
@@ -1028,7 +1028,7 @@ class NavigationPage(QWidget):
             self.back_button.setIconSize(QSize(28, 28))
         else:
             self.back_button.setText("‹")
-            self.back_button.setStyleSheet("color: #b32632; font-size: 20px; font-weight: 700;")
+            self.back_button.setStyleSheet("color: #f6c16a; font-size: 20px; font-weight: 700;")
         self.back_button.clicked.connect(self.back_requested.emit)
         bar_layout.addWidget(self.back_button)
 
@@ -1149,7 +1149,7 @@ class NavigationPage(QWidget):
         chips_bar = QHBoxLayout()
         chips_bar.setSpacing(6)
         lbl_chips = QLabel("Điểm nhanh:")
-        lbl_chips.setStyleSheet("color: #5c6e80; font-size: 11px; font-weight: 700;")
+        lbl_chips.setStyleSheet("color: #94a3b8; font-size: 11px; font-weight: 700;")
         chips_bar.addWidget(lbl_chips)
 
         self.chips_layout = QHBoxLayout()
@@ -1175,7 +1175,7 @@ class NavigationPage(QWidget):
         pbar_row = QHBoxLayout()
         pbar_row.setSpacing(8)
         lbl_pbar_title = QLabel("Tiến độ hành trình:")
-        lbl_pbar_title.setStyleSheet("color: #506176; font-size: 12px; font-weight: 700;")
+        lbl_pbar_title.setStyleSheet("color: #cbd5e1; font-size: 12px; font-weight: 700;")
 
         self.nav_progress_bar = QProgressBar()
         self.nav_progress_bar.setRange(0, 100)
@@ -1185,11 +1185,11 @@ class NavigationPage(QWidget):
         self.nav_progress_bar.setFixedHeight(20)
         self.nav_progress_bar.setStyleSheet("""
             QProgressBar {
-                border: 1px solid #dce4ec;
+                border: 1px solid #242c36;
                 border-radius: 6px;
                 text-align: center;
-                background-color: #ffffff;
-                color: #1d2938;
+                background-color: #080808;
+                color: #ffffff;
                 font-weight: 800;
                 font-size: 11px;
             }
@@ -1206,13 +1206,13 @@ class NavigationPage(QWidget):
         metrics_row = QHBoxLayout()
         metrics_row.setSpacing(10)
         self.lbl_dist_remain = QLabel("Cự ly còn lại: -- m")
-        self.lbl_dist_remain.setStyleSheet("color: #126da8; font-size: 12px; font-weight: 700;")
+        self.lbl_dist_remain.setStyleSheet("color: #38bdf8; font-size: 12px; font-weight: 700;")
 
         self.lbl_nav_time = QLabel("Thời gian chạy: 0.0 s")
-        self.lbl_nav_time.setStyleSheet("color: #506176; font-size: 12px; font-weight: 600;")
+        self.lbl_nav_time.setStyleSheet("color: #cbd5e1; font-size: 12px; font-weight: 600;")
 
         self.lbl_est_time = QLabel("Ước tính: -- s")
-        self.lbl_est_time.setStyleSheet("color: #506176; font-size: 12px; font-weight: 600;")
+        self.lbl_est_time.setStyleSheet("color: #cbd5e1; font-size: 12px; font-weight: 600;")
 
         self.lbl_recovery_count = QLabel("Tự cứu: 0 lần")
         self.lbl_recovery_count.setStyleSheet("color: #f59e0b; font-size: 12px; font-weight: 700;")
@@ -1228,7 +1228,7 @@ class NavigationPage(QWidget):
         action_row = QHBoxLayout()
         action_row.setSpacing(10)
         self.status_label = QLabel("Chạm bản đồ hoặc chọn điểm nhanh để bắt đầu di chuyển")
-        self.status_label.setStyleSheet("color: #1d2938; font-size: 12px; font-weight: 600;")
+        self.status_label.setStyleSheet("color: #f1f5f9; font-size: 12px; font-weight: 600;")
         self.status_label.setWordWrap(True)
 
         self.start_button = QPushButton("BẮT ĐẦU ĐI")
@@ -1312,7 +1312,7 @@ class NavigationPage(QWidget):
         m_layout.setSpacing(6)
 
         lbl_m_title = QLabel("ĐIỀU KHIỂN NHIỆM VỤ TUẦN TRA")
-        lbl_m_title.setStyleSheet("color: #b32632; font-size: 12px; font-weight: 800;")
+        lbl_m_title.setStyleSheet("color: #f6c16a; font-size: 12px; font-weight: 800;")
         m_layout.addWidget(lbl_m_title)
 
         m_btn_row = QHBoxLayout()
@@ -1339,7 +1339,7 @@ class NavigationPage(QWidget):
         m_layout.addLayout(m_btn_row)
 
         self.lbl_route_summary = QLabel("Lộ trình: Chưa có điểm nào")
-        self.lbl_route_summary.setStyleSheet("color: #126da8; font-size: 11px; font-weight: 700;")
+        self.lbl_route_summary.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 700;")
         self.lbl_route_summary.setWordWrap(True)
         m_layout.addWidget(self.lbl_route_summary)
 
@@ -1354,7 +1354,7 @@ class NavigationPage(QWidget):
 
         t_head = QHBoxLayout()
         lbl_t_title = QLabel("Danh sách điểm tuần tra (sửa trực tiếp):")
-        lbl_t_title.setStyleSheet("color: #506176; font-size: 11px; font-weight: 700;")
+        lbl_t_title.setStyleSheet("color: #cbd5e1; font-size: 11px; font-weight: 700;")
         t_head.addWidget(lbl_t_title)
         t_head.addStretch(1)
 
@@ -1366,7 +1366,7 @@ class NavigationPage(QWidget):
         self.btn_save_yaml.setStyleSheet("""
             QPushButton {
                 background: #2563eb;
-                color: #1d2938;
+                color: #ffffff;
                 border-radius: 6px;
                 font-size: 12px;
                 font-weight: 800;
@@ -1410,18 +1410,18 @@ class NavigationPage(QWidget):
             btn = QPushButton(name)
             btn.setStyleSheet("""
                 QPushButton {
-                    background: #f3f6fa;
-                    color: #263747;
-                    border: 1px solid #dce4ec;
+                    background: #171c22;
+                    color: #e2e8f0;
+                    border: 1px solid #242c36;
                     border-radius: 6px;
                     font-size: 11px;
                     font-weight: 700;
                     padding: 4px 10px;
                 }
                 QPushButton:hover {
-                    background: #dce4ec;
+                    background: #242c36;
                     border-color: #f6c16a;
-                    color: #1d2938;
+                    color: #ffffff;
                 }
             """)
             btn.clicked.connect(

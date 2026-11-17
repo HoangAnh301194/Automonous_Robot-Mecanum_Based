@@ -187,7 +187,7 @@ class DiagnosticsDetailScreen(QWidget):
         self.txt_console.setMaximumHeight(90)
         self.txt_console.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #f8fafc;
+                background-color: #090d12;
                 color: #10b981;
                 font-family: monospace;
                 font-size: 11px;
@@ -288,7 +288,7 @@ class DiagnosticsDetailScreen(QWidget):
             fails = [k for k, (_, lbl) in self.preflight_items.items() if "CHƯA ĐẠT" in lbl.text()]
             if not fails:
                 self.lbl_preflight_banner.setText("TOÀN BỘ 7 HẠNG MỤC ĐẠT CHUẨN! Robot sẵn sàng xuất phát phục vụ.")
-                self.lbl_preflight_banner.setStyleSheet(f"color: #1d2938; background: {KioskTheme.COLOR_HEALTHY_BG}; padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;")
+                self.lbl_preflight_banner.setStyleSheet(f"color: #ffffff; background: {KioskTheme.COLOR_HEALTHY_BG}; padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;")
             else:
                 self.lbl_preflight_banner.setText(f"CẢNH BÁO: Có {len(fails)} hạng mục chưa đạt yêu cầu an toàn!")
-                self.lbl_preflight_banner.setStyleSheet(f"color: #1d2938; background: {KioskTheme.COLOR_CRITICAL_BG}; padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;")
+                self.lbl_preflight_banner.setStyleSheet(f"color: #ffffff; background: {KioskTheme.COLOR_CRITICAL_BG}; padding: 8px 12px; border-radius: 6px; font-size: 11px; font-weight: bold;")
