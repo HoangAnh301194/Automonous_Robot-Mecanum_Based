@@ -250,6 +250,12 @@ class KioskRosNode(Node):
             10,
         )
 
+        self.initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped,
+            "/initialpose",
+            10,
+        )
+
         self.create_timer(1.0, self._check_backend_connection)
         self.create_timer(1.0, self._publish_system_telemetry)
 
@@ -521,6 +527,27 @@ class KioskRosNode(Node):
         tone = "success" if result.success else "error"
         self.get_logger().info(f"[DIRECT_GO Result] Kết quả: success={result.success}, msg='{result.finish_message}'")
         self.signals.command_status_changed.emit(tone, str(result.finish_message))
+
+    def publish_initial_pose(self, x: float, y: float, yaw: float) -> None:
+        """Publish 2D initial pose estimate to /initialpose for AMCL/Localization."""
+        msg = PoseWithCovarianceStamped()
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.header.frame_id = "map"
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+        msg.pose.pose.orientation.z = math.sin(yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(yaw / 2.0)
+        cov = [0.0] * 36
+        cov[0] = 0.25    # x variance
+        cov[7] = 0.25    # y variance
+        cov[35] = 0.068  # yaw variance (~15 deg)
+        msg.pose.covariance = cov
+
+        self.initial_pose_pub.publish(msg)
+        deg = math.degrees(yaw)
+        self.get_logger().info(f"[AMCL] Đã phát 2D Pose Estimate: X={x:.3f}, Y={y:.3f}, Yaw={yaw:.3f} rad ({deg:.1f}°)")
+        self.signals.command_status_changed.emit("success", f"Đã định vị ban đầu: ({x:.2f}, {y:.2f}) {deg:.0f}°")
 
     def navigate_to_pose(self, x: float, y: float, yaw: float) -> None:
         if not self._nav2_client.server_is_ready():

@@ -201,6 +201,7 @@ class InteractiveNavMapWidget(QWidget):
 
     goal_selected = pyqtSignal(float, float, float)     # (x, y, yaw)
     waypoint_picked = pyqtSignal(float, float, float)   # (x, y, yaw)
+    initial_pose_selected = pyqtSignal(float, float, float)  # (x, y, yaw)
     invalid_goal = pyqtSignal(str)
 
     def __init__(
@@ -223,6 +224,11 @@ class InteractiveNavMapWidget(QWidget):
         # Patrol & Batch Waypoints
         self._batch_waypoints: list[dict[str, Any]] = []
         self._pick_mode = False
+
+        # 2D Pose Estimate State (RViz initialpose)
+        self._estimate_mode = False
+        self._estimate_start_pos: QPointF | None = None
+        self._estimate_current_pos: QPointF | None = None
 
         # Sensor points in world frame (map coordinates)
         self._scan_points: list[tuple[float, float]] = []
@@ -387,14 +393,31 @@ class InteractiveNavMapWidget(QWidget):
 
     def set_pick_mode(self, enabled: bool) -> None:
         self._pick_mode = enabled
-        self.setCursor(Qt.CrossCursor if enabled else Qt.PointingHandCursor)
+        self._update_cursor()
+        if self.isVisible():
+            self.update()
+
+    def set_estimate_mode(self, enabled: bool) -> None:
+        self._estimate_mode = enabled
+        self._estimate_start_pos = None
+        self._estimate_current_pos = None
+        self._update_cursor()
         if self.isVisible():
             self.update()
 
     def set_selection_enabled(self, enabled: bool) -> None:
         self._selection_enabled = enabled
-        if not self._pick_mode:
-            self.setCursor(Qt.PointingHandCursor if enabled else Qt.ArrowCursor)
+        self._update_cursor()
+
+    def _update_cursor(self) -> None:
+        if self._is_panning:
+            self.setCursor(Qt.ClosedHandCursor)
+        elif self._estimate_mode or self._pick_mode:
+            self.setCursor(Qt.CrossCursor)
+        elif self._selection_enabled:
+            self.setCursor(Qt.PointingHandCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
 
     def set_scan_points(self, points: list[tuple[float, float]]) -> None:
         self._scan_points = points
@@ -463,8 +486,12 @@ class InteractiveNavMapWidget(QWidget):
         sy = target.bottom() - (cell_y / ph) * target.height()
         return QPointF(sx, sy)
 
-    def _screen_to_world(self, point: QPointF, target: QRectF) -> tuple[float, float] | None:
-        if not self._map or not target.contains(point):
+    def _screen_to_world(
+        self, point: QPointF, target: QRectF, check_free: bool = True
+    ) -> tuple[float, float] | None:
+        if not self._map:
+            return None
+        if check_free and not target.contains(point):
             return None
         pw = int(self._map.get("preview_width", 0))
         ph = int(self._map.get("preview_height", 0))
@@ -479,11 +506,12 @@ class InteractiveNavMapWidget(QWidget):
         iy = min(ph - 1, max(0, int(cell_y)))
 
         # Free space validation check
-        cells = self._map.get("cells", [])
-        idx = iy * pw + ix
-        if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
-            self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
-            return None
+        if check_free:
+            cells = self._map.get("cells", [])
+            idx = iy * pw + ix
+            if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
+                self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
+                return None
 
         dist_x = cell_x * res * step
         dist_y = cell_y * res * step
@@ -509,37 +537,47 @@ class InteractiveNavMapWidget(QWidget):
         if event.button() in (Qt.RightButton, Qt.MiddleButton):
             self._is_panning = True
             self._last_pan_pos = event.pos()
-            self.setCursor(Qt.ClosedHandCursor)
+            self._update_cursor()
             event.accept()
             return
 
-        if event.button() == Qt.LeftButton and self._selection_enabled:
-            target = self._transformed_map_rect()
-            world = self._screen_to_world(QPointF(event.pos()), target)
-            if world is None:
-                return
-            wx, wy = world
+        if event.button() == Qt.LeftButton:
+            if self._estimate_mode:
+                target = self._transformed_map_rect()
+                if target.contains(QPointF(event.pos())):
+                    self._estimate_start_pos = QPointF(event.pos())
+                    self._estimate_current_pos = QPointF(event.pos())
+                    self.update()
+                    event.accept()
+                    return
 
-            if self._pick_mode:
-                # Mode: Batch Waypoint Picking for Patrol Route
-                yaw = 0.0
-                if self._batch_waypoints:
-                    last_wp = self._batch_waypoints[-1]
-                    dx = wx - float(last_wp.get("x", 0.0))
-                    dy = wy - float(last_wp.get("y", 0.0))
-                    yaw = math.atan2(dy, dx)
-                self.waypoint_picked.emit(wx, wy, yaw)
-            else:
-                # Mode: Single Goal Selection
-                if self._pose:
-                    rx = float(self._pose.get("x", wx))
-                    ry = float(self._pose.get("y", wy))
-                    yaw = math.atan2(wy - ry, wx - rx)
-                else:
+            if self._selection_enabled:
+                target = self._transformed_map_rect()
+                world = self._screen_to_world(QPointF(event.pos()), target)
+                if world is None:
+                    return
+                wx, wy = world
+
+                if self._pick_mode:
+                    # Mode: Batch Waypoint Picking for Patrol Route
                     yaw = 0.0
-                self.set_goal(wx, wy, yaw)
-                self.goal_selected.emit(wx, wy, yaw)
-            event.accept()
+                    if self._batch_waypoints:
+                        last_wp = self._batch_waypoints[-1]
+                        dx = wx - float(last_wp.get("x", 0.0))
+                        dy = wy - float(last_wp.get("y", 0.0))
+                        yaw = math.atan2(dy, dx)
+                    self.waypoint_picked.emit(wx, wy, yaw)
+                else:
+                    # Mode: Single Goal Selection
+                    if self._pose:
+                        rx = float(self._pose.get("x", wx))
+                        ry = float(self._pose.get("y", wy))
+                        yaw = math.atan2(wy - ry, wx - rx)
+                    else:
+                        yaw = 0.0
+                    self.set_goal(wx, wy, yaw)
+                    self.goal_selected.emit(wx, wy, yaw)
+                event.accept()
 
     def mouseMoveEvent(self, event: Any) -> None:
         if self._is_panning and self._last_pan_pos is not None:
@@ -550,15 +588,55 @@ class InteractiveNavMapWidget(QWidget):
             self.update()
             event.accept()
             return
+        if self._estimate_mode and self._estimate_start_pos is not None:
+            self._estimate_current_pos = QPointF(event.pos())
+            self.update()
+            event.accept()
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:
         if event.button() in (Qt.RightButton, Qt.MiddleButton) and self._is_panning:
             self._is_panning = False
             self._last_pan_pos = None
-            self.setCursor(Qt.CrossCursor if self._pick_mode else Qt.PointingHandCursor)
+            self._update_cursor()
             event.accept()
             return
+
+        if (
+            event.button() == Qt.LeftButton
+            and self._estimate_mode
+            and self._estimate_start_pos is not None
+        ):
+            target = self._transformed_map_rect()
+            p_start = self._estimate_start_pos
+            p_end = self._estimate_current_pos if self._estimate_current_pos is not None else p_start
+
+            # Turn off estimate mode
+            self._estimate_mode = False
+            self._estimate_start_pos = None
+            self._estimate_current_pos = None
+            self._update_cursor()
+            self.update()
+
+            w_start = self._screen_to_world(p_start, target, check_free=False)
+            if w_start is not None:
+                wx, wy = w_start
+                drag_dist = math.hypot(p_end.x() - p_start.x(), p_end.y() - p_start.y())
+                if drag_dist >= 8.0:
+                    w_end = self._screen_to_world(p_end, target, check_free=False)
+                    if w_end is not None:
+                        dx = w_end[0] - wx
+                        dy = w_end[1] - wy
+                        yaw = math.atan2(dy, dx)
+                    else:
+                        yaw = 0.0
+                else:
+                    yaw = float(self._pose.get("yaw", 0.0)) if self._pose else 0.0
+                self.initial_pose_selected.emit(wx, wy, yaw)
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: Any) -> None:
@@ -733,6 +811,44 @@ class InteractiveNavMapWidget(QWidget):
                     painter.setBrush(QColor("#f43f5e"))
                     painter.drawEllipse(gpt, 8, 8)
 
+        # 9. 2D Pose Estimate Dragging Arrow (RViz style)
+        if (
+            self._estimate_mode
+            and self._estimate_start_pos is not None
+            and self._estimate_current_pos is not None
+        ):
+            p1 = self._estimate_start_pos
+            p2 = self._estimate_current_pos
+            est_color = QColor("#22c55e")  # Bright Emerald Green
+
+            # Base anchor circle
+            painter.setPen(QPen(QColor("#ffffff"), 2))
+            painter.setBrush(est_color)
+            painter.drawEllipse(p1, 7, 7)
+
+            # Arrow body
+            painter.setPen(QPen(est_color, 4, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            painter.drawLine(p1, p2)
+
+            # Arrowhead
+            edx = p2.x() - p1.x()
+            edy = p2.y() - p1.y()
+            edist = math.hypot(edx, edy)
+            if edist >= 8.0:
+                e_angle = math.atan2(edy, edx)
+                head_len = 16.0
+                p_arrow1 = QPointF(
+                    p2.x() - head_len * math.cos(e_angle - math.pi / 6),
+                    p2.y() - head_len * math.sin(e_angle - math.pi / 6),
+                )
+                p_arrow2 = QPointF(
+                    p2.x() - head_len * math.cos(e_angle + math.pi / 6),
+                    p2.y() - head_len * math.sin(e_angle + math.pi / 6),
+                )
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(est_color)
+                painter.drawPolygon(QPolygonF([p2, p_arrow1, p_arrow2]))
+
         painter.restore()
 
         # Border
@@ -741,14 +857,17 @@ class InteractiveNavMapWidget(QWidget):
 
         # Zoom & Status HUD in bottom-left corner
         hud_text = f"Zoom: {self._zoom_factor:.1f}x"
-        if self._pick_mode:
+        if self._estimate_mode:
+            hud_text += " | 📍 Đang định vị: Kéo chuột để chỉ hướng robot"
+        elif self._pick_mode:
             hud_text += f" | Đang chấm điểm ({len(self._batch_waypoints)} điểm)"
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(17, 20, 24, 190))
-        painter.drawRoundedRect(QRectF(8, self.height() - 28, 200, 22), 5, 5)
+        hud_w = 340 if self._estimate_mode else (210 if self._pick_mode else 110)
+        painter.drawRoundedRect(QRectF(8, self.height() - 28, hud_w, 22), 5, 5)
         painter.setPen(QColor("#94a3b8"))
         painter.setFont(QFont("Sans Serif", 8, QFont.Bold))
-        painter.drawText(QRectF(14, self.height() - 28, 190, 22), Qt.AlignVCenter, hud_text)
+        painter.drawText(QRectF(14, self.height() - 28, hud_w - 10, 22), Qt.AlignVCenter, hud_text)
 
         painter.end()
 
@@ -769,6 +888,7 @@ class NavigationPage(QWidget):
     start_patrol_requested = pyqtSignal()
     pause_patrol_requested = pyqtSignal()
     reload_route_requested = pyqtSignal()
+    initial_pose_requested = pyqtSignal(float, float, float)  # (x, y, yaw)
 
     def __init__(self, icons: dict[str, Path | None], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1135,11 +1255,43 @@ class NavigationPage(QWidget):
         self.chips_layout.setSpacing(6)
         chips_bar.addLayout(self.chips_layout)
         chips_bar.addStretch(1)
+
+        # 2D Pose Estimate Button (RViz-style initialpose)
+        self.btn_2d_estimate = QPushButton("📍 2D ESTIMATE")
+        self.btn_2d_estimate.setCheckable(True)
+        self.btn_2d_estimate.setCursor(Qt.PointingHandCursor)
+        self.btn_2d_estimate.setToolTip(
+            "Bấm nút rồi nhấn & kéo chuột trên bản đồ để định vị vị trí và hướng robot (/initialpose)"
+        )
+        self.btn_2d_estimate.setStyleSheet("""
+            QPushButton {
+                background: #1e293b;
+                color: #38bdf8;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                font-size: 11px;
+                font-weight: 800;
+                padding: 4px 12px;
+            }
+            QPushButton:hover {
+                background: #0369a1;
+                color: #ffffff;
+            }
+            QPushButton:checked {
+                background: #0284c7;
+                color: #ffffff;
+                border: 2px solid #38bdf8;
+            }
+        """)
+        self.btn_2d_estimate.clicked.connect(self._toggle_2d_estimate)
+        chips_bar.addWidget(self.btn_2d_estimate)
+
         layout.addLayout(chips_bar)
 
         # Live Map
         self.map_widget = InteractiveNavMapWidget(self.icons.get("goal"))
         self.map_widget.goal_selected.connect(self._on_single_goal_selected)
+        self.map_widget.initial_pose_selected.connect(self._on_initial_pose_selected)
         self.map_widget.invalid_goal.connect(self._show_warning)
         layout.addWidget(self.map_widget, 1)
 
@@ -1618,6 +1770,24 @@ class NavigationPage(QWidget):
         self._set_button_strength(self.start_button, not active)
         self._set_button_strength(self.stop_button, active)
         self.map_widget.set_selection_enabled(not active)
+
+    def _toggle_2d_estimate(self) -> None:
+        is_active = self.btn_2d_estimate.isChecked()
+        self.map_widget.set_estimate_mode(is_active)
+        if is_active:
+            self.status_label.setText(
+                "📍 Bấm và kéo chuột trên bản đồ theo hướng robot để đặt 2D Pose Estimate (/initialpose)"
+            )
+        else:
+            self.status_label.setText("Đã tắt chế độ 2D Pose Estimate")
+
+    def _on_initial_pose_selected(self, x: float, y: float, yaw: float) -> None:
+        self.btn_2d_estimate.setChecked(False)
+        deg = math.degrees(yaw)
+        self.status_label.setText(
+            f"📍 Đã phát 2D Pose Estimate: X={x:.2f}m, Y={y:.2f}m, Yaw={deg:.1f}°"
+        )
+        self.initial_pose_requested.emit(x, y, yaw)
 
     def _on_single_goal_selected(self, x: float, y: float, yaw: float) -> None:
         self._goal = (x, y, yaw)

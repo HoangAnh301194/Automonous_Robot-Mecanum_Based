@@ -157,6 +157,29 @@ class TestKioskNavigationPage(unittest.TestCase):
         self.page.set_robot_status({"battery_percent": 42.0})
         self.assertEqual(self.page.battery_text_label.text(), "42%")
 
+    def test_2d_pose_estimate_mode_and_signals(self):
+        """Test toggling 2D pose estimate button and signal forwarding."""
+        self.assertIsNotNone(self.page.btn_2d_estimate)
+        self.assertFalse(self.page.btn_2d_estimate.isChecked())
+        self.assertFalse(self.page.map_widget._estimate_mode)
+
+        # Toggle ON
+        self.page.btn_2d_estimate.setChecked(True)
+        self.page._toggle_2d_estimate()
+        self.assertTrue(self.page.map_widget._estimate_mode)
+        self.assertIn("2D Pose Estimate", self.page.status_label.text())
+
+        # Mock initial_pose_requested listener
+        mock_handler = MagicMock()
+        self.page.initial_pose_requested.connect(mock_handler)
+
+        # Simulate initial pose selected
+        self.page.map_widget.initial_pose_selected.emit(1.25, -0.75, 1.57)
+        self.assertFalse(self.page.btn_2d_estimate.isChecked())
+        mock_handler.assert_called_once_with(1.25, -0.75, 1.57)
+        self.assertIn("1.25m", self.page.status_label.text())
+
 
 if __name__ == "__main__":
     unittest.main()
+
