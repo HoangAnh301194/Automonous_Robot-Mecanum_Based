@@ -277,7 +277,7 @@ class ServicePage(QWidget):
             }
         """)
 
-    def _select_mode(self, mode: str) -> None:
+    def _select_mode(self, mode: str, emit_signal: bool = True) -> None:
         self._selected_mode = mode
         self.btn_wait.setProperty("selected", mode == "wait")
         self.btn_continue.setProperty("selected", mode == "continue")
@@ -285,13 +285,14 @@ class ServicePage(QWidget):
         self.btn_wait.style().polish(self.btn_wait)
         self.btn_continue.style().unpolish(self.btn_continue)
         self.btn_continue.style().polish(self.btn_continue)
-        self.mode_selected.emit(mode)
+        if emit_signal:
+            self.mode_selected.emit(mode)
 
     def get_selected_mode(self) -> str | None:
         return self._selected_mode
 
-    def select_mode_programmatically(self, mode: str) -> None:
-        self._select_mode(mode)
+    def select_mode_programmatically(self, mode: str, emit_signal: bool = True) -> None:
+        self._select_mode(mode, emit_signal=emit_signal)
 
     def reset_selection(self) -> None:
         self._selected_mode = None

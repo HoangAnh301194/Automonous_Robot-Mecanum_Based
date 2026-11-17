@@ -164,6 +164,8 @@ class KioskRosNode(Node):
         self._starting_layers: set[str] = set()
         self._cancel_starting_layers: set[str] = set()
         self._stopping_layers: set[str] = set()
+        self._error_layers: set[str] = set()
+        self._active_launch_tokens: dict[str, str] = {}
         self._layer_log_buffers: dict[str, deque[str]] = {
             "all": deque(maxlen=400),
             "layer1": deque(maxlen=400),
@@ -985,9 +987,16 @@ class KioskRosNode(Node):
                     pass
 
             graph_path = os.path.splitext(map_yaml_path)[0]
+            if backend == "slam_toolbox":
+                posegraph_file = graph_path + ".posegraph"
+                if not os.path.exists(posegraph_file):
+                    self.get_logger().warn(
+                        f"[KIOSK LOCALIZATION] File posegraph '{posegraph_file}' không tồn tại trên đĩa. "
+                        "SLAM Toolbox có thể cần file posegraph hợp lệ để định vị!"
+                    )
             cmd = (
                 self._get_ws_prefix()
-                + f"ros2 launch mo_hinh real_localization_nav2.launch.py "
+                + "ros2 launch mo_hinh real_localization_nav2.launch.py "
                 + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
                 + f"map_yaml:={shlex.quote(map_yaml_path)} "
                 + f"map_graph:={shlex.quote(graph_path)} use_rviz:=false"
@@ -1163,12 +1172,14 @@ class KioskRosNode(Node):
         }
         self.signals.system_telemetry_changed.emit(snap)
 
-        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự, tôn trọng trạng thái STARTING & STOPPING
+        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự, tôn trọng trạng thái STARTING, STOPPING & ERROR
         def _resolve_layer_state(canonical_key: str, alt_key: str, extra_proc=None):
             if canonical_key in self._starting_layers or alt_key in self._starting_layers:
                 return "STARTING"
             if canonical_key in self._stopping_layers or alt_key in self._stopping_layers:
                 return "STOPPING"
+            if canonical_key in self._error_layers or alt_key in self._error_layers:
+                return "ERROR"
             proc = self._layer_procs.get(canonical_key) or self._layer_procs.get(alt_key) or extra_proc
             return bool(proc and proc.poll() is None)
 
@@ -1287,18 +1298,56 @@ class KioskRosNode(Node):
             launch_key = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
         alt_key = self.LAYER_ALIAS_MAP.get(launch_key, "")
 
-        if launch_key in self._stopping_layers or layer_key in self._stopping_layers:
+        if (
+            launch_key in self._stopping_layers
+            or layer_key in self._stopping_layers
+            or (bool(alt_key) and alt_key in self._stopping_layers)
+        ):
             self.get_logger().warn(
                 f"[LAYER START] Tầng {layer_key} ({launch_key}) đang trong trạng thái STOPPING. "
                 "Không thể khởi động lại cho đến khi tiến trình dừng hoàn toàn!"
             )
             return
 
-        if launch_key in self._starting_layers or layer_key in self._starting_layers:
+        if (
+            launch_key in self._starting_layers
+            or layer_key in self._starting_layers
+            or (bool(alt_key) and alt_key in self._starting_layers)
+        ):
             self.get_logger().warn(
                 f"[LAYER START] Tầng {layer_key} ({launch_key}) đang trong quá trình STARTING, bỏ qua."
             )
             return
+
+        if (
+            launch_key in self._error_layers
+            or layer_key in self._error_layers
+            or (bool(alt_key) and alt_key in self._error_layers)
+        ):
+            self.get_logger().error(
+                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang ở trạng thái ERROR (tiến trình cũ chưa dừng sạch). "
+                "Vui lòng bấm STOP hoặc Emergency Cleanup trước khi khởi động lại!"
+            )
+            return
+
+        existing_proc = (
+            self._layer_procs.get(launch_key)
+            or self._layer_procs.get(layer_key)
+            or (self._layer_procs.get(alt_key) if alt_key else None)
+        )
+        if existing_proc and existing_proc.poll() is None:
+            self.get_logger().warn(
+                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang có tiến trình PID {existing_proc.pid} còn chạy! "
+                "Từ chối khởi động trùng."
+            )
+            return
+
+        # Gán token định danh duy nhất cho phiên khởi động này
+        launch_token = str(time.time_ns())
+        self._active_launch_tokens[launch_key] = launch_token
+        self._active_launch_tokens[layer_key] = launch_token
+        if alt_key:
+            self._active_launch_tokens[alt_key] = launch_token
 
         # Đánh dấu đang STARTING và xóa cờ hủy cũ (nếu có)
         self._starting_layers.add(launch_key)
@@ -1315,7 +1364,7 @@ class KioskRosNode(Node):
             starting_dict[alt_key] = "STARTING"
         self.signals.layer_status_changed.emit(starting_dict)
 
-        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (launch_key={launch_key})")
+        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (launch_key={launch_key}, token={launch_token})")
         cmd = ""
         prefix = self._get_ws_prefix()
         if launch_key == "layer1":
@@ -1327,7 +1376,7 @@ class KioskRosNode(Node):
             )
             cmd = (
                 prefix
-                + f"ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
@@ -1340,16 +1389,30 @@ class KioskRosNode(Node):
             cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
 
         if cmd:
-            def _launch():
+            def _launch(token=launch_token):
                 try:
-                    # Kiểm tra xem có lệnh hủy trước khi Popen không
-                    if launch_key in self._cancel_starting_layers:
-                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} trước khi tạo tiến trình.")
+                    # Kiểm tra xem có lệnh hủy hoặc token bị thu hồi trước khi Popen không
+                    if (
+                        self._active_launch_tokens.get(launch_key) != token
+                        or launch_key in self._cancel_starting_layers
+                    ):
+                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} trước khi tạo tiến trình (token mismatch).")
                         self._starting_layers.discard(launch_key)
                         self._starting_layers.discard(layer_key)
                         if alt_key:
                             self._starting_layers.discard(alt_key)
-                        self.signals.layer_status_changed.emit({launch_key: False})
+                        self._stopping_layers.discard(launch_key)
+                        self._stopping_layers.discard(layer_key)
+                        if alt_key:
+                            self._stopping_layers.discard(alt_key)
+                        self._cancel_starting_layers.discard(launch_key)
+                        self._cancel_starting_layers.discard(layer_key)
+                        if alt_key:
+                            self._cancel_starting_layers.discard(alt_key)
+                        stopped_dict = {launch_key: False, layer_key: False}
+                        if alt_key:
+                            stopped_dict[alt_key] = False
+                        self.signals.layer_status_changed.emit(stopped_dict)
                         return
 
                     log_path = f"/tmp/ros_layer_{launch_key}.log"
@@ -1368,9 +1431,12 @@ class KioskRosNode(Node):
                         preexec_fn=os.setsid,
                     )
 
-                    # Kiểm tra xem có lệnh hủy trong khi Popen đang spawn không
-                    if launch_key in self._cancel_starting_layers:
-                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} ngay sau Popen.")
+                    # Kiểm tra xem có lệnh hủy hoặc token bị thu hồi trong khi Popen đang spawn không
+                    if (
+                        self._active_launch_tokens.get(launch_key) != token
+                        or launch_key in self._cancel_starting_layers
+                    ):
+                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} ngay sau Popen (token mismatch).")
                         try:
                             os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
                         except Exception:
@@ -1379,7 +1445,18 @@ class KioskRosNode(Node):
                         self._starting_layers.discard(layer_key)
                         if alt_key:
                             self._starting_layers.discard(alt_key)
-                        self.signals.layer_status_changed.emit({launch_key: False})
+                        self._stopping_layers.discard(launch_key)
+                        self._stopping_layers.discard(layer_key)
+                        if alt_key:
+                            self._stopping_layers.discard(alt_key)
+                        self._cancel_starting_layers.discard(launch_key)
+                        self._cancel_starting_layers.discard(layer_key)
+                        if alt_key:
+                            self._cancel_starting_layers.discard(alt_key)
+                        stopped_dict = {launch_key: False, layer_key: False}
+                        if alt_key:
+                            stopped_dict[alt_key] = False
+                        self.signals.layer_status_changed.emit(stopped_dict)
                         return
 
                     self._layer_procs[launch_key] = proc
@@ -1439,6 +1516,18 @@ class KioskRosNode(Node):
                     self._starting_layers.discard(layer_key)
                     if alt_key:
                         self._starting_layers.discard(alt_key)
+                    self._stopping_layers.discard(launch_key)
+                    self._stopping_layers.discard(layer_key)
+                    if alt_key:
+                        self._stopping_layers.discard(alt_key)
+                    self._active_launch_tokens.pop(launch_key, None)
+                    self._active_launch_tokens.pop(layer_key, None)
+                    if alt_key:
+                        self._active_launch_tokens.pop(alt_key, None)
+                    self._error_layers.add(launch_key)
+                    self._error_layers.add(layer_key)
+                    if alt_key:
+                        self._error_layers.add(alt_key)
                     err_dict = {launch_key: "ERROR", layer_key: "ERROR"}
                     if alt_key:
                         err_dict[alt_key] = "ERROR"
@@ -1459,26 +1548,68 @@ class KioskRosNode(Node):
             self.get_logger().warn(f"[LAYER STOP] Tầng {layer_key} đang ở trạng thái STOPPING, bỏ qua yêu cầu trùng lặp.")
             return
 
+        # Thu hồi ngay lập tức token khởi chạy để vô hiệu hóa background launch thread
+        self._active_launch_tokens.pop(canonical, None)
+        self._active_launch_tokens.pop(layer_key, None)
+        self._active_launch_tokens.pop(launch_key, None)
+        if alt_key:
+            self._active_launch_tokens.pop(alt_key, None)
+
         # Xử lý nếu tầng đang trong giai đoạn STARTING:
-        if canonical in self._starting_layers or layer_key in self._starting_layers:
+        is_starting = (
+            canonical in self._starting_layers
+            or layer_key in self._starting_layers
+            or (bool(alt_key) and alt_key in self._starting_layers)
+        )
+        if is_starting:
             self.get_logger().info(f"[LAYER STOP] Yêu cầu dừng khi tầng {layer_key} đang STARTING. Đánh dấu cờ hủy.")
             self._cancel_starting_layers.add(canonical)
             self._cancel_starting_layers.add(layer_key)
+            self._cancel_starting_layers.add(launch_key)
             if alt_key:
                 self._cancel_starting_layers.add(alt_key)
 
-        proc = self._layer_procs.get(canonical) or self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
+        proc = (
+            self._layer_procs.get(canonical)
+            or self._layer_procs.get(layer_key)
+            or self._layer_procs.get(launch_key)
+            or (self._layer_procs.get(alt_key) if alt_key else None)
+        )
 
         if not proc or proc.poll() is not None:
-            # Không có tiến trình hoặc tiến trình đã chết sẵn
+            # Nếu đang trong quá trình STARTING nhưng chưa có process handle trong _layer_procs:
+            # CHUYỂN SANG STOPPING và để background launch thread tự dọn dẹp khi phát hiện token bị hủy,
+            # tránh việc báo STOPPED quá sớm khiến người dùng bấm START trùng lặp!
+            if is_starting:
+                self._stopping_layers.add(canonical)
+                self._stopping_layers.add(layer_key)
+                if alt_key:
+                    self._stopping_layers.add(alt_key)
+                stopping_dict = {canonical: "STOPPING", layer_key: "STOPPING"}
+                if alt_key:
+                    stopping_dict[alt_key] = "STOPPING"
+                self.signals.layer_status_changed.emit(stopping_dict)
+                self.get_logger().info(f"[LAYER STOP] Tầng {layer_key} đang STARTING -> chuyển STOPPING chờ thread hủy an toàn.")
+                return
+
+            # Không có tiến trình hoặc tiến trình đã kết thúc
             self._layer_procs.pop(canonical, None)
             self._layer_procs.pop(layer_key, None)
+            self._layer_procs.pop(launch_key, None)
             if alt_key:
                 self._layer_procs.pop(alt_key, None)
             self._starting_layers.discard(canonical)
             self._starting_layers.discard(layer_key)
             if alt_key:
                 self._starting_layers.discard(alt_key)
+            self._stopping_layers.discard(canonical)
+            self._stopping_layers.discard(layer_key)
+            if alt_key:
+                self._stopping_layers.discard(alt_key)
+            self._error_layers.discard(canonical)
+            self._error_layers.discard(layer_key)
+            if alt_key:
+                self._error_layers.discard(alt_key)
             stopped_dict = {canonical: False, layer_key: False}
             if alt_key:
                 stopped_dict[alt_key] = False
@@ -1523,6 +1654,7 @@ class KioskRosNode(Node):
                 if is_dead:
                     self._layer_procs.pop(c_key, None)
                     self._layer_procs.pop(orig_key, None)
+                    self._layer_procs.pop(l_key, None)
                     if a_key:
                         self._layer_procs.pop(a_key, None)
                     if l_key == "layer3" or c_key in ("layer3", "layer_slam"):
@@ -1535,6 +1667,10 @@ class KioskRosNode(Node):
                     self._stopping_layers.discard(orig_key)
                     if a_key:
                         self._stopping_layers.discard(a_key)
+                    self._error_layers.discard(c_key)
+                    self._error_layers.discard(orig_key)
+                    if a_key:
+                        self._error_layers.discard(a_key)
 
                     stopped_dict = {c_key: False, orig_key: False}
                     if a_key:
@@ -1543,12 +1679,16 @@ class KioskRosNode(Node):
                     self._record_layer_log(c_key, f"--- TIẾN TRÌNH [{c_key.upper()}] ĐÃ DỪNG HOÀN TOÀN ---")
                     self.get_logger().info(f"[LAYER STOP] Đã dừng hoàn toàn: {c_key}")
                 else:
-                    # TIẾN TRÌNH VẪN CHƯA THOÁT! Giữ handle trong _layer_procs và báo ERROR
+                    # TIẾN TRÌNH VẪN CHƯA THOÁT! Giữ handle trong _layer_procs và chuyển sang ERROR
                     self.get_logger().error(f"[LAYER STOP] Tiến trình {c_key} (PID: {target_proc.pid}) không phản hồi! Giữ trạng thái ERROR.")
                     self._stopping_layers.discard(c_key)
                     self._stopping_layers.discard(orig_key)
                     if a_key:
                         self._stopping_layers.discard(a_key)
+                    self._error_layers.add(c_key)
+                    self._error_layers.add(orig_key)
+                    if a_key:
+                        self._error_layers.add(a_key)
                     err_dict = {c_key: "ERROR", orig_key: "ERROR"}
                     if a_key:
                         err_dict[a_key] = "ERROR"
@@ -1618,6 +1758,8 @@ class KioskRosNode(Node):
         self._starting_layers.clear()
         self._cancel_starting_layers.clear()
         self._stopping_layers.clear()
+        self._error_layers.clear()
+        self._active_launch_tokens.clear()
         self._layer_procs.clear()
         self._slam_proc = None
         self._localization_proc = None

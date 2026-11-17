@@ -917,7 +917,8 @@ class KioskWindow(QMainWindow):
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
         if cmd == "SHOW_SERVING":
             if hasattr(self, "service_page"):
-                self.service_page.select_mode_programmatically("wait")
+                # Cập nhật hiển thị chế độ phục vụ nhưng KHÔNG phát ngược tín hiệu điều khiển ra ROS 2 backend
+                self.service_page.select_mode_programmatically("wait", emit_signal=False)
             self.show_page("service")
         elif cmd == "SHOW_5S_INVITE":
             # Chỉ mở giao diện chào mời 5 giây, không tự động kích hoạt chế độ phục vụ

@@ -15,6 +15,8 @@ Verifies:
 12. SHOW_5S_INVITE popup does not auto-trigger service wait mode (Service logic fix).
 13. load_map_yaml() without waypoints does not overwrite global config files (Data protection fix).
 14. apply_localization_map() passes both map_yaml and map_graph for SLAM Toolbox (Nav2 fix).
+15. Token-based lifecycle prevents START-STOP-START race condition (P0 concurrency fix).
+16. SHOW_SERVING decouples UI selection from command emitting (P1 loop fix).
 """
 from __future__ import annotations
 
@@ -245,11 +247,14 @@ def test_scenario_7_lifecycle_starting_stopping_error_and_race_prevention(app, m
         CANONICAL_LAYER_MAP = KioskRosNode.CANONICAL_LAYER_MAP
         LAYER_ALIAS_MAP = KioskRosNode.LAYER_ALIAS_MAP
         _canonical_layer_key = KioskRosNode._canonical_layer_key
-        _get_ws_prefix = lambda self: ""
+        def _get_ws_prefix(self):
+            return ""
         _layer_procs = {"layer1": mock_proc, "layer_hardware": mock_proc}
         _starting_layers = set()
         _cancel_starting_layers = set()
         _stopping_layers = set()
+        _error_layers = set()
+        _active_launch_tokens = {}
         _layer_log_buffers = {"layer1": [], "all": []}
         _console_active = False
 
@@ -298,11 +303,23 @@ def test_scenario_7_lifecycle_starting_stopping_error_and_race_prevention(app, m
     monkeypatch.setattr(time, "sleep", lambda s: None)
 
     node.stop_layer("layer2")
-    real_time.sleep(0.05)
+    t_end = real_time.monotonic() + 1.5
+    while real_time.monotonic() < t_end:
+        if "layer2" in node._error_layers:
+            break
+        real_time.sleep(0.02)
+
     # Vì tiến trình không thoát, nó KHÔNG được xóa khỏi _layer_procs, và phát trạng thái ERROR
     assert "layer2" in node._layer_procs
+    assert "layer2" in node._error_layers
     last_dict = node.signals.layer_status_changed.emit.call_args[0][0]
     assert last_dict.get("layer2") == "ERROR"
+
+    # F. Khi đang ở ERROR, start_layer phải bị từ chối tuyệt đối để chặn start trùng
+    mock_logger.reset_mock()
+    node.start_layer("layer2")
+    mock_logger.error.assert_called()
+    assert "ERROR" in mock_logger.error.call_args[0][0]
 
 
 def test_scenario_8_souta_video_simd_resize(app):
@@ -398,9 +415,9 @@ def test_scenario_12_service_invite_popup_no_auto_serving(app):
     win.show_page.assert_called_with("service")
     win.service_page.select_mode_programmatically.assert_not_called()
 
-    # 2. Nhận lệnh SHOW_SERVING: Phải kích hoạt wait mode
+    # 2. Nhận lệnh SHOW_SERVING: Phải kích hoạt wait mode với emit_signal=False để tránh phản hồi vòng lặp lệnh
     win._on_service_popup_cmd("SHOW_SERVING")
-    win.service_page.select_mode_programmatically.assert_called_with("wait")
+    win.service_page.select_mode_programmatically.assert_called_with("wait", emit_signal=False)
 
 
 def test_scenario_13_load_map_yaml_without_waypoints_protects_config(app, tmp_path):
@@ -438,7 +455,8 @@ def test_scenario_14_apply_localization_map_passes_map_graph(app):
         _selected_map_yaml = ""
         _selected_backend = ""
         stop_slam = MagicMock()
-        _get_ws_prefix = lambda self: ""
+        def _get_ws_prefix(self):
+            return ""
 
         def get_logger(self):
             return MagicMock()
@@ -463,3 +481,108 @@ def test_scenario_14_apply_localization_map_passes_map_graph(app):
     cmd = spawned_cmds[0]
     assert "map_yaml:=/home/user/my_map/khoa_a1.yaml" in cmd
     assert "map_graph:=/home/user/my_map/khoa_a1" in cmd
+
+
+def test_scenario_15_token_based_race_prevention_start_stop_start(app, monkeypatch):
+    """15. P0 Fix: Token-based lifecycle ngăn chặn race condition START-STOP-START."""
+    import signal
+    import threading
+    from robot_ui.kiosk.ros_node import KioskRosNode
+
+    spawned_procs = []
+    launch_gate = threading.Event()
+    killed_pids = []
+
+    def mock_popen(cmd_list, **kwargs):
+        launch_gate.wait(timeout=2.0)
+        p = MagicMock()
+        p.pid = 9000 + len(spawned_procs)
+        p.poll.return_value = None
+        p.stdout = None
+        spawned_procs.append(p)
+        return p
+
+    monkeypatch.setattr("subprocess.Popen", mock_popen)
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: killed_pids.append((pgid, sig)))
+
+    mock_logger = MagicMock()
+
+    class DummyRosNode:
+        CANONICAL_LAYER_MAP = KioskRosNode.CANONICAL_LAYER_MAP
+        LAYER_ALIAS_MAP = KioskRosNode.LAYER_ALIAS_MAP
+        _canonical_layer_key = KioskRosNode._canonical_layer_key
+
+        def _get_ws_prefix(self):
+            return ""
+
+        _layer_procs = {}
+        _starting_layers = set()
+        _cancel_starting_layers = set()
+        _stopping_layers = set()
+        _error_layers = set()
+        _active_launch_tokens = {}
+        _layer_log_buffers = {"layer1": [], "all": []}
+        _console_active = False
+
+        def get_logger(self):
+            return mock_logger
+
+        signals = MagicMock()
+        _record_layer_log = MagicMock()
+        start_layer = KioskRosNode.start_layer
+        stop_layer = KioskRosNode.stop_layer
+
+    node = DummyRosNode()
+
+    # Bước 1: Gọi start_layer("layer1") - tiến trình đang chờ ở launch_gate
+    node.start_layer("layer1")
+    token_1 = node._active_launch_tokens.get("layer1")
+    assert token_1 is not None
+    assert "layer1" in node._starting_layers
+
+    # Bước 2: Ngay lập tức gọi stop_layer("layer1") khi thread chưa spawn xong
+    node.stop_layer("layer1")
+    # Token 1 phải bị vô hiệu hóa ngay lập tức
+    assert "layer1" not in node._active_launch_tokens
+    # Trạng thái chuyển sang STOPPING chờ thread hủy an toàn
+    assert "layer1" in node._stopping_layers
+
+    # Trong lúc đang STOPPING, lệnh start lần 2 phải bị từ chối
+    node.start_layer("layer1")
+    assert mock_logger.warn.called
+    assert "STOPPING" in mock_logger.warn.call_args[0][0]
+
+    # Bước 3: Cho phép Popen hoàn tất; launch thread phát hiện token đã mất và tự hủy
+    launch_gate.set()
+    time.sleep(0.15)
+
+    assert "layer1" not in node._starting_layers
+    assert "layer1" not in node._stopping_layers
+    # Không có tiến trình nào được đưa vào _layer_procs
+    assert "layer1" not in node._layer_procs
+    # Tiến trình được tạo ra phải bị killpg ngay sau Popen
+    assert any(sig == signal.SIGKILL for _, sig in killed_pids)
+
+
+def test_scenario_16_service_page_select_mode_decoupling(app):
+    """16. P1 Fix: select_mode_programmatically với emit_signal=False không phát tín hiệu."""
+    from robot_ui.kiosk.pages.service_page import ServicePage
+
+    page = ServicePage()
+    emitted_modes = []
+    page.mode_selected.connect(lambda m: emitted_modes.append(m))
+
+    # 1. Gọi programmatic với emit_signal=False: nút được chọn nhưng KHÔNG emit
+    page.select_mode_programmatically("wait", emit_signal=False)
+    assert page.get_selected_mode() == "wait"
+    assert page.btn_wait.property("selected") is True
+    assert page.btn_continue.property("selected") is False
+    assert len(emitted_modes) == 0
+
+    # 2. Gọi programmatic với emit_signal=True: nút được chọn và CÓ emit
+    page.select_mode_programmatically("continue", emit_signal=True)
+    assert page.get_selected_mode() == "continue"
+    assert page.btn_continue.property("selected") is True
+    assert len(emitted_modes) == 1
+    assert emitted_modes[0] == "continue"
