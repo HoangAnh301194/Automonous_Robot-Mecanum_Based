@@ -1840,7 +1840,8 @@ class KioskRosNode(Node):
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
-        self._start_all_cancel.set()
+        with self._start_all_gate:
+            self._start_all_cancel.set()
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         self._record_layer_log("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
