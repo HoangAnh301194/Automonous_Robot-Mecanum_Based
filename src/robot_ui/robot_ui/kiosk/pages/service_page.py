@@ -95,18 +95,15 @@ class ServiceMascotCanvas(QWidget):
     def set_selected(self, mode: str | None) -> None:
         if mode not in {"wait", "continue", None}:
             return
-        changed = mode != self._selected_mode
         self._selected_mode = mode
         self._zoom_animation.stop()
         if mode is None:
             self._press_scale = 1.0
-        elif changed:
+        else:
             self._press_scale = 1.0
             self._zoom_animation.setStartValue(1.0)
             self._zoom_animation.setEndValue(1.055)
             self._zoom_animation.start()
-        else:
-            self._press_scale = 1.055
         for button, button_mode, fill in (
             (self.wait_button, "wait", "#0865b3"),
             (self.continue_button, "continue", "#168a40"),
