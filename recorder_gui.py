@@ -165,11 +165,11 @@ class RecorderApp:
         group.pack(fill="x", pady=5)
         line = ttk.Frame(group)
         line.pack(fill="x")
-        ttk.Label(line, text="Mã cộng tác viên:").pack(side="left")
+        ttk.Label(line, text="Tên/mã người thu data:").pack(side="left")
         ttk.Entry(line, textvariable=self.collector, width=12).pack(side="left", padx=8)
         self.export_btn = ttk.Button(line, text="Xuất ZIP dataset", command=self.export_zip)
         self.export_btn.pack(side="left")
-        ttk.Label(group, text="ZIP gồm WAV theo nhãn, không chứa registry tên người nói.").pack(anchor="w", pady=5)
+        ttk.Label(group, text="Ví dụ c01 hoặc hoanganh (không dấu/không cách). Đây là người thu data, không phải người nói.").pack(anchor="w", pady=5)
 
         group = ttk.LabelFrame(body, text="4 · Trạng thái", padding=10)
         group.pack(fill="x", pady=5)
@@ -330,7 +330,7 @@ class RecorderApp:
     def export_zip(self):
         code = self.collector.get().strip().lower()
         if not re.fullmatch(r"[a-z][a-z0-9]{1,11}", code):
-            messagebox.showerror("Mã không hợp lệ", "Mã 2–12 ký tự a-z, 0-9, bắt đầu bằng chữ.")
+            messagebox.showerror("Tên/mã không hợp lệ", "Tên/mã người thu data: 2–12 ký tự a-z, 0-9, bắt đầu bằng chữ, không dấu/không khoảng trắng.")
             return
         suggested = f"souta_kws_{code}_{datetime.now():%Y%m%d_%H%M%S}.zip"
         filename = filedialog.asksaveasfilename(
