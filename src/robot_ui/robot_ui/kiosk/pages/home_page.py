@@ -133,7 +133,10 @@ class VideoBackground(QWidget):
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#000000"))
+        # This screen is intentionally light even when the rest of Kiosk is dark.
+        # Match the white background baked into mochi_idle_light.jpg so there
+        # are no black bands at wide screen aspect ratios.
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
         if not self._static_image.isNull():
             image = self._static_image.scaled(
                 max(1, round(self.width() * self._display_scale)),
@@ -161,6 +164,9 @@ class HomePage(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("idleHomePage")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet("QWidget#idleHomePage { background-color: #FFFFFF; }")
         self.video = VideoBackground(self)
         self.overlay = QWidget(self)
         self.overlay.setAttribute(Qt.WA_TranslucentBackground)
