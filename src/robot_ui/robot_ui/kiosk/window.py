@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -638,6 +639,10 @@ class KioskWindow(QMainWindow):
         self.system_config_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.system_config_page.start_layer_requested.connect(self.ros_node.start_layer)
         self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
+        self.system_config_page.start_all_requested.connect(self.ros_node.start_all_layers)
+        self.system_config_page.stop_all_requested.connect(self.ros_node.stop_all_layers)
+        self.system_config_page.swap_ports_requested.connect(self._on_swap_serial_ports)
+        self.system_config_page.rescan_ports_requested.connect(self._on_rescan_serial_ports)
         self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
         self.detection_debug_page.home_requested.connect(self.return_to_home)
@@ -654,6 +659,7 @@ class KioskWindow(QMainWindow):
         signals.system_telemetry_changed.connect(self.detection_debug_page.update_ai_telemetry)
         signals.layer_status_changed.connect(self.system_config_page.update_layer_status)
         signals.layer_log_received.connect(self.system_config_page.append_layer_log)
+        signals.serial_ports_changed.connect(self.system_config_page.set_detected_ports)
         signals.actuator_test_result.connect(
             lambda name, ok, msg: self.system_config_page.append_console_log(
                 f"[{name.upper()}] {'THÀNH CÔNG' if ok else 'THẤT BẠI'}: {msg}"
@@ -987,6 +993,28 @@ class KioskWindow(QMainWindow):
     def _on_admin_system_status(self) -> None:
         LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
         self.show_page("system_config")
+
+    def _on_rescan_serial_ports(self) -> None:
+        """Scan ports in a worker; never block the GUI event loop."""
+        def worker() -> None:
+            try:
+                ports = self.ros_node.get_detected_ports(refresh=True)
+                self.signals.serial_ports_changed.emit(*ports)
+            except Exception as exc:
+                LOG.warning("Serial rescan failed: %s", exc)
+                self.signals.serial_ports_changed.emit("-", "-", "scan_failed")
+        threading.Thread(target=worker, name="kiosk-serial-scan", daemon=True).start()
+
+    def _on_swap_serial_ports(self) -> None:
+        """Update next-launch port assignment without touching a live driver."""
+        def worker() -> None:
+            try:
+                ports = self.ros_node.swap_serial_ports()
+                self.signals.serial_ports_changed.emit(*ports)
+            except Exception as exc:
+                LOG.warning("Serial swap failed: %s", exc)
+                self.signals.serial_ports_changed.emit("-", "-", "swap_failed")
+        threading.Thread(target=worker, name="kiosk-serial-swap", daemon=True).start()
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
