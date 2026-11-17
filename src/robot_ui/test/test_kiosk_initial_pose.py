@@ -380,7 +380,7 @@ def test_ip18_subpage_switch_preserves_localization_state(qapp):
 
 
 def test_ip19_high_covariance_rejected(ros_node):
-    """IP-19: /amcl_pose có phương sai lớn (>0.60m) -> Không chuyển LOCALIZED, báo ERROR sau timeout."""
+    """IP-19: /amcl_pose có phương sai lớn (>1.20m) -> Không chuyển LOCALIZED, báo ERROR sau timeout."""
     ros_node._layer_states["layer2"] = LayerState.RUNNING
     ros_node._last_odom_time = time.monotonic()
     ros_node._last_scan_time = time.monotonic()
@@ -393,8 +393,8 @@ def test_ip19_high_covariance_rejected(ros_node):
     msg = PoseWithCovarianceStamped()
     msg.header.frame_id = "map"
     cov = [0.0] * 36
-    cov[0] = 0.5   # var x
-    cov[7] = 0.5   # var y -> norm = sqrt(1.0) = 1.0m > 0.60m
+    cov[0] = 1.0   # var x
+    cov[7] = 1.0   # var y -> norm = sqrt(2.0) = 1.41m > 1.20m
     msg.pose.covariance = cov
 
     ros_node._on_amcl_pose(msg)

@@ -467,7 +467,7 @@ class KioskRosNode(Node):
         # Khi Kiosk chủ động phát initial pose, việc chuyển sang LOCALIZED được thực hiện nguyên tử qua _verify_localization_worker.
         # Nếu người dùng dùng RViz2 (2D Pose Estimate) độc lập, tự động đồng bộ khi đạt chuẩn hội tụ và TF:
         if not self._loc_session_token and self._localization_state != LocalizationState.LOCALIZED:
-            if cov_norm <= 0.85:
+            if cov_norm <= 1.20:
                 tf_ok = False
                 try:
                     tf_ok = self._tf_buffer.can_transform("map", "odom", rclpy.time.Time())
@@ -1481,11 +1481,11 @@ class KioskRosNode(Node):
         return True
 
     def _verify_localization_worker(self, token: str) -> None:
-        """Worker nền kiểm tra TF map -> odom và độ hội tụ AMCL sau khi gửi Initial Pose."""
+        """Worker nền kiểm tra TF map -> odom từ AMCL sau khi gửi Initial Pose (chuẩn gui_v3)."""
         start_t = time.monotonic()
         timeout = 10.0
         tf_detected = False
-        MAX_COVARIANCE_NORM = 0.85
+        MAX_COVARIANCE_NORM = 1.20
 
         while time.monotonic() - start_t < timeout:
             if self._loc_session_token != token:
@@ -1499,38 +1499,37 @@ class KioskRosNode(Node):
 
             if tf_ok:
                 tf_detected = True
-                pose_is_fresh = self._last_amcl_pose_at >= (self._last_initial_pose_sent_at - 0.20)
                 cov_ok = self._amcl_covariance_norm <= MAX_COVARIANCE_NORM
 
-                if pose_is_fresh and cov_ok:
+                if cov_ok:
                     self._loc_session_token = ""
                     self._set_localization_state(
                         LocalizationState.LOCALIZED,
-                        f"Đã định vị thành công (sai số: {self._amcl_covariance_norm:.2f}m)"
+                        f"Đã định vị thành công (TF map->odom OK, sai số: {self._amcl_covariance_norm:.2f}m)"
                     )
                     self.signals.initial_pose_confirmed.emit({
                         "token": token,
                         "covariance_norm": self._amcl_covariance_norm,
-                        "timestamp": self._last_amcl_pose_at,
+                        "timestamp": self._last_amcl_pose_at or time.monotonic(),
                     })
                     return
-                elif pose_is_fresh and not cov_ok:
+                else:
                     self._set_localization_state(
                         LocalizationState.TF_AVAILABLE,
-                        f"Có liên kết TF nhưng độ phân tán hạt chưa đạt ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
+                        f"Có liên kết TF nhưng độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
                     )
-                else:
-                    if self._localization_state == LocalizationState.WAITING_FOR_LOCALIZATION:
-                        self._set_localization_state(
-                            LocalizationState.TF_AVAILABLE,
-                            "Đã nhận liên kết TF map -> odom từ AMCL, chờ hội tụ vị trí..."
-                        )
+            else:
+                if self._localization_state == LocalizationState.WAITING_FOR_LOCALIZATION:
+                    self._set_localization_state(
+                        LocalizationState.WAITING_FOR_LOCALIZATION,
+                        "Đang chờ liên kết TF map -> odom từ AMCL..."
+                    )
 
             if self._localization_state == LocalizationState.LOCALIZED:
                 self._loc_session_token = ""
                 return
 
-            time.sleep(0.15)
+            time.sleep(0.10)
 
         if self._loc_session_token == token and self._localization_state != LocalizationState.LOCALIZED:
             self._loc_session_token = ""
