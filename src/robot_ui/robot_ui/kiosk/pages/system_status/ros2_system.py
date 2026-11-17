@@ -436,7 +436,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.btn_rescan_ports.clicked.connect(self._on_rescan_ports)
         ports_row.addWidget(self.btn_rescan_ports)
 
-        self.btn_swap_ports = QPushButton("Hoán Đổi Cổng Hoverboard/ESP32")
+        self.btn_swap_ports = QPushButton("Đảo Cổng ESP32 ↔ LiDAR")
         self.btn_swap_ports.setFixedHeight(KioskTheme.TOUCH_TARGET_MIN)
         self.btn_swap_ports.setCursor(Qt.PointingHandCursor)
         self.btn_swap_ports.setStyleSheet(f"""
