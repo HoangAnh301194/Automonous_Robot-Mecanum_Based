@@ -60,6 +60,7 @@ class DetectionDebugPage(QWidget):
         self.setObjectName("detectionDebugPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.icons = icons or {}
+        self._last_stats: Optional[dict[str, Any]] = None
 
         self._init_ui()
 
@@ -386,8 +387,19 @@ class DetectionDebugPage(QWidget):
         except Exception:
             pass
 
-    def update_ai_telemetry(self, stats: dict[str, Any]) -> None:
-        """Update live telemetry from AI pipeline."""
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        if self._last_stats is not None:
+            self._render_ai_telemetry(self._last_stats)
+
+    def update_ai_telemetry(self, stats: dict[str, Any], force: bool = False) -> None:
+        """Update live telemetry from AI pipeline (skips rendering when hidden)."""
+        self._last_stats = stats
+        if self.parent() is not None and not self.isVisible() and not force:
+            return
+        self._render_ai_telemetry(stats)
+
+    def _render_ai_telemetry(self, stats: dict[str, Any]) -> None:
         cnt = int(stats.get("people_count", stats.get("yolo_people_count", 0)))
         self.lbl_people_count.setText(f"{cnt} người")
 
@@ -433,6 +445,8 @@ class DetectionDebugPage(QWidget):
             self.btn_fullscreen.setToolTip("Toàn màn hình (F11)")
 
     def update_wifi(self, connected: bool) -> None:
+        if self.parent() is not None and not self.isVisible():
+            return
         self.lbl_wifi_top.setText("Online" if connected else "Offline")
         self.lbl_wifi_top.setStyleSheet(
             f"color: {KioskTheme.COLOR_HEALTHY if connected else KioskTheme.COLOR_CRITICAL}; font-size: 11px; font-weight: bold;"
@@ -445,6 +459,8 @@ class DetectionDebugPage(QWidget):
             )
 
     def update_battery(self, percent: float | None) -> None:
+        if self.parent() is not None and not self.isVisible():
+            return
         if percent is None:
             self.lbl_bat_top.setText("--%")
             return

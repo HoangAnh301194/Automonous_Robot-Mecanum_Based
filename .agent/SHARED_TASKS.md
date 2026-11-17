@@ -12,6 +12,7 @@
 | **Admin Configuration** | `a1fd1e54-8359-4442-b74b-70fe27d80e32` | `admin_page.py` | - | HOÀN TẤT | Sắp xếp lại lưới nút chức năng: H1 (System Config, SLAM Config, Navigation), H2 (Detection Debug, Start Nav, Stop Nav) |
 | **Coordinator & Rules** | `ebc52d35-1122-49c3-89d3-ae990b16cd0e` | `.agent/rules/`, `.agent/` | - | Đang trực | Quản lý quy chuẩn Git, Coding Style, Quality Gate và Điều phối |
 | **Patrol & Approach Control** | `4386e324-f290-434d-a154-1c063a46edc8` | `bt_nodes.py`, `test_bt_preemption.py` | `ActionApproachWavingPerson` | HOÀN TẤT | Hoàn thành: Cập nhật cự ly tiếp cận người vẫy tay từ 1.2m xuống 0.70m (freeze_distance 1.0m), pass 100% 13 unit tests, build pass 0 errors. |
+| **UI Performance & Lazy Sleep** | `4386e324-f290-434d-a154-1c063a46edc8` | `ros_node.py`, `detection_debug_page.py`, `system_config_page.py`, `window.py` | `robot_status_changed`, `system_telemetry_changed` | HOÀN TẤT | Hoàn thành: Chặn bão pin 50Hz về 1Hz, chỉ render trang active, cho tab Debug & System Config ngủ 100% khi ẩn, pass 100% linter/build/125 unit tests |
 
 ---
 

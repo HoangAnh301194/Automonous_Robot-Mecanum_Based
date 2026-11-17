@@ -148,6 +148,7 @@ class KioskRosNode(Node):
         self._dbg_lock = threading.Lock()
         self._topic_stats: dict[str, dict[str, Any]] = {}
         self._battery_voltages: deque[float] = deque(maxlen=25)
+        self._last_battery_emit_at: float = 0.0
         self._battery_pct = 0.0
         self._battery_smooth_v = 36.0
         self._battery_raw_v = 36.0
@@ -1208,7 +1209,11 @@ class KioskRosNode(Node):
     def _on_wave_detected(self, msg: Bool) -> None:
         self._is_waving = bool(msg.data)
 
-    def _emit_battery_water(self) -> None:
+    def _emit_battery_water(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_battery_emit_at) < 1.0:
+            return
+        self._last_battery_emit_at = now
         self.signals.robot_status_changed.emit(
             {
                 "battery_percent": self._battery_pct,
