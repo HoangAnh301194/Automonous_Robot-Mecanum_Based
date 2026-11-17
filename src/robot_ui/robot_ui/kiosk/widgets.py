@@ -8,7 +8,7 @@ from PyQt5.QtGui import QColor, QIcon
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 
 # Re-export page components and helpers for 100% backward compatibility
-from robot_ui.kiosk.assets import ICON_GOLD, ICON_GOLD_ACTIVE
+from robot_ui.kiosk.assets import ICON_WHITE, ICON_WHITE_ACTIVE
 from robot_ui.kiosk.pages.base import monochrome_icon, strip_emojis
 from robot_ui.kiosk.pages.chat_page import (
     ChatPage,
@@ -34,12 +34,12 @@ class NavButton(QPushButton):
 
     def refresh_appearance(self, dark_background: bool, active: bool) -> None:
         self.setProperty("dark", dark_background)
-        # Keep emergency red; all other actionable glyphs use the same ochre
+        # Keep emergency red; all other actionable glyphs use the white
         # palette in every state, including the selected Service/Settings icon.
         if self.page_id == "emergency" or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
             self.setIcon(QIcon(str(self.icon_path)))
         else:
-            color = QColor(ICON_GOLD_ACTIVE if active else ICON_GOLD)
+            color = QColor(ICON_WHITE_ACTIVE if active else ICON_WHITE)
             self.setIcon(monochrome_icon(self.icon_path, color))
         self.style().unpolish(self)
         self.style().polish(self)
