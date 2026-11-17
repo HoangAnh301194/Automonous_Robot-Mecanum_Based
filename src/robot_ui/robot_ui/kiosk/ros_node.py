@@ -1764,6 +1764,7 @@ class KioskRosNode(Node):
         def _sequence() -> None:
             self._record_layer_log("all", f"[START ALL] Mode={selected_mode}, backend={selected_backend}")
             try:
+                start_requested_at = time.monotonic()
                 self.start_layer("layer1")
                 ready = False
                 deadline = time.monotonic() + 30.0
@@ -1779,7 +1780,9 @@ class KioskRosNode(Node):
                             now = time.monotonic()
                             odom_ts = self._topic_stats.get("odom", {}).get("last_ts", 0.0)
                             lidar_ts = self._topic_stats.get("lidar", {}).get("last_ts", 0.0)
-                        if now - odom_ts < 3.0 and now - lidar_ts < 3.0:
+                        # Ignore telemetry left over from a previous Hardware run.
+                        if (odom_ts >= start_requested_at and lidar_ts >= start_requested_at
+                                and now - odom_ts < 3.0 and now - lidar_ts < 3.0):
                             ready = True
                             break
                     time.sleep(0.2)
@@ -1830,8 +1833,8 @@ class KioskRosNode(Node):
                 self.stop_layer(key)
 
     def cleanup_ros_processes(self) -> None:
-        self._start_all_cancel.set()
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
+        self._start_all_cancel.set()
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         self._record_layer_log("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
