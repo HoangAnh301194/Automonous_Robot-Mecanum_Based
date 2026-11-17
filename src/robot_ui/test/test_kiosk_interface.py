@@ -573,12 +573,12 @@ def test_service_page_elements_and_selection(app):
     )
 
     # 1. Header elements
-    assert page.findChild(QLabel, "serviceHeaderTitle").text() == "SERVICE"
-    assert "Souta Robot · Phục vụ nước" in page.findChild(QLabel, "serviceHeaderSubtitle").text()
+    assert page.findChild(QLabel, "serviceHeaderTitle").text() == "DỊCH VỤ PHỤC VỤ NƯỚC"
 
-    # 2. Main content elements
-    assert page.findChild(QLabel, "serviceMainTitle").text() == "Dịch vụ phục vụ nước"
-    assert "Vui lòng lựa chọn chức năng bên dưới" in page.findChild(QLabel, "serviceInstruction").text()
+    # 2. Native touch regions overlay the service mascot artwork
+    assert page.mascot_canvas is not None
+    assert page.btn_wait.accessibleName() == "Phục vụ"
+    assert page.btn_continue.accessibleName() == "Hoàn tất"
 
     # 3. Two large cards
     assert page.btn_wait is not None
@@ -606,7 +606,7 @@ def test_service_page_elements_and_selection(app):
     # 4. Footer
     footer = page.findChild(QLabel, "serviceFooter")
     assert footer is not None
-    assert "Đã kết nối điều khiển robot" in footer.text()
+    assert "Hoàn tất" in footer.text()
 
     # Programmatic selection
     page.select_mode_programmatically("wait")
@@ -634,14 +634,17 @@ def test_service_page_layout_dimensions(app):
     app.processEvents()
     assert page.width() == 800
     assert page.height() == 480
-    assert page.btn_wait.width() == 280
-    assert page.btn_continue.width() == 280
+    assert page.btn_wait.width() >= 44
+    assert page.btn_continue.width() >= 44
+    assert page.btn_wait.geometry().right() < page.btn_continue.geometry().left()
 
     # Test 1280x720
     page.resize(1280, 720)
     app.processEvents()
     assert page.width() == 1280
     assert page.height() == 720
+    assert page.btn_wait.width() >= 44
+    assert page.btn_continue.width() >= 44
 
 
 

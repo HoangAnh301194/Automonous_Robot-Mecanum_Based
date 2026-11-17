@@ -66,9 +66,9 @@ def test_contracts_and_overall_health():
 
 
 def test_theme_tokens():
-    assert KioskTheme.COLOR_BG == "#000000"
-    assert KioskTheme.COLOR_SURFACE == "#111418"
-    assert KioskTheme.COLOR_ACCENT == "#F6C16A"
+    assert KioskTheme.COLOR_BG == "#f7f9fc"
+    assert KioskTheme.COLOR_SURFACE == "#ffffff"
+    assert KioskTheme.COLOR_ACCENT == "#b32632"
     assert KioskTheme.TOUCH_TARGET_MIN >= 44
 
     assert KioskTheme.get_status_color(HealthStatus.HEALTHY) == KioskTheme.COLOR_HEALTHY

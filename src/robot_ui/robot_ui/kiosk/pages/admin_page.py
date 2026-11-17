@@ -387,7 +387,7 @@ class AdminPage(QWidget):
                 border-radius: 12px;
             }
             QPushButton#adminBackButton:hover {
-                background: #17202c;
+                background: #eaf0f7;
                 border-color: #3b4e64;
             }
             QPushButton#adminBackButton:pressed {
@@ -403,7 +403,7 @@ class AdminPage(QWidget):
                 font-weight: 700;
             }
             QPushButton#adminFullscreenButton:hover {
-                background: #17202c;
+                background: #eaf0f7;
                 border-color: #3b4e64;
                 color: #b32632;
             }
@@ -437,7 +437,7 @@ class AdminPage(QWidget):
             QPushButton#adminStartNavButton:pressed,
             QPushButton#adminStopNavButton:pressed,
             QPushButton#adminSystemStatusButton:pressed {
-                background: #192432;
+                background: #e6edf6;
                 border: 2px solid #f6c16a;
             }
             QLabel#launcherTitle {

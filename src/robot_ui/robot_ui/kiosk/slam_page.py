@@ -340,7 +340,7 @@ class TouchMapNameDialog(QDialog):
                 font-weight: 600;
             }
             QPushButton#touchPresetBtn:hover {
-                background: #2a2215;
+                background: #fff3e4;
             }
             QPushButton#touchCancelBtn {
                 background: #dce4ec;
@@ -492,7 +492,7 @@ class TouchMapNameDialog(QDialog):
         if not name:
             self.entry.setStyleSheet("""
                 QLineEdit#touchDisplayInput {
-                    background: #1e1b2e;
+                    background: #f4f0ff;
                     border: 2px solid #f59e0b;
                     border-radius: 10px;
                     color: #fde68a;
@@ -520,7 +520,7 @@ class TouchMapNameDialog(QDialog):
         if is_dup:
             self.entry.setStyleSheet("""
                 QLineEdit#touchDisplayInput {
-                    background: #2a1215;
+                    background: #fff0f2;
                     border: 2px solid #ef4444;
                     border-radius: 10px;
                     color: #fca5a5;
@@ -548,7 +548,7 @@ class TouchMapNameDialog(QDialog):
         else:
             self.entry.setStyleSheet("""
                 QLineEdit#touchDisplayInput {
-                    background: #0a1c13;
+                    background: #eaf8f0;
                     border: 2px solid #22c55e;
                     border-radius: 10px;
                     color: #1d2938;
@@ -1153,7 +1153,7 @@ class SlamMapPage(QWidget):
             self.lbl_name_warning.setStyleSheet("color: #f87171; font-size: 12px; font-weight: 700;")
             self.edt_map_name.setStyleSheet("""
                 QLineEdit#slamMapNameInput {
-                    background: #2a1215;
+                    background: #fff0f2;
                     border: 2px solid #ef4444;
                     border-radius: 8px;
                     color: #fca5a5;
@@ -1181,7 +1181,7 @@ class SlamMapPage(QWidget):
             self.lbl_name_warning.setStyleSheet("color: #4ade80; font-size: 12px; font-weight: 600;")
             self.edt_map_name.setStyleSheet("""
                 QLineEdit#slamMapNameInput {
-                    background: #0a1c13;
+                    background: #eaf8f0;
                     border: 1.5px solid #10b981;
                     border-radius: 8px;
                     color: #1d2938;
@@ -1381,11 +1381,11 @@ class SlamMapPage(QWidget):
                 color: white;
             }
             QPushButton#slamBackButton:hover, QPushButton#slamHomeButton:hover {
-                background: #1c222b;
+                background: #e6edf5;
                 border-color: #384352;
             }
             QPushButton#slamEmergencyButton:pressed {
-                background: #7f1d1d;
+                background: #fff0f2;
             }
             QPushButton#slamTabButton {
                 background: #ffffff;
@@ -1397,7 +1397,7 @@ class SlamMapPage(QWidget):
                 padding: 0 16px;
             }
             QPushButton#slamTabButton:checked {
-                background: #1c222b;
+                background: #e6edf5;
                 border-color: #f6c16a;
                 color: #b32632;
             }
@@ -1450,7 +1450,7 @@ class SlamMapPage(QWidget):
                 background: #15803d;
             }
             QPushButton#slamStartButton:disabled {
-                background: #14532d;
+                background: #eaf8f0;
                 color: #86efac;
             }
             QPushButton#slamStopButton {
@@ -1545,7 +1545,7 @@ class SlamMapPage(QWidget):
                 background: #f3f6fa;
             }
             QListWidget#slamMapList::item:selected {
-                background: #2a2215;
+                background: #fff3e4;
                 color: #b32632;
                 border: 1px solid #f6c16a;
             }

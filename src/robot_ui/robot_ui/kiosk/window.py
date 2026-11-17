@@ -94,7 +94,7 @@ QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeB
     border-radius: 12px;
 }
 QPushButton#navHomeButton:hover, QPushButton#adminHomeButton:hover, QPushButton#serviceHomeButton:hover, QPushButton#navBackButton:hover {
-    background: #334155;
+    background: #e7edf4;
     border-color: #ffb32c;
 }
 QPushButton#navEmergencyButton, QPushButton#adminEmergencyButton, QPushButton#serviceEmergencyButton {
@@ -302,7 +302,7 @@ QPushButton#chatStopSpeakingButton {
     font-weight: 700;
 }
 QPushButton#chatStopSpeakingButton:pressed {
-    background: #38151c;
+    background: #ffe7eb;
 }
 QFrame#suggestionContainer {
     background: transparent;
@@ -343,15 +343,15 @@ QPushButton#chatMicButton:hover {
     border-color: #ffb32c;
 }
 QPushButton#chatMicButton:pressed {
-    background: #333333;
+    background: #e8edf3;
 }
 QPushButton#chatMicButton[listening="true"] {
-    background: #2b1c09;
+    background: #fff3e4;
     border: 3px solid #ffb32c;
     border-radius: 50px;
 }
 QPushButton#chatMicButton:disabled {
-    background: #101010;
+    background: #f0f4f8;
     border-color: #dae3ec;
     border-radius: 50px;
 }
@@ -368,11 +368,11 @@ QPushButton#chatSendButton:pressed {
 }
 QPushButton#chatSendButton:disabled {
     color: #666666;
-    background: #28241b;
+    background: #f4eee2;
 }
 QLabel#llmStatus {
     color: #19754c;
-    background: #111a14;
+    background: #eaf8f0;
     border: 1px solid #1e3827;
     border-radius: 9px;
     padding: 5px 9px;
@@ -381,12 +381,12 @@ QLabel#llmStatus {
 }
 QLabel#llmStatus[state="busy"] {
     color: #b32632;
-    background: #1d1810;
+    background: #fff6e6;
     border-color: #4b3b20;
 }
 QLabel#llmStatus[state="offline"] {
     color: #888888;
-    background: #161616;
+    background: #edf2f7;
     border-color: #2a2a2a;
 }
 QLabel#llmStatus[state="error"] {
