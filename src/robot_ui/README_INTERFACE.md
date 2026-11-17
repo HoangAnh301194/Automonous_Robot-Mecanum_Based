@@ -1,4 +1,4 @@
-# Kiosk interface dark theme — simulator_interface_lord
+# Kiosk interface mixed theme — simulator_interface_lord
 
 Branch: `simulator_interface_lord` (derived from `simulator_interface`).
 Implementation: `robot_ui/kiosk/window.py`, `widgets.py`, `pages.py`.
@@ -53,8 +53,9 @@ KIOSK_ADMIN_PIN=1 ros2 launch robot_ui kiosk.launch.py \
 ```
 
 Default mascot artwork: `souta_robot/mochi_idle_light.jpg` and
-`souta_robot/mochi_service_light.jpg`. Service retains a dark header and
-background around its original white-backed Mochi illustration.
+`souta_robot/mochi_service_light.jpg`. Only the Idle and Service pages are light mode (white full-screen
+background, white Service canvas and header), matching the white-backed Mochi
+artwork. All other Kiosk pages retain the original dark theme.
 Service has two real Qt touch
 controls aligned over the artwork: **Phục vụ** sends the existing
 `request_serve()` ("wait") command; **Hoàn tất** sends the existing
@@ -90,15 +91,16 @@ use a strong PIN / secret storage and consider local OS access control.
 
 ## Manual smoke checks
 
-1. Launch Kiosk. It should show the new static PTIT Mochi image, no Home/Map/Chat dock. UI chrome remains dark.
+1. Launch Kiosk. It should show the new static PTIT Mochi image on a full-white background without black borders or a dock.
 2. Tap anywhere. The Home screen should show the institution background,
    PTIT/FEE1 logos and Home + Chat + Settings in the bottom dock.
-3. Tap Chat. Confirm 9router conversation works; return via header button.
-4. Tap Settings. Wrong PIN stays locked; PIN `1` opens Admin.
-5. From Admin open Map & Nav2; use the back arrow to return to Admin.
-6. Logout; ensure Map & Nav2 is no longer accessible without PIN.
-7. Leave the screen idle; verify return to Souta Robot and reset of Chat.
-8. Confirm changing pages **does not** send Nav2 cancel goals.
+3. Tap Chat. Confirm dark-theme 9router conversation works; return via header button.
+4. Open Service. Confirm the white artwork blends into the white page; tap the blue **Phục vụ** and green **Hoàn tất** controls to check zoom. On a connected robot, these send real ROS 2 commands, so test only when safe.
+5. Tap Settings. Wrong PIN stays locked; PIN `1` opens Admin.
+6. From Admin open Map & Nav2; use the back arrow to return to Admin.
+7. Logout; ensure Map & Nav2 is no longer accessible without PIN.
+8. Leave the screen idle; verify return to the new PTIT Mochi and reset of Chat.
+9. Confirm changing pages **does not** send Nav2 cancel goals.
 
 ## Multilingual Voice Chat (STT & TTS)
 
