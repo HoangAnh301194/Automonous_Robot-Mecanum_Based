@@ -114,18 +114,36 @@ PROMPT_GUIDANCE = {
     "ambient": "KHÔNG đọc dòng hướng dẫn. Chọn 30–60 giây, ghi âm thanh môi trường thực tế.",
 }
 
+POSITIVE_FIRST_25 = (
+    0, 2, 1, 0, 3, 0, 4, 1, 0, 5,
+    0, 6, 1, 0, 7, 0, 8, 1, 0, 9,
+    0, 10, 1, 0, 11,
+)
+# Within the first 25 accepted examples: 10 'Sô ta', 5 'Sô ta ơi',
+# and 10 distinct short call sentences. Remaining prompts come next.
+PROMPT_SEQUENCE = {label: tuple(range(len(phrases))) for label, phrases in PROMPTS.items()}
+PROMPT_SEQUENCE['positive'] = POSITIVE_FIRST_25 + tuple(range(12, len(PROMPTS['positive'])))
+
 class PromptCycler:
-    """Keep separate prompt positions for each label. UI-only state, not registry."""
+    """Separate per-label positions; positive prompts have a weighted first 25."""
 
     def __init__(self):
         self._positions = {label: 0 for label in PROMPTS}
 
     def current(self, label):
-        return PROMPTS[label][self._positions[label]]
+        idx = PROMPT_SEQUENCE[label][self._positions[label]]
+        return PROMPTS[label][idx]
 
     def position(self, label):
-        return self._positions[label] + 1, len(PROMPTS[label])
+        return self._positions[label] + 1, len(PROMPT_SEQUENCE[label])
+
+    def set_position(self, label, count):
+        """Align suggestions with the selected speaker's saved sample count."""
+        if not isinstance(count, int) or count < 0:
+            raise ValueError('Số mẫu đã lưu phải là số nguyên không âm')
+        self._positions[label] = count % len(PROMPT_SEQUENCE[label])
+        return self.current(label)
 
     def advance(self, label):
-        self._positions[label] = (self._positions[label] + 1) % len(PROMPTS[label])
+        self._positions[label] = (self._positions[label] + 1) % len(PROMPT_SEQUENCE[label])
         return self.current(label)

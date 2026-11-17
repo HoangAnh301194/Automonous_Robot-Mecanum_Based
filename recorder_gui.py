@@ -128,7 +128,7 @@ class RecorderApp:
         ttk.Label(line, text="Người / phiên:").pack(side="left")
         self.member_combo = ttk.Combobox(line, textvariable=self.member, state="readonly")
         self.member_combo.pack(side="left", padx=8, fill="x", expand=True)
-        self.member_combo.bind("<<ComboboxSelected>>", lambda _: self.refresh_count())
+        self.member_combo.bind("<<ComboboxSelected>>", lambda _: self.on_member_changed())
         ttk.Label(group, text="Tên nội bộ không nằm trong file ZIP gửi người phụ trách.").pack(anchor="w")
 
         prompts_box = ttk.LabelFrame(body, text="2 · Câu gợi ý để đọc (có sẵn trong ứng dụng)", padding=10)
@@ -251,7 +251,17 @@ class RecorderApp:
             self.member.set(found)
         elif self.member.get() not in self.member_map:
             self.member.set("")
+        self.on_member_changed()
+
+    def on_member_changed(self):
         self.refresh_count()
+        group_id = self.member_map.get(self.member.get())
+        if group_id:
+            count = self.store.count(self.label.get(), group_id)
+            self.prompts.set_position(self.label.get(), count)
+        else:
+            self.prompts.set_position(self.label.get(), 0)
+        self.refresh_prompt()
 
     def refresh_count(self):
         label = self.label.get()
@@ -259,8 +269,8 @@ class RecorderApp:
         number = self.store.count(label, current) if current else 0
         if label == "ambient":
             ambient_dir = self.store.data_dir / "raw" / "ambient"
-            total = len(list(ambient_dir.glob("*/*.wav"))) if ambient_dir.is_dir() else 0
-            self.counter.set(DESCRIPTIONS[label] + f" · Toàn bộ collector: {total}/8 phiên ambient (mục tiêu)")
+            total = sum(1 for folder in ambient_dir.iterdir() if folder.is_dir() and any(folder.glob("*.wav"))) if ambient_dir.is_dir() else 0
+            self.counter.set(DESCRIPTIONS[label] + f" · Toàn bộ collector: {total}/8 phiên môi trường khác nhau (mục tiêu)")
         else:
             target = {"positive": 25, "negative": 20, "hard_negative": 20}[label]
             self.counter.set(DESCRIPTIONS[label] + f" · Speaker này: {number}/{target} mẫu (mục tiêu)")

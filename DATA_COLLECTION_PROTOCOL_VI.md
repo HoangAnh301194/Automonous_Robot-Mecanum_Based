@@ -96,7 +96,7 @@
 - **5 mẫu nói “Sô ta ơi”**.
 - **10 mẫu câu gọi ngắn** như “Này Sô ta”, “Sô ta, lại đây”, “Sô ta, giúp mình với”, “Sô ta, nghe không?”.
 
-GUI luân phiên các câu này trong 25 gợi ý đầu; bấm **“Câu tiếp theo”** nếu muốn đổi. Không nhất thiết nói thật nhiều câu dài sau wakeword; mô hình phải nhận được từ gọi, không học thuộc cả câu lệnh.
+GUI luân phiên các câu này trong 25 gợi ý đầu; bấm **“Câu tiếp theo”** nếu muốn đổi. Khi chọn speaker khác, ứng dụng căn vị trí câu gợi ý theo số WAV đã lưu của speaker đó (theo nhãn hiện tại). Không nhất thiết nói thật nhiều câu dài sau wakeword; mô hình phải nhận được từ gọi, không học thuộc cả câu lệnh.
 
 **Tốc độ nói:** khoảng 60% bình thường, 20% chậm hơn tự nhiên, 20% nhanh hơn tự nhiên; không cần hát, hét hoặc phát âm một cách máy móc. **Âm lượng:** chủ yếu giọng nói thường; thỉnh thoảng nói nhỏ hơn hoặc nhấn giọng nhẹ, nhưng không được méo/clipping.
 
