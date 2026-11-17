@@ -20,6 +20,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QScroller,
     QVBoxLayout,
     QWidget,
 )
@@ -71,6 +72,8 @@ class SensorsAIDetailScreen(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
 
         container = QWidget()
         c_layout = QVBoxLayout(container)
@@ -210,6 +213,7 @@ class SensorsAIDetailScreen(QWidget):
         ai_grid.addWidget(self.card_person, 0, 2)
         ai_layout.addLayout(ai_grid)
         c_layout.addWidget(card_ai)
+        c_layout.addStretch(1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)

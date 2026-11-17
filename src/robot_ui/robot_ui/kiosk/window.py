@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -11,10 +10,7 @@ from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import (
     QApplication,
-    QFrame,
-    QHBoxLayout,
     QMainWindow,
-    QPushButton,
     QStackedWidget,
     QWidget,
 )
@@ -220,16 +216,25 @@ QScrollArea {
     border: none;
 }
 QScrollBar:vertical {
-    width: 8px;
-    background: transparent;
+    width: 28px;
+    background: #0f1318;
+    margin: 0px;
+    border-radius: 6px;
 }
 QScrollBar::handle:vertical {
-    min-height: 28px;
-    background: #cad3d8;
-    border-radius: 4px;
+    min-height: 54px;
+    background: #475569;
+    border-radius: 6px;
+    margin: 3px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {
+    background: #ffb32c;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 QWidget#navigationPage {
     background: #000000;
@@ -624,6 +629,7 @@ class KioskWindow(QMainWindow):
         self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
         self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
         self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
+        self.navigation_page.initial_pose_requested.connect(self._on_initial_pose_requested)
         self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.slam_page.home_requested.connect(self.return_to_home)
         self.slam_page.back_requested.connect(self.go_back)
@@ -639,11 +645,9 @@ class KioskWindow(QMainWindow):
         self.system_config_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.system_config_page.start_layer_requested.connect(self.ros_node.start_layer)
         self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
-        self.system_config_page.start_all_requested.connect(self.ros_node.start_all_layers)
-        self.system_config_page.stop_all_requested.connect(self.ros_node.stop_all_layers)
+        self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
         self.system_config_page.swap_ports_requested.connect(self._on_swap_serial_ports)
         self.system_config_page.rescan_ports_requested.connect(self._on_rescan_serial_ports)
-        self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
         self.detection_debug_page.home_requested.connect(self.return_to_home)
         self.detection_debug_page.back_requested.connect(self.go_back)
@@ -659,7 +663,6 @@ class KioskWindow(QMainWindow):
         signals.system_telemetry_changed.connect(self.detection_debug_page.update_ai_telemetry)
         signals.layer_status_changed.connect(self.system_config_page.update_layer_status)
         signals.layer_log_received.connect(self.system_config_page.append_layer_log)
-        signals.serial_ports_changed.connect(self.system_config_page.set_detected_ports)
         signals.actuator_test_result.connect(
             lambda name, ok, msg: self.system_config_page.append_console_log(
                 f"[{name.upper()}] {'THÀNH CÔNG' if ok else 'THẤT BẠI'}: {msg}"
@@ -676,6 +679,8 @@ class KioskWindow(QMainWindow):
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
+        signals.localization_status_changed.connect(self.navigation_page.set_localization_status)
+        signals.initial_pose_confirmed.connect(self.navigation_page.on_initial_pose_confirmed)
         signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
         signals.scan_points_changed.connect(self.slam_page.set_scan_points)
         signals.obstacle_points_changed.connect(self.navigation_page.set_obstacle_points)
@@ -753,13 +758,7 @@ class KioskWindow(QMainWindow):
 
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        # Dark mode is the UI theme; it does not change the new Mochi
-        # artwork. Default to the static PTIT mascot; MP4 is opt-in via
-        # KIOSK_MOCHI_STATIC=0 for legacy expressions.
-        if os.getenv("KIOSK_MOCHI_STATIC", "1").strip().lower() in {"1", "true", "yes"}:
-            self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
-        else:
-            self.idle_page.video.set_video(self.emotions.path("idle"))
+        self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)
@@ -986,6 +985,14 @@ class KioskWindow(QMainWindow):
             self.navigation_page.load_map_yaml(map_path)
         self.show_page("admin")
 
+    def _on_initial_pose_requested(self, payload: dict) -> None:
+        x = float(payload.get("x", 0.0))
+        y = float(payload.get("y", 0.0))
+        yaw = float(payload.get("yaw", 0.0))
+        map_name = str(payload.get("map_name", ""))
+        LOG.info("[UI Navigation] Phát Initial Pose: X=%.2f, Y=%.2f, Yaw=%.2f (Map: %s)", x, y, yaw, map_name)
+        self.ros_node.publish_initial_pose(x, y, yaw, map_name=map_name)
+
     def _on_admin_detection(self) -> None:
         LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
         self.show_page("detection_debug")
@@ -993,28 +1000,24 @@ class KioskWindow(QMainWindow):
     def _on_admin_system_status(self) -> None:
         LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
         self.show_page("system_config")
-
-    def _on_rescan_serial_ports(self) -> None:
-        """Scan ports in a worker; never block the GUI event loop."""
-        def worker() -> None:
-            try:
-                ports = self.ros_node.get_detected_ports(refresh=True)
-                self.signals.serial_ports_changed.emit(*ports)
-            except Exception as exc:
-                LOG.warning("Serial rescan failed: %s", exc)
-                self.signals.serial_ports_changed.emit("-", "-", "scan_failed")
-        threading.Thread(target=worker, name="kiosk-serial-scan", daemon=True).start()
+        self._on_rescan_serial_ports()
 
     def _on_swap_serial_ports(self) -> None:
-        """Update next-launch port assignment without touching a live driver."""
-        def worker() -> None:
-            try:
-                ports = self.ros_node.swap_serial_ports()
-                self.signals.serial_ports_changed.emit(*ports)
-            except Exception as exc:
-                LOG.warning("Serial swap failed: %s", exc)
-                self.signals.serial_ports_changed.emit("-", "-", "swap_failed")
-        threading.Thread(target=worker, name="kiosk-serial-swap", daemon=True).start()
+        """Hoán đổi cổng Serial giữa Hoverboard và LiDAR."""
+        esp, lidar, src = self.ros_node.swap_serial_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+
+    def _on_rescan_serial_ports(self) -> None:
+        """Quét và đồng bộ thông tin cổng Serial lên giao diện Kiosk."""
+        esp, lidar, src = self.ros_node.get_detected_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+        if hasattr(self.ros_node, "rescan_serial_ports_async"):
+            def _async_update(e, l, s):
+                if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+                    self.system_config_page.ros2_screen.set_detected_ports(e, l, s)
+            self.ros_node.rescan_serial_ports_async(_async_update)
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
