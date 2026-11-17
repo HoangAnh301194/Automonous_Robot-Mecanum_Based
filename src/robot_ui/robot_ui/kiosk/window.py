@@ -80,9 +80,9 @@ QPushButton#kioskNavButton {
     padding: 3px 10px;
 }
 QPushButton#kioskNavButton:checked {
-    color: #d97800;
+    color: #b32632;
     background: transparent;
-    border-bottom: 3px solid #d97800;
+    border-bottom: 3px solid #b32632;
 }
 
 QPushButton#kioskNavButton:pressed {
@@ -90,7 +90,7 @@ QPushButton#kioskNavButton:pressed {
 }
 QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeButton, QPushButton#navBackButton {
     background: #eaf0f7;
-    border: 1px solid rgba(255, 255, 255, 0.2);
+    border: 1px solid #cbd5e1;
     border-radius: 12px;
 }
 QPushButton#navHomeButton:hover, QPushButton#adminHomeButton:hover, QPushButton#serviceHomeButton:hover, QPushButton#navBackButton:hover {
@@ -185,7 +185,7 @@ QPushButton#dangerButton {
     font-weight: 700;
 }
 QLineEdit#chatInput {
-    color: #f2f2f2;
+    color: #203247;
     background: #ffffff;
     border: 1px solid #383838;
     border-radius: 11px;
@@ -239,12 +239,12 @@ QPushButton#navHomeButton:pressed {
     background: #e8eef4;
 }
 QLabel#navClock {
-    color: #eeeeee;
+    color: #253448;
     font-size: 10px;
     font-weight: 700;
 }
 QLabel#navPrompt {
-    color: #eeeeee;
+    color: #253448;
     font-size: 13px;
     font-weight: 700;
 }
@@ -419,7 +419,7 @@ QLabel#robotBubbleSender {
     font-weight: 700;
 }
 QLabel#userBubbleSender {
-    color: #ffbd45;
+    color: #9d3038;
     font-size: 10px;
     font-weight: 700;
 }
@@ -908,7 +908,7 @@ class KioskWindow(QMainWindow):
             print("[robot_ui] SERVICE: Kích hoạt PHỤC VỤ HOÀN TẤT & TIẾP TỤC", flush=True)
             self.ros_node.finish_serving()
             self.signals.command_status_changed.emit("success", "✅ Đã hoàn tất phục vụ. Cảm ơn quý khách!")
-            QTimer.singleShot(1500, lambda: self.show_page("home"))
+            QTimer.singleShot(700, lambda: self.show_page("home") if self._active_page == "service" else None)
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
