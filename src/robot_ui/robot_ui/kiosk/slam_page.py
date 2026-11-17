@@ -257,7 +257,7 @@ class StaticMapPreviewWidget(QWidget):
         # Bottom info badge
         info_rect = QRect(pad, h - 38, w - pad * 2, 30)
         painter.setPen(Qt.NoPen)
-        painter.setBrush(QColor(17, 20, 24, 230))
+        painter.setBrush(QColor(248, 250, 252, 232))
         painter.drawRoundedRect(QRectF(info_rect), 6, 6)
 
         painter.setPen(QColor("#e2e8f0"))
@@ -535,7 +535,7 @@ class TouchMapNameDialog(QDialog):
             self.btn_confirm.setStyleSheet("""
                 QPushButton#touchConfirmBtn {
                     background: #dc2626;
-                    color: #1d2938;
+                    color: #ffffff;
                     border: 2px solid #ef4444;
                     border-radius: 10px;
                     font-size: 16px;
