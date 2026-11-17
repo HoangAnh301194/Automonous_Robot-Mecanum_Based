@@ -621,6 +621,12 @@ def test_scenario_17_start_all_hardware_readiness(app):
 
         def start_layer(self, key):
             self.calls.append(key)
+            if key == "layer1":
+                # Simulate a fresh /odom and /scan message after Start All.
+                timestamp = time.monotonic() + 0.001
+                with self._dbg_lock:
+                    self._topic_stats["odom"]["last_ts"] = timestamp
+                    self._topic_stats["lidar"]["last_ts"] = timestamp
 
         def get_logger(self):
             return MagicMock()
