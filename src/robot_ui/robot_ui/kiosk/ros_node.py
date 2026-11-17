@@ -966,6 +966,15 @@ class KioskRosNode(Node):
         env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
         return env
 
+    def is_sim_time(self) -> bool:
+        """Kiểm tra xem node Kiosk có đang chạy ở chế độ use_sim_time (mô phỏng) không."""
+        try:
+            if hasattr(self, "has_parameter") and self.has_parameter("use_sim_time"):
+                return bool(self.get_parameter("use_sim_time").value)
+        except Exception:
+            pass
+        return False
+
     def _get_ws_prefix(self) -> str:
         ws_root = self._get_ws_root()
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
@@ -999,7 +1008,8 @@ class KioskRosNode(Node):
                 # Đợi phần cứng khởi động và kích hoạt controller (tối thiểu 4.0s)
                 time.sleep(4.0)
 
-            cmd = self._get_ws_prefix() + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+            sim_time_str = "true" if (hasattr(self, "is_sim_time") and self.is_sim_time()) else "false"
+            cmd = self._get_ws_prefix() + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:={sim_time_str} use_rviz:=false"
             self.get_logger().info(f"[KIOSK SLAM] START: {cmd}")
             try:
                 log_path = "/tmp/ros_slam.log"
@@ -1143,10 +1153,17 @@ class KioskRosNode(Node):
                     pass
                 self._localization_proc = None
 
-            # 2. Khởi chạy Layer 2 đồng bộ qua start_layer nếu có
+            # 2. Khởi chạy Layer 2 đồng bộ qua start_layer nếu chưa chạy
             if hasattr(self, "start_layer") and hasattr(self, "_lifecycle_lock"):
-                self.get_logger().info("[KIOSK LOCALIZATION] Khởi động Layer 2 đồng nhất qua start_layer...")
-                self.start_layer("layer2")
+                amcl_already_active = False
+                if hasattr(self, "check_amcl_lifecycle_active"):
+                    amcl_already_active, _ = self.check_amcl_lifecycle_active()
+                layer2_already_running = self.is_layer_running("layer2") or self.is_layer_running("layer_navigation")
+                if not amcl_already_active and not layer2_already_running:
+                    self.get_logger().info("[KIOSK LOCALIZATION] Khởi động Layer 2 đồng nhất qua start_layer...")
+                    self.start_layer("layer2")
+                else:
+                    self.get_logger().info("[KIOSK LOCALIZATION] AMCL / Layer 2 đã đang chạy, tái sử dụng không khởi chạy trùng lặp.")
             else:
                 # Fallback cho unit test mock độc lập (DummyRosNode)
                 graph_path = os.path.splitext(map_yaml_path)[0]
@@ -1157,10 +1174,11 @@ class KioskRosNode(Node):
                             f"[KIOSK LOCALIZATION] File posegraph '{posegraph_file}' không tồn tại trên đĩa. "
                             "SLAM Toolbox có thể cần file posegraph hợp lệ để định vị!"
                         )
+                sim_time_str = "true" if (hasattr(self, "is_sim_time") and self.is_sim_time()) else "false"
                 cmd = (
                     self._get_ws_prefix()
                     + "ros2 launch mo_hinh real_localization_nav2.launch.py "
-                    + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
+                    + f"localization_mode:={shlex.quote(backend)} use_sim_time:={sim_time_str} "
                     + f"map_yaml:={shlex.quote(map_yaml_path)} "
                     + f"map_graph:={shlex.quote(graph_path)} use_rviz:=true"
                 )
@@ -1265,13 +1283,20 @@ class KioskRosNode(Node):
         if self._selected_backend == "slam_toolbox":
             return True, "Chế độ SLAM Toolbox không yêu cầu AMCL Initial Pose"
 
-        # 1. Kiểm tra Layer 2 (Nav2 & AMCL)
+        # 1. Kiểm tra Layer 2 (Nav2 & AMCL) hoặc node /amcl đang chạy bên ngoài
         layer2_running = (
             self.is_layer_running("layer2")
             or self.is_layer_running("layer_navigation")
             or (self._localization_proc is not None and self._localization_proc.poll() is None)
         )
-        if not layer2_running:
+        layer2_explicitly_stopped = self._layer_states.get("layer2") == LayerState.STOPPED
+        external_amcl_online = (
+            not layer2_explicitly_stopped
+            and hasattr(self, "_amcl_get_state_client")
+            and self._amcl_get_state_client is not None
+            and self._amcl_get_state_client.service_is_ready()
+        )
+        if not layer2_running and not external_amcl_online:
             return False, "Layer 2 (Nav2 & AMCL) chưa khởi chạy hoặc chưa ở trạng thái RUNNING"
 
         # 2. Kiểm tra AMCL lifecycle state thực tế
@@ -1397,6 +1422,9 @@ class KioskRosNode(Node):
             self._set_localization_state(LocalizationState.ERROR, "Tọa độ hoặc góc yaw không hợp lệ (NaN/Inf)")
             return False
 
+        if map_name and not getattr(self, "_selected_map_yaml", None):
+            self._selected_map_yaml = map_name
+
         if map_name:
             req_stem = FilePath(map_name).stem.lower()
             curr_stem = FilePath(self._selected_map_yaml).stem.lower() if self._selected_map_yaml else ""
@@ -1455,7 +1483,7 @@ class KioskRosNode(Node):
     def _verify_localization_worker(self, token: str) -> None:
         """Worker nền kiểm tra TF map -> odom và độ hội tụ AMCL sau khi gửi Initial Pose."""
         start_t = time.monotonic()
-        timeout = 6.0
+        timeout = 10.0
         tf_detected = False
         MAX_COVARIANCE_NORM = 0.60
 
@@ -1471,10 +1499,11 @@ class KioskRosNode(Node):
 
             if tf_ok:
                 tf_detected = True
-                pose_is_fresh = self._last_amcl_pose_at >= (self._last_initial_pose_sent_at - 0.05)
+                pose_is_fresh = self._last_amcl_pose_at >= (self._last_initial_pose_sent_at - 0.20)
                 cov_ok = self._amcl_covariance_norm <= MAX_COVARIANCE_NORM
 
                 if pose_is_fresh and cov_ok:
+                    self._loc_session_token = ""
                     self._set_localization_state(
                         LocalizationState.LOCALIZED,
                         f"Đã định vị thành công (sai số: {self._amcl_covariance_norm:.2f}m)"
@@ -1498,11 +1527,13 @@ class KioskRosNode(Node):
                         )
 
             if self._localization_state == LocalizationState.LOCALIZED:
+                self._loc_session_token = ""
                 return
 
             time.sleep(0.15)
 
         if self._loc_session_token == token and self._localization_state != LocalizationState.LOCALIZED:
+            self._loc_session_token = ""
             if tf_detected:
                 if self._amcl_covariance_norm > MAX_COVARIANCE_NORM:
                     self._set_localization_state(
@@ -1512,12 +1543,12 @@ class KioskRosNode(Node):
                 else:
                     self._set_localization_state(
                         LocalizationState.ERROR,
-                        "Hết thời gian chờ (6s): Chưa nhận được ước lượng hội tụ từ /amcl_pose"
+                        "Hết thời gian chờ (10s): Chưa nhận được ước lượng hội tụ từ /amcl_pose"
                     )
             else:
                 self._set_localization_state(
                     LocalizationState.ERROR,
-                    "Hết thời gian chờ (6s): AMCL không tạo được liên kết TF map -> odom"
+                    "Hết thời gian chờ (10s): AMCL không tạo được liên kết TF map -> odom"
                 )
 
     def stop_subprocesses(self) -> None:
@@ -1876,6 +1907,7 @@ class KioskRosNode(Node):
     def _build_layer_cmd(self, launch_key: str) -> str:
         """Sinh chuỗi lệnh khởi chạy cho tầng tiến trình."""
         prefix = self._get_ws_prefix()
+        sim_time_str = "true" if (hasattr(self, "is_sim_time") and self.is_sim_time()) else "false"
         if launch_key == "layer1":
             hb_port, lidar_port, detect_method = self.get_detected_ports()
             self.get_logger().info(
@@ -1883,7 +1915,7 @@ class KioskRosNode(Node):
             )
             return (
                 prefix
-                + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
+                + f"ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:={sim_time_str} "
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
@@ -1891,7 +1923,7 @@ class KioskRosNode(Node):
             cmd_parts = [
                 prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py",
                 f"localization_mode:={shlex.quote(backend)}",
-                "use_sim_time:=false",
+                f"use_sim_time:={sim_time_str}",
                 "use_rviz:=true",
             ]
             map_yaml = getattr(self, "_selected_map_yaml", None)
@@ -1901,9 +1933,9 @@ class KioskRosNode(Node):
                 cmd_parts.append(f"map_graph:={shlex.quote(graph_path)}")
             return " ".join(cmd_parts)
         elif launch_key == "layer3":
-            return prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+            return prefix + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:={sim_time_str} use_rviz:=false"
         elif launch_key == "layer4":
-            return prefix + "ros2 launch robot_bringup ai_perception.launch.py use_sim_time:=false"
+            return prefix + f"ros2 launch robot_bringup ai_perception.launch.py use_sim_time:={sim_time_str}"
         elif launch_key == "layer5":
             return prefix + "ros2 launch robot_bringup backend.launch.py"
         return ""

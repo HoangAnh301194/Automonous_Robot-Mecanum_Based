@@ -231,8 +231,13 @@ class InteractiveNavMapWidget(QWidget):
         self._batch_waypoints: list[dict[str, Any]] = []
         self._pick_mode = False
 
-        # Initial Pose Picking Mode
+        # Initial Pose Picking Mode (RViz-style 2D Pose Estimate: Press -> Drag -> Release)
         self._initial_pose_mode = False
+        self._is_dragging_pose = False
+        self._estimate_start_world: tuple[float, float] | None = None
+        self._estimate_start_screen: QPointF | None = None
+        self._estimate_current_screen: QPointF | None = None
+        self._estimate_yaw: float = 0.0
         self._candidate_initial_pose: dict[str, float] | None = None
 
         # Sensor points in world frame (map coordinates)
@@ -426,13 +431,21 @@ class InteractiveNavMapWidget(QWidget):
             self.update()
 
     def set_initial_pose_mode(self, enabled: bool) -> None:
-        """Kích hoạt chế độ chấm vị trí ban đầu (Initial Pose) trên bản đồ."""
+        """Kích hoạt chế độ 2D Pose Estimate (Press -> Drag -> Release)."""
         self._initial_pose_mode = enabled
+        self._is_dragging_pose = False
+        self._estimate_start_world = None
+        self._estimate_start_screen = None
+        self._estimate_current_screen = None
         self.setCursor(Qt.CrossCursor if enabled else Qt.PointingHandCursor)
         if not enabled:
             self._candidate_initial_pose = None
         if self._is_active:
             self.update()
+
+    def set_estimate_mode(self, enabled: bool) -> None:
+        """Alias cho set_initial_pose_mode tương thích reference simulator."""
+        self.set_initial_pose_mode(enabled)
 
     def set_candidate_initial_pose(self, x: float | None, y: float | None, yaw: float | None = 0.0) -> None:
         """Lưu và hiển thị preview điểm định vị ứng viên trên bản đồ."""
@@ -525,7 +538,7 @@ class InteractiveNavMapWidget(QWidget):
         sy = target.bottom() - (cell_y / ph) * target.height()
         return QPointF(sx, sy)
 
-    def _screen_to_world(self, point: QPointF, target: QRectF) -> tuple[float, float] | None:
+    def _screen_to_world(self, point: QPointF, target: QRectF, check_free: bool = True) -> tuple[float, float] | None:
         if not self._map or not target.contains(point):
             return None
         pw = int(self._map.get("preview_width", 0))
@@ -541,11 +554,12 @@ class InteractiveNavMapWidget(QWidget):
         iy = min(ph - 1, max(0, int(cell_y)))
 
         # Free space validation check
-        cells = self._map.get("cells", [])
-        idx = iy * pw + ix
-        if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
-            self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
-            return None
+        if check_free:
+            cells = self._map.get("cells", [])
+            idx = iy * pw + ix
+            if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
+                self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
+                return None
 
         dist_x = cell_x * res * step
         dist_y = cell_y * res * step
@@ -575,45 +589,54 @@ class InteractiveNavMapWidget(QWidget):
             event.accept()
             return
 
-        if event.button() == Qt.LeftButton and self._selection_enabled:
+        if event.button() == Qt.LeftButton:
             target = self._transformed_map_rect()
-            world = self._screen_to_world(QPointF(event.pos()), target)
-            if world is None:
+            if target.isEmpty() or not target.contains(QPointF(event.pos())):
                 return
-            wx, wy = world
 
             if self._initial_pose_mode:
-                # Mode: Manual Initial Pose Selection
-                yaw = 0.0
-                if self._candidate_initial_pose:
-                    dx = wx - float(self._candidate_initial_pose.get("x", wx))
-                    dy = wy - float(self._candidate_initial_pose.get("y", wy))
-                    if math.hypot(dx, dy) > 0.05:
-                        yaw = math.atan2(dy, dx)
-                        wx = float(self._candidate_initial_pose["x"])
-                        wy = float(self._candidate_initial_pose["y"])
-                self.set_candidate_initial_pose(wx, wy, yaw)
-                self.initial_pose_picked.emit(wx, wy, yaw)
-            elif self._pick_mode:
-                # Mode: Batch Waypoint Picking for Patrol Route
-                yaw = 0.0
-                if self._batch_waypoints:
-                    last_wp = self._batch_waypoints[-1]
-                    dx = wx - float(last_wp.get("x", 0.0))
-                    dy = wy - float(last_wp.get("y", 0.0))
-                    yaw = math.atan2(dy, dx)
-                self.waypoint_picked.emit(wx, wy, yaw)
-            else:
-                # Mode: Single Goal Selection
-                if self._pose:
-                    rx = float(self._pose.get("x", wx))
-                    ry = float(self._pose.get("y", wy))
-                    yaw = math.atan2(wy - ry, wx - rx)
-                else:
+                # Mode: RViz 2D Pose Estimate (Bắt đầu Press -> Drag)
+                world = self._screen_to_world(QPointF(event.pos()), target, check_free=True)
+                if world is None:
+                    return
+                wx, wy = world
+                fallback_yaw = float(self._pose.get("yaw", 0.0)) if self._pose else 0.0
+                self._is_dragging_pose = True
+                self._estimate_start_world = (wx, wy)
+                self._estimate_start_screen = QPointF(event.pos())
+                self._estimate_current_screen = QPointF(event.pos())
+                self._estimate_yaw = fallback_yaw
+                self.set_candidate_initial_pose(wx, wy, fallback_yaw)
+                self.update()
+                event.accept()
+                return
+
+            if self._selection_enabled:
+                world = self._screen_to_world(QPointF(event.pos()), target, check_free=True)
+                if world is None:
+                    return
+                wx, wy = world
+
+                if self._pick_mode:
+                    # Mode: Batch Waypoint Picking for Patrol Route
                     yaw = 0.0
-                self.set_goal(wx, wy, yaw)
-                self.goal_selected.emit(wx, wy, yaw)
-            event.accept()
+                    if self._batch_waypoints:
+                        last_wp = self._batch_waypoints[-1]
+                        dx = wx - float(last_wp.get("x", 0.0))
+                        dy = wy - float(last_wp.get("y", 0.0))
+                        yaw = math.atan2(dy, dx)
+                    self.waypoint_picked.emit(wx, wy, yaw)
+                else:
+                    # Mode: Single Goal Selection
+                    if self._pose:
+                        rx = float(self._pose.get("x", wx))
+                        ry = float(self._pose.get("y", wy))
+                        yaw = math.atan2(wy - ry, wx - rx)
+                    else:
+                        yaw = 0.0
+                    self.set_goal(wx, wy, yaw)
+                    self.goal_selected.emit(wx, wy, yaw)
+                event.accept()
 
     def mouseMoveEvent(self, event: Any) -> None:
         if self._is_panning and self._last_pan_pos is not None:
@@ -624,15 +647,74 @@ class InteractiveNavMapWidget(QWidget):
             self.update()
             event.accept()
             return
+
+        if self._initial_pose_mode and self._is_dragging_pose and self._estimate_start_screen is not None:
+            curr_pos = QPointF(event.pos())
+            self._estimate_current_screen = curr_pos
+            dx_scr = curr_pos.x() - self._estimate_start_screen.x()
+            dy_scr = curr_pos.y() - self._estimate_start_screen.y()
+            drag_dist_scr = math.hypot(dx_scr, dy_scr)
+
+            if drag_dist_scr >= 8.0:
+                target = self._transformed_map_rect()
+                if not target.isEmpty():
+                    pw = float(self._map.get("preview_width", 1)) if self._map else 1.0
+                    ph = float(self._map.get("preview_height", 1)) if self._map else 1.0
+                    res = float(self._map.get("resolution", 0.05)) if self._map else 0.05
+                    step = int(self._map.get("sample_step", 1)) if self._map else 1
+                    oyaw = float(self._map.get("origin_yaw", 0.0)) if self._map else 0.0
+
+                    d_cell_x = (dx_scr / target.width()) * pw
+                    d_cell_y = (-dy_scr / target.height()) * ph
+                    d_dist_x = d_cell_x * res * step
+                    d_dist_y = d_cell_y * res * step
+
+                    cos_y = math.cos(oyaw)
+                    sin_y = math.sin(oyaw)
+                    dwx = cos_y * d_dist_x - sin_y * d_dist_y
+                    dwy = sin_y * d_dist_x + cos_y * d_dist_y
+
+                    if math.hypot(dwx, dwy) > 0.02:
+                        self._estimate_yaw = math.atan2(dwy, dwx)
+
+            if self._estimate_start_world:
+                self.set_candidate_initial_pose(
+                    self._estimate_start_world[0],
+                    self._estimate_start_world[1],
+                    self._estimate_yaw,
+                )
+            self.update()
+            event.accept()
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:
         if event.button() in (Qt.RightButton, Qt.MiddleButton) and self._is_panning:
             self._is_panning = False
             self._last_pan_pos = None
-            self.setCursor(Qt.CrossCursor if self._pick_mode else Qt.PointingHandCursor)
+            self.setCursor(Qt.CrossCursor if (self._pick_mode or self._initial_pose_mode) else Qt.PointingHandCursor)
             event.accept()
             return
+
+        if event.button() == Qt.LeftButton and self._initial_pose_mode and self._is_dragging_pose:
+            self._is_dragging_pose = False
+            start_world = self._estimate_start_world
+            yaw = self._estimate_yaw
+
+            self._estimate_start_world = None
+            self._estimate_start_screen = None
+            self._estimate_current_screen = None
+
+            if start_world is not None:
+                wx, wy = start_world
+                self.set_candidate_initial_pose(wx, wy, yaw)
+                self.initial_pose_picked.emit(wx, wy, yaw)
+
+            self.set_initial_pose_mode(False)
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: Any) -> None:
@@ -805,7 +887,7 @@ class InteractiveNavMapWidget(QWidget):
                     painter.setBrush(QColor("#f43f5e"))
                     painter.drawEllipse(gpt, 8, 8)
 
-        # 9. Candidate Initial Pose Preview (Green/Gold Ring & Arrow)
+        # 9. Candidate Initial Pose Preview (RViz-style Green Arrow & Badge)
         if self._candidate_initial_pose:
             cpt = self._world_to_screen(
                 float(self._candidate_initial_pose.get("x", 0.0)),
@@ -815,20 +897,64 @@ class InteractiveNavMapWidget(QWidget):
             if cpt is not None and self.rect().contains(cpt.toPoint()):
                 yaw = float(self._candidate_initial_pose.get("yaw", 0.0))
                 deg = math.degrees(yaw)
-                painter.setPen(QPen(QColor("#f59e0b"), 2, Qt.DashLine))
-                painter.setBrush(QColor(245, 158, 11, 60))
-                painter.drawEllipse(cpt, 18, 18)
+
+                # Chiều dài hiển thị mũi tên trên màn hình
+                arrow_len = 45.0
+                if self._is_dragging_pose and self._estimate_start_screen and self._estimate_current_screen:
+                    drag_len = math.hypot(
+                        self._estimate_current_screen.x() - self._estimate_start_screen.x(),
+                        self._estimate_current_screen.y() - self._estimate_start_screen.y(),
+                    )
+                    arrow_len = max(35.0, min(140.0, drag_len))
+
+                # Hướng vector trên màn hình từ hệ tọa độ thế giới (đảm bảo đúng xoay map)
+                tip_world_x = float(self._candidate_initial_pose["x"]) + 0.5 * math.cos(yaw)
+                tip_world_y = float(self._candidate_initial_pose["y"]) + 0.5 * math.sin(yaw)
+                tip_scr = self._world_to_screen(tip_world_x, tip_world_y, target)
+                if tip_scr is not None:
+                    v_dx = tip_scr.x() - cpt.x()
+                    v_dy = tip_scr.y() - cpt.y()
+                    v_norm = math.hypot(v_dx, v_dy)
+                    if v_norm > 1e-4:
+                        dir_x = v_dx / v_norm
+                        dir_y = v_dy / v_norm
+                    else:
+                        dir_x = math.cos(yaw)
+                        dir_y = -math.sin(yaw)
+                else:
+                    dir_x = math.cos(yaw)
+                    dir_y = -math.sin(yaw)
+
+                arrow_tip = QPointF(cpt.x() + arrow_len * dir_x, cpt.y() + arrow_len * dir_y)
+
+                # Vòng tròn đế (Base Circle)
+                painter.setPen(QPen(QColor("#10b981"), 2, Qt.DashLine if self._is_dragging_pose else Qt.SolidLine))
+                painter.setBrush(QColor(16, 185, 129, 65 if self._is_dragging_pose else 40))
+                painter.drawEllipse(cpt, 16, 16)
 
                 painter.setPen(QPen(QColor("#ffffff"), 2))
                 painter.setBrush(QColor("#10b981"))
-                painter.drawEllipse(cpt, 6, 6)
+                painter.drawEllipse(cpt, 5, 5)
 
-                ax = cpt.x() + 28 * math.cos(yaw)
-                ay = cpt.y() - 28 * math.sin(yaw)
-                painter.setPen(QPen(QColor("#10b981"), 3))
-                painter.drawLine(cpt, QPointF(ax, ay))
+                # Thân mũi tên (Arrow Shaft)
+                painter.setPen(QPen(QColor("#10b981"), 3, Qt.SolidLine, Qt.RoundCap))
+                painter.drawLine(cpt, arrow_tip)
 
-                b_text = f"📍 ĐỊNH VỊ: ({self._candidate_initial_pose['x']:.2f}, {self._candidate_initial_pose['y']:.2f}, {deg:.0f}°)"
+                # Đầu mũi tên (Arrow Head)
+                perp_x = -dir_y
+                perp_y = dir_x
+                head_len = 12.0
+                head_w = 6.0
+                p_head_base = QPointF(arrow_tip.x() - head_len * dir_x, arrow_tip.y() - head_len * dir_y)
+                wing1 = QPointF(p_head_base.x() + head_w * perp_x, p_head_base.y() + head_w * perp_y)
+                wing2 = QPointF(p_head_base.x() - head_w * perp_x, p_head_base.y() - head_w * perp_y)
+                painter.setPen(QPen(QColor("#ffffff"), 1))
+                painter.setBrush(QColor("#10b981"))
+                poly_head = QPolygonF([arrow_tip, wing1, wing2])
+                painter.drawPolygon(poly_head)
+
+                # Nhãn tọa độ HUD
+                b_text = f"📍 2D POSE: ({self._candidate_initial_pose['x']:.2f}, {self._candidate_initial_pose['y']:.2f}, {deg:.0f}°)"
                 painter.setFont(QFont("Sans Serif", 9, QFont.Bold))
                 tw = painter.fontMetrics().horizontalAdvance(b_text) + 12
                 b_rect = QRectF(cpt.x() - tw / 2.0, cpt.y() - 32, tw, 20)
@@ -847,7 +973,7 @@ class InteractiveNavMapWidget(QWidget):
         # Zoom & Status HUD in bottom-left corner
         hud_text = f"Zoom: {self._zoom_factor:.1f}x"
         if self._initial_pose_mode:
-            hud_text += " | 📍 Đang chọn Initial Pose"
+            hud_text += " | 📍 2D Pose (Chạm & kéo)"
         elif self._pick_mode:
             hud_text += f" | Đang chấm điểm ({len(self._batch_waypoints)} điểm)"
         painter.setPen(Qt.NoPen)
@@ -1633,10 +1759,11 @@ class NavigationPage(QWidget):
             "border: 1px solid #ef4444; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
         )
 
-        self.btn_initial_pose = QPushButton("ĐỊNH VỊ ROBOT")
+        self.btn_initial_pose = QPushButton("2D POSE ESTIMATE")
         self.btn_initial_pose.setObjectName("navToolBtn")
-        self.btn_initial_pose.setToolTip("Thiết lập vị trí ban đầu (Initial Pose) cho AMCL định vị robot")
-        self.btn_initial_pose.clicked.connect(self._on_initial_pose_button_clicked)
+        self.btn_initial_pose.setToolTip("Kích hoạt chọn vị trí và hướng robot (2D Pose Estimate) trực tiếp trên bản đồ")
+        self.btn_initial_pose.clicked.connect(self._toggle_2d_estimate)
+        self.btn_2d_estimate = self.btn_initial_pose
 
         action_row.addWidget(self.status_label, 1)
         action_row.addWidget(self.lbl_localization_badge)
@@ -2141,7 +2268,7 @@ class NavigationPage(QWidget):
                 "Chưa Định Vị Robot",
                 "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
                 f"Trạng thái hiện tại: {self._localization_state}.\n"
-                "Vui lòng bấm 'ĐỊNH VỊ ROBOT' để xác nhận vị trí xuất phát trước khi bắt đầu điều hướng!",
+                "Vui lòng bấm '2D POSE ESTIMATE' để xác nhận vị trí xuất phát trước khi bắt đầu điều hướng!",
             )
             return
         if self._goal is None:
@@ -2163,7 +2290,7 @@ class NavigationPage(QWidget):
                 "Chưa Định Vị Robot",
                 "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
                 f"Trạng thái hiện tại: {self._localization_state}.\n"
-                "Vui lòng bấm 'ĐỊNH VỊ ROBOT' để xác nhận vị trí xuất phát trước khi bắt đầu tuần tra!",
+                "Vui lòng bấm '2D POSE ESTIMATE' để xác nhận vị trí xuất phát trước khi bắt đầu tuần tra!",
             )
             return
         self.start_patrol_requested.emit()
@@ -2171,49 +2298,49 @@ class NavigationPage(QWidget):
     def _pause_patrol(self) -> None:
         self.pause_patrol_requested.emit()
 
-    def _on_initial_pose_button_clicked(self) -> None:
+    def _toggle_2d_estimate(self) -> None:
+        """Bật/tắt chế độ chọn vị trí và hướng robot (2D Pose Estimate) trực tiếp trên bản đồ."""
         if self.map_widget._initial_pose_mode:
-            cand = self.map_widget._candidate_initial_pose
-            if cand:
-                self._send_initial_pose(cand["x"], cand["y"], cand["yaw"], "map_pick")
-            else:
-                QMessageBox.information(
-                    self,
-                    "Chưa chọn vị trí",
-                    "Vui lòng chạm lên bản đồ để chọn tọa độ trước khi bấm xác nhận định vị!",
-                )
             self.map_widget.set_initial_pose_mode(False)
-            self.btn_initial_pose.setText("ĐỊNH VỊ ROBOT")
+            self.btn_initial_pose.setText("2D POSE ESTIMATE")
             self.btn_initial_pose.setStyleSheet("")
+            self.status_label.setText("Đã hủy chế độ 2D Pose Estimate.")
             return
 
-        dlg = InitialPoseDialog(
-            current_map_path=self._current_map_path,
-            loc_state=self._localization_state,
-            loc_msg=self._localization_message,
-            parent=self,
+        self.map_widget.set_initial_pose_mode(True)
+        self.btn_initial_pose.setText("HỦY 2D POSE")
+        self.btn_initial_pose.setStyleSheet(
+            "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
         )
-        dlg.pose_confirmed.connect(self._send_initial_pose)
-        dlg.pick_on_map_requested.connect(self._enable_map_pose_pick_mode)
-        dlg.exec_()
+        self.status_label.setText("📍 Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
+
+    def _on_initial_pose_button_clicked(self) -> None:
+        """Alias tương thích luồng cũ."""
+        self._toggle_2d_estimate()
 
     def _enable_map_pose_pick_mode(self) -> None:
+        """Kích hoạt mode nếu được gọi từ dialog cũ."""
         self.map_widget.set_initial_pose_mode(True)
-        self.status_label.setText(
-            "📍 Chế độ định vị: Chạm bản đồ để chọn tọa độ, chạm điểm thứ 2 để chỉnh hướng. Sau đó bấm 'XÁC NHẬN ĐỊNH VỊ'."
+        self.btn_initial_pose.setText("HỦY 2D POSE")
+        self.btn_initial_pose.setStyleSheet(
+            "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
         )
-        self.btn_initial_pose.setText("XÁC NHẬN ĐỊNH VỊ")
-        self.btn_initial_pose.setStyleSheet("background: #10b981; color: #ffffff; font-weight: 700;")
+        self.status_label.setText("📍 Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
 
     def _on_map_initial_pose_picked(self, x: float, y: float, yaw: float) -> None:
-        deg = math.degrees(yaw)
-        self.status_label.setText(
-            f"📍 Điểm định vị: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°). Bấm 'XÁC NHẬN ĐỊNH VỊ' để gửi."
-        )
+        """Xử lý khi người dùng hoàn tất thao tác Press -> Drag -> Release trên bản đồ."""
+        self._send_initial_pose(x, y, yaw, "2d_pose_estimate")
+
+    def _on_initial_pose_selected(self, x: float, y: float, yaw: float) -> None:
+        """Alias tương thích reference simulator."""
+        self._on_map_initial_pose_picked(x, y, yaw)
 
     def _send_initial_pose(self, x: float, y: float, yaw: float, source: str) -> None:
         map_name = self._current_map_path.name if self._current_map_path else ""
-        self.status_label.setText(f"📍 Đang gửi Initial Pose: X={x:.2f}, Y={y:.2f}, Yaw={yaw:.2f} rad...")
+        deg = math.degrees(yaw)
+        self.status_label.setText(
+            f"📍 Đang gửi 2D Pose: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)..."
+        )
         self.initial_pose_requested.emit({
             "x": float(x),
             "y": float(y),
@@ -2223,7 +2350,7 @@ class NavigationPage(QWidget):
         })
         self.map_widget.set_initial_pose_mode(False)
         self.map_widget.set_candidate_initial_pose(x, y, yaw)
-        self.btn_initial_pose.setText("ĐỊNH VỊ ROBOT")
+        self.btn_initial_pose.setText("2D POSE ESTIMATE")
         self.btn_initial_pose.setStyleSheet("")
 
     def set_localization_status(self, state: str, message: str) -> None:

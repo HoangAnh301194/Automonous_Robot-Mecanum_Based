@@ -8,7 +8,8 @@ import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Quaternion
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from PyQt5.QtCore import QPointF, QRectF
+from PyQt5.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
+from PyQt5.QtGui import QImage, QMouseEvent
 from PyQt5.QtWidgets import QApplication
 
 from robot_ui.kiosk.pages.navigation_page import (
@@ -522,3 +523,153 @@ def test_scan_overlay_after_pose_and_rviz_launch_configuration(ros_node):
     layer2_command = ros_node._build_layer_cmd("layer2")
     assert "real_localization_nav2.launch.py" in layer2_command
     assert "use_rviz:=true" in layer2_command
+
+
+def _setup_mock_map(widget: InteractiveNavMapWidget, width: int = 200, height: int = 200) -> None:
+    """Thiết lập bản đồ giả lập với kích thước và pixel hợp lệ cho unit test."""
+    widget.resize(width, height)
+    img = QImage(width, height, QImage.Format_RGB32)
+    img.fill(Qt.white)
+    widget._map_image = img
+    widget._map = {
+        "preview_width": width,
+        "preview_height": height,
+        "resolution": 0.05,
+        "origin_x": 0.0,
+        "origin_y": 0.0,
+        "origin_yaw": 0.0,
+        "sample_step": 1,
+        "cells": [0] * (width * height),
+    }
+
+
+def test_ip24_2d_pose_estimate_toggle_button(qapp):
+    """IP-24: Nút 2D POSE ESTIMATE bật/tắt đúng chế độ và trạng thái giao diện."""
+    page = NavigationPage({})
+    assert page.btn_initial_pose.text() == "2D POSE ESTIMATE"
+    assert not page.map_widget._initial_pose_mode
+
+    # Click để bật chế độ
+    page.btn_initial_pose.click()
+    assert page.map_widget._initial_pose_mode is True
+    assert page.btn_initial_pose.text() == "HỦY 2D POSE"
+    assert "Chạm và kéo trên bản đồ" in page.status_label.text()
+
+    # Click lại để hủy
+    page.btn_initial_pose.click()
+    assert page.map_widget._initial_pose_mode is False
+    assert page.btn_initial_pose.text() == "2D POSE ESTIMATE"
+    assert "Đã hủy" in page.status_label.text()
+    page.close()
+
+
+def test_ip25_2d_pose_estimate_press_drag_release(qapp):
+    """IP-25: Thao tác Press -> Drag -> Release phát sinh Initial Pose chính xác."""
+    page = NavigationPage({})
+    _setup_mock_map(page.map_widget, 200, 200)
+
+    emitted_poses = []
+    page.initial_pose_requested.connect(emitted_poses.append)
+
+    # Bật chế độ 2D Pose
+    page._toggle_2d_estimate()
+    assert page.map_widget._initial_pose_mode is True
+
+    # 1. Press tại tâm bản đồ (100, 100)
+    p_center = QPoint(100, 100)
+    press_ev = QMouseEvent(QEvent.MouseButtonPress, p_center, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    page.map_widget.mousePressEvent(press_ev)
+
+    assert page.map_widget._is_dragging_pose is True
+    assert page.map_widget._estimate_start_world is not None
+
+    # 2. Drag sang phải (150, 100) -> hướng dương trục X (yaw ~ 0.0 rad)
+    p_right = QPoint(150, 100)
+    move_ev = QMouseEvent(QEvent.MouseMove, p_right, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    page.map_widget.mouseMoveEvent(move_ev)
+
+    assert abs(page.map_widget._estimate_yaw) < 0.2
+
+    # 3. Release để kết thúc thao tác
+    rel_ev = QMouseEvent(QEvent.MouseButtonRelease, p_right, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    page.map_widget.mouseReleaseEvent(rel_ev)
+
+    # Chế độ tự động tắt sau khi thả
+    assert page.map_widget._initial_pose_mode is False
+    assert page.map_widget._is_dragging_pose is False
+    assert page.btn_initial_pose.text() == "2D POSE ESTIMATE"
+
+    # Kiểm tra payload phát đi
+    assert len(emitted_poses) == 1
+    pose = emitted_poses[0]
+    assert pose["source"] == "2d_pose_estimate"
+    assert "x" in pose and "y" in pose and "yaw" in pose
+    assert abs(pose["yaw"]) < 0.2
+    page.close()
+
+
+def test_ip26_2d_pose_estimate_short_drag_uses_fallback_yaw(qapp):
+    """IP-26: Kéo quá ngắn hoặc chỉ click sẽ dùng hướng robot hiện tại làm fallback."""
+    page = NavigationPage({})
+    _setup_mock_map(page.map_widget, 200, 200)
+    page.map_widget.set_pose({"x": 1.0, "y": 2.0, "yaw": 1.25})
+
+    emitted_poses = []
+    page.initial_pose_requested.connect(emitted_poses.append)
+
+    page._toggle_2d_estimate()
+
+    # Click mà không kéo (khoảng cách 0px < 8px ngưỡng)
+    p = QPoint(100, 100)
+    press_ev = QMouseEvent(QEvent.MouseButtonPress, p, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    page.map_widget.mousePressEvent(press_ev)
+
+    rel_ev = QMouseEvent(QEvent.MouseButtonRelease, p, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier)
+    page.map_widget.mouseReleaseEvent(rel_ev)
+
+    assert len(emitted_poses) == 1
+    assert emitted_poses[0]["yaw"] == pytest.approx(1.25)
+    page.close()
+
+
+def test_ip27_2d_pose_estimate_does_not_emit_goal_or_waypoint(qapp):
+    """IP-27: Trong chế độ 2D Pose Estimate không được phát Navigation Goal hay Waypoint."""
+    page = NavigationPage({})
+    _setup_mock_map(page.map_widget, 200, 200)
+
+    goals = []
+    waypoints = []
+    page.map_widget.goal_selected.connect(goals.append)
+    page.map_widget.waypoint_picked.connect(waypoints.append)
+
+    page._toggle_2d_estimate()
+
+    p1 = QPoint(80, 80)
+    p2 = QPoint(120, 80)
+    page.map_widget.mousePressEvent(QMouseEvent(QEvent.MouseButtonPress, p1, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    page.map_widget.mouseMoveEvent(QMouseEvent(QEvent.MouseMove, p2, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    page.map_widget.mouseReleaseEvent(QMouseEvent(QEvent.MouseButtonRelease, p2, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+
+    assert len(goals) == 0
+    assert len(waypoints) == 0
+    page.close()
+
+
+def test_ip28_2d_pose_estimate_click_outside_map_ignored(qapp):
+    """IP-28: Click vào vùng ngoài bản đồ sẽ bị bỏ qua và không emit initial pose."""
+    page = NavigationPage({})
+    _setup_mock_map(page.map_widget, 200, 200)
+
+    emitted_poses = []
+    page.initial_pose_requested.connect(emitted_poses.append)
+
+    page._toggle_2d_estimate()
+
+    # Click ở điểm âm (-10, -10) ngoài target rect
+    p_outside = QPoint(-10, -10)
+    page.map_widget.mousePressEvent(QMouseEvent(QEvent.MouseButtonPress, p_outside, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    assert page.map_widget._is_dragging_pose is False
+
+    page.map_widget.mouseReleaseEvent(QMouseEvent(QEvent.MouseButtonRelease, p_outside, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
+    assert len(emitted_poses) == 0
+    page.close()
