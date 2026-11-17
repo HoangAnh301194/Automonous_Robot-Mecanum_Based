@@ -198,9 +198,11 @@ class MissionControllerNode(Node):
             if pos_valid:
                 dist = math.hypot(p.position.x, p.position.y)
                 # Chỉ coi là chắn lối mời nước khi người đứng trực diện trước đầu xe:
-                # Cự ly 0.4m - 1.2m, lệch ngang trong luồng thân xe <= 0.35m
-                if 0.40 <= dist <= 1.20 and abs(p.position.y) <= 0.35:
-                    has_blocking = True
+                # Cự ly 0.35m - 0.70m, lệch ngang trong luồng thân xe <= 0.35m
+                # và không phải người đang vẫy tay hoặc robot đang trong tiến trình tiếp cận
+                if not is_approaching and not p.is_waving:
+                    if 0.35 <= dist <= 0.70 and abs(p.position.y) <= 0.35:
+                        has_blocking = True
 
         now_mono = time.monotonic()
         if is_approaching:

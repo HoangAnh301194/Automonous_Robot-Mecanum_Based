@@ -216,11 +216,11 @@ class ActionApproachWavingPerson(Action):
         self.nav2_client = None
         self.goal_handle = None
         self.is_navigating = False
-        self.standoff_distance = 0.70        # Đỗ cách người 0.70m an toàn (cự ly giao tiếp tự nhiên)
+        self.standoff_distance = 0.45        # Đỗ cách người 0.45m (cự ly với tay lấy nước thuận tiện)
         self.enable_dynamic_replan = False   # Snapshot 1-shot goal: chụp tọa độ map 1 lần và đi tới điểm đó
         self.min_replan_interval = 1.2       # Tối thiểu 1.2s mới cho replan 1 lần
         self.min_displacement = 0.40         # Người phải di chuyển > 40cm mới cập nhật
-        self.freeze_distance = 1.00          # Dưới 1.0m thì khóa goal, giảm tốc đỗ xe
+        self.freeze_distance = 0.75          # Dưới 0.75m thì khóa goal, giảm tốc đỗ xe
         self.last_replan_time = 0.0
         self.last_goal_pose = None
         self._goal_seq = 0

@@ -207,7 +207,7 @@ def test_snapshot_one_shot_approach_freezes_goal():
     from robot_mission_control.bt_nodes import ActionApproachWavingPerson, Blackboard, NodeStatus
 
     action = ActionApproachWavingPerson("TestSnapshotApproach", node=None)
-    assert action.standoff_distance == 0.70
+    assert action.standoff_distance == 0.45
     assert action.enable_dynamic_replan is False
 
     sent_goals = []
@@ -297,7 +297,7 @@ def test_resolve_target_pose_uses_depth_stamp_with_fallback():
 
     assert pose_map is not None
     assert dist == pytest.approx(3.20)
-    assert pose_map.pose.position.x == pytest.approx(2.50)  # 3.20 - 0.70 standoff
+    assert pose_map.pose.position.x == pytest.approx(2.75)  # 3.20 - 0.45 standoff
     assert recorded_times == [98 * 10**9 + 500000000]
 
     # Now test fallback when stamped TF lookup fails
@@ -307,7 +307,7 @@ def test_resolve_target_pose_uses_depth_stamp_with_fallback():
 
     assert pose_map_fb is not None
     assert dist_fb == pytest.approx(3.20)
-    assert pose_map_fb.pose.position.x == pytest.approx(2.50)
+    assert pose_map_fb.pose.position.x == pytest.approx(2.75)
     assert recorded_times == [98 * 10**9 + 500000000, 0]
 
 
