@@ -747,9 +747,10 @@ class KioskWindow(QMainWindow):
 
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        # Dark theme defaults to the original MP4 expressions. The new
-        # static PTIT mascot remains available via KIOSK_MOCHI_STATIC=1.
-        if os.getenv("KIOSK_MOCHI_STATIC", "0").strip().lower() in {"1", "true", "yes"}:
+        # Dark mode is the UI theme; it does not change the new Mochi
+        # artwork. Default to the static PTIT mascot; MP4 is opt-in via
+        # KIOSK_MOCHI_STATIC=0 for legacy expressions.
+        if os.getenv("KIOSK_MOCHI_STATIC", "1").strip().lower() in {"1", "true", "yes"}:
             self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
         else:
             self.idle_page.video.set_video(self.emotions.path("idle"))
