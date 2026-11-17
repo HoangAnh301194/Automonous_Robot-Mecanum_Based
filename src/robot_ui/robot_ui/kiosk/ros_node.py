@@ -494,11 +494,14 @@ class KioskRosNode(Node):
         self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "amcl")
 
     def _on_odom(self, msg: Odometry) -> None:
-        self._last_odom_time = time.monotonic()
+        now = time.monotonic()
+        self._last_odom_time = now
         vx = float(msg.twist.twist.linear.x)
         wz = float(msg.twist.twist.angular.z)
         self._mark_topic_rx("odom", {"vx": vx, "wz": wz})
-        if not self._have_localized_pose:
+        # Throttle UI emit tối đa 5 Hz (200ms) để giảm tải Qt event loop
+        if not self._have_localized_pose and (now - getattr(self, "_last_odom_ui_time", 0.0)) >= 0.2:
+            self._last_odom_ui_time = now
             self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
 
     def _on_path(self, msg: Path) -> None:

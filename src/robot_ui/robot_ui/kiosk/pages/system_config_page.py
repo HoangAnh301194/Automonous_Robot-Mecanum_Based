@@ -56,13 +56,19 @@ class HostTelemetryWorker(QThread):
         self.wait(500)
 
     def run(self) -> None:
+        # Warm-up: đợi 2s để kiosk khởi động xong mới bắt đầu thu thập
+        for _ in range(20):
+            if not self._running:
+                return
+            time.sleep(0.1)
         while self._running:
             try:
                 snap = self._collect()
                 self.telemetry_ready.emit(snap)
             except Exception:
                 pass
-            for _ in range(20):
+            # Poll 5s/lần thay vì 2s — giảm 60% tải CPU nền
+            for _ in range(50):
                 if not self._running:
                     break
                 time.sleep(0.1)
@@ -148,7 +154,7 @@ class HostTelemetryWorker(QThread):
         router_port = 20128
         try:
             sock_r = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_r.settimeout(0.3)
+            sock_r.settimeout(0.1)
             res = sock_r.connect_ex(("127.0.0.1", router_port))
             sock_r.close()
             router_ok = (res == 0)
@@ -160,7 +166,7 @@ class HostTelemetryWorker(QThread):
         try:
             t0 = time.monotonic()
             sock_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_s.settimeout(0.8)
+            sock_s.settimeout(0.15)
             sock_s.connect(("api.groq.com", 443))
             sock_s.close()
             stt_latency_ms = int((time.monotonic() - t0) * 1000)
@@ -208,7 +214,7 @@ class HostTelemetryWorker(QThread):
                 except Exception:
                     pass
             top_procs.sort(key=lambda x: (x["cpu"], x["mem_mb"]), reverse=True)
-            top_procs = top_procs[:10]
+            top_procs = top_procs[:5]
         except Exception:
             pass
 
