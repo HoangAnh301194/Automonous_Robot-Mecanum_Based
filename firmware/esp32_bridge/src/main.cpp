@@ -51,6 +51,11 @@
 #define SAFETY_TIMEOUT_MS  200        // Watchdog ngắt nếu mất lệnh PC quá 200ms
 #define RC_TIMEOUT_MS      250        // Mất sóng RC quá 250ms -> coi như tắt tay điều khiển
 
+// Giới hạn an toàn tay cầm RC (xe phục vụ nước, tránh giật và lật/sánh nước)
+#define RC_MAX_SPEED       95         // Max tốc độ dài ~0.80 m/s (tương đương 95 RPM)
+#define RC_MAX_STEER       40         // Max vận tốc góc quay ~0.80 rad/s (~45 deg/s)
+#define RC_DEADBAND        40         // Vùng chết micro-giây quanh vị trí nghỉ 1500us
+
 #define START_FRAME        0xABCD
 #define START_FRAME_KETTLE 0xABCE
 
@@ -300,17 +305,17 @@ void loop() {
   bool rcActive = false;
 
   if (rcAvailable) {
-    // Vùng chết (Deadband) quanh điểm giữa 1500us
+    // Lọc deadband quanh điểm giữa 1500us
     int16_t rawSteer = (int16_t)rc_ch1_pwm - 1500;
     int16_t rawSpeed = (int16_t)rc_ch2_pwm - 1500;
 
-    // Lọc deadband +-40us (tương đương cần ở giữa vị trí nghỉ)
-    if (abs(rawSteer) > 40) {
-      rcSteer = constrain(map((int)rc_ch1_pwm, 1000, 2000, -800, 800), -800, 800);
+    // Lọc deadband +-RC_DEADBAND us (tương đương cần ở giữa vị trí nghỉ)
+    if (abs(rawSteer) > RC_DEADBAND) {
+      rcSteer = constrain(map((int)rc_ch1_pwm, 1000, 2000, -RC_MAX_STEER, RC_MAX_STEER), -RC_MAX_STEER, RC_MAX_STEER);
       rcActive = true;
     }
-    if (abs(rawSpeed) > 40) {
-      rcSpeed = constrain(map((int)rc_ch2_pwm, 1000, 2000, -800, 800), -800, 800);
+    if (abs(rawSpeed) > RC_DEADBAND) {
+      rcSpeed = constrain(map((int)rc_ch2_pwm, 1000, 2000, -RC_MAX_SPEED, RC_MAX_SPEED), -RC_MAX_SPEED, RC_MAX_SPEED);
       rcActive = true;
     }
   }
