@@ -193,6 +193,7 @@ class KioskRosNode(Node):
             "layer5": deque(maxlen=400),
         }
         self._console_active: bool = False
+        self._force_swap_ports: bool = False
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -1387,7 +1388,8 @@ class KioskRosNode(Node):
         if launch_key == "layer1":
             from robot_ui.kiosk.serial_resolver import detect_serial_ports
 
-            hb_port, lidar_port, detect_method = detect_serial_ports()
+            force_swap = getattr(self, "_force_swap_ports", False)
+            hb_port, lidar_port, detect_method = detect_serial_ports(force_swap=force_swap)
             self.get_logger().info(
                 f"[LAYER 1] Auto-detected serial ports ({detect_method}): Hoverboard={hb_port}, LiDAR={lidar_port}"
             )
@@ -1405,6 +1407,22 @@ class KioskRosNode(Node):
         elif launch_key == "layer5":
             return prefix + "ros2 launch robot_bringup backend.launch.py"
         return ""
+
+    def swap_serial_ports(self) -> tuple[str, str, str]:
+        """Hoán đổi vị trí giữa cổng Hoverboard/ESP32 và cổng LiDAR."""
+        self._force_swap_ports = not self._force_swap_ports
+        from robot_ui.kiosk.serial_resolver import detect_serial_ports
+
+        esp, lidar, src = detect_serial_ports(force_swap=self._force_swap_ports)
+        self.get_logger().info(f"[SERIAL] Đảo cổng thành công: ESP={esp}, LiDAR={lidar} (nguồn: {src})")
+        self._record_layer_log("layer1", f"[SERIAL] Đã đảo cổng cấu hình: ESP={esp}, LiDAR={lidar} (nguồn: {src})")
+        return esp, lidar, src
+
+    def get_detected_ports(self) -> tuple[str, str, str]:
+        """Trả về tuple (esp_port, lidar_port, detect_src)."""
+        from robot_ui.kiosk.serial_resolver import detect_serial_ports
+
+        return detect_serial_ports(force_swap=self._force_swap_ports)
 
     def start_layer(self, layer_key: str) -> None:
         """Khởi động tầng tiến trình tương ứng bảo đảm thread-safe và nguyên tử."""

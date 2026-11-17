@@ -10,10 +10,7 @@ from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import (
     QApplication,
-    QFrame,
-    QHBoxLayout,
     QMainWindow,
-    QPushButton,
     QStackedWidget,
     QWidget,
 )
@@ -638,6 +635,8 @@ class KioskWindow(QMainWindow):
         self.system_config_page.start_layer_requested.connect(self.ros_node.start_layer)
         self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
         self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
+        self.system_config_page.swap_ports_requested.connect(self._on_swap_serial_ports)
+        self.system_config_page.rescan_ports_requested.connect(self._on_rescan_serial_ports)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
         self.detection_debug_page.home_requested.connect(self.return_to_home)
         self.detection_debug_page.back_requested.connect(self.go_back)
@@ -980,6 +979,19 @@ class KioskWindow(QMainWindow):
     def _on_admin_system_status(self) -> None:
         LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
         self.show_page("system_config")
+        self._on_rescan_serial_ports()
+
+    def _on_swap_serial_ports(self) -> None:
+        """Hoán đổi cổng Serial giữa Hoverboard và LiDAR."""
+        esp, lidar, src = self.ros_node.swap_serial_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+
+    def _on_rescan_serial_ports(self) -> None:
+        """Quét và đồng bộ thông tin cổng Serial lên giao diện Kiosk."""
+        esp, lidar, src = self.ros_node.get_detected_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected

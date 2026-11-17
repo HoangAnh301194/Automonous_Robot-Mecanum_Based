@@ -250,6 +250,8 @@ class SystemConfigPage(QWidget):
     start_layer_requested = pyqtSignal(str)
     stop_layer_requested = pyqtSignal(str)
     emergency_cleanup_requested = pyqtSignal()
+    swap_ports_requested = pyqtSignal()
+    rescan_ports_requested = pyqtSignal()
 
     # Actuator Quick-Test Signals
     actuator_test_requested = pyqtSignal(str)
@@ -443,6 +445,8 @@ class SystemConfigPage(QWidget):
         self.ros2_screen.start_layer_requested.connect(self.start_layer_requested.emit)
         self.ros2_screen.stop_layer_requested.connect(self.stop_layer_requested.emit)
         self.ros2_screen.emergency_cleanup_requested.connect(self.emergency_cleanup_requested.emit)
+        self.ros2_screen.swap_ports_requested.connect(self.swap_ports_requested.emit)
+        self.ros2_screen.rescan_ports_requested.connect(self.rescan_ports_requested.emit)
         self.stack.addWidget(self.ros2_screen)
 
         # Screen 4: Module D (Diagnostics & Tests)

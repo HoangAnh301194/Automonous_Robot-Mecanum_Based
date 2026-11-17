@@ -1,45 +1,74 @@
 """Serial port resolver for Hoverboard motor controller and RPLiDAR sensors.
 
-Aligns with the proven detection mechanism from gui_v3.py:
-- Auto-detects udev aliases (/dev/hoverboard, /dev/rplidar, /dev/esp32, /dev/lidar)
-- Scans system serial devices (/dev/ttyUSB*, /dev/ttyACM*)
-- Probes RPLiDAR sensor using standard SDK protocol bytes (0xA5 0x52)
-- Automatically resolves optimal port assignments for Layer 1 bringup.
+Faithfully implements the proven port scanning logic from gui_v3.py and simulator:
+- Auto-detects udev aliases (/dev/hoverboard, /dev/rplidar, /dev/esp32, /dev/lidar).
+- Preserves /dev/serial/by-id/* symlinks to recognize hardware chipsets (Silicon Labs CP2102, RPLiDAR, ESP32).
+- Passive read probe for ESP32 / Hoverboard telemetry and bootloader headers (0xCD 0xAB, V:, E, ets Jun).
+- Optional active probe for RPLiDAR health protocol (0xA5 0x52).
+- Automatic physical device deduplication and port pairing.
+- Supports force_swap to quickly invert port assignments.
 """
 from __future__ import annotations
 
 import glob
 import logging
 import os
-from pathlib import Path
+import time
 from typing import Tuple
 
 LOG = logging.getLogger(__name__)
 
 
 def list_serial_ports() -> list[str]:
-    """Return all available serial port device paths on Linux."""
-    ports: list[str] = []
-    # by-id symlinks
-    by_id = "/dev/serial/by-id"
-    if os.path.isdir(by_id):
-        for name in os.listdir(by_id):
-            full = os.path.join(by_id, name)
-            if os.path.islink(full):
-                try:
-                    resolved = os.path.realpath(full)
-                    if resolved not in ports:
-                        ports.append(resolved)
-                except Exception:
-                    pass
+    """Return all available serial port device paths on Linux, prioritizing by-id symlinks."""
+    raw_ports = (
+        sorted(glob.glob("/dev/serial/by-id/*"))
+        + sorted(glob.glob("/dev/ttyUSB*"))
+        + sorted(glob.glob("/dev/ttyACM*"))
+    )
+    dedup: list[str] = []
+    seen_real: set[str] = set()
+    for p in raw_ports:
+        try:
+            real = os.path.realpath(p)
+        except Exception:
+            real = p
+        if real not in seen_real:
+            seen_real.add(real)
+            dedup.append(p)
+    return dedup
 
-    # direct ttyUSB / ttyACM nodes
-    for pattern in ("/dev/ttyUSB*", "/dev/ttyACM*"):
-        for p in sorted(glob.glob(pattern)):
-            if p not in ports:
-                ports.append(p)
 
-    return ports
+def is_esp32_port(port: str, baudrate: int = 115200, timeout: float = 0.1) -> bool:
+    """Passive probe for ESP32/Hoverboard telemetry packets and bootloader messages."""
+    try:
+        import serial  # type: ignore
+    except ImportError:
+        return False
+    ser = None
+    try:
+        ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
+        ser.reset_input_buffer()
+        start_time = time.monotonic()
+        while time.monotonic() - start_time < 0.6:
+            raw = ser.read(64)
+            if not raw:
+                continue
+            if b"\xcd\xab" in raw or b"\xab\xcd" in raw:
+                return True
+            if b"ets Jun" in raw or b"rst:0x" in raw or b"boot:" in raw:
+                return True
+            if b"V:" in raw or b"E," in raw:
+                return True
+    except Exception:
+        return False
+    finally:
+        if ser is not None:
+            try:
+                ser.close()
+            except Exception:
+                pass
+    return False
 
 
 def probe_rplidar(port: str, baudrate: int = 115200, timeout: float = 0.4) -> bool:
@@ -55,7 +84,6 @@ def probe_rplidar(port: str, baudrate: int = 115200, timeout: float = 0.4) -> bo
         ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
         # Send STOP first in case LiDAR is continuously streaming scan data
         ser.write(bytes([0xA5, 0x25]))
-        import time
         time.sleep(0.02)
         ser.reset_input_buffer()
         # RPLiDAR GET_HEALTH command: 0xA5 0x52
@@ -75,66 +103,89 @@ def probe_rplidar(port: str, baudrate: int = 115200, timeout: float = 0.4) -> bo
     return False
 
 
-def detect_serial_ports() -> Tuple[str, str, str]:
-    """Detect and return (hoverboard_port, lidar_port, detection_method).
+def detect_serial_ports(force_swap: bool = False) -> Tuple[str, str, str]:
+    """Tự động phát hiện cổng ESP32/Hoverboard và LiDAR chuẩn xác như gui_v3 và simulator.
 
-    Checks udev aliases first; if not present, scans /dev/ttyUSB* and probes
-    for RPLiDAR to cleanly pair Hoverboard and LiDAR ports.
+    Returns:
+        (hoverboard_port, lidar_port, detection_method)
     """
-    # 1. Check udev aliases
+    # 1. Kiểm tra udev aliases trước
     hb_alias = "/dev/hoverboard" if os.path.exists("/dev/hoverboard") else (
         "/dev/esp32" if os.path.exists("/dev/esp32") else None
     )
     lidar_alias = "/dev/rplidar" if os.path.exists("/dev/rplidar") else (
         "/dev/lidar" if os.path.exists("/dev/lidar") else None
     )
-
     if hb_alias and lidar_alias:
+        if force_swap:
+            return lidar_alias, hb_alias, "swap_override"
         return hb_alias, lidar_alias, "udev_alias"
 
     ports = list_serial_ports()
     if not ports:
+        if force_swap:
+            return "/dev/ttyUSB1", "/dev/ttyUSB0", "swap_override"
         return "/dev/ttyUSB0", "/dev/ttyUSB1", "fallback_defaults"
 
-    hoverboard_port: str | None = hb_alias
+    esp_port: str | None = hb_alias
     lidar_port: str | None = lidar_alias
 
-    # 2. Check by filename hints (e.g. symlinks in by-id)
+    # 2. Nhận diện qua tên symlink / chipset (đặc biệt chip Silicon Labs CP2102 của RPLiDAR trên Jetson)
     for p in ports:
-        key = Path(p).name.lower()
-        if lidar_port is None and any(tag in key for tag in ("rplidar", "slamtec", "lidar")):
+        key = os.path.basename(p).lower()
+        if lidar_port is None and any(tag in key for tag in ("rplidar", "slamtec", "lidar", "cp210", "silicon_labs")):
             lidar_port = p
-        if hoverboard_port is None and any(tag in key for tag in ("hoverboard", "esp32", "esp")):
-            hoverboard_port = p
+        if esp_port is None and any(tag in key for tag in ("hoverboard", "esp32", "esp")):
+            esp_port = p
 
-    # 3. Active hardware probe for RPLiDAR
+    # 3. Thăm dò byte thực tế ESP32/Hoverboard (thụ động như gui_v3)
+    if esp_port is None:
+        for p in ports:
+            if p != lidar_port and is_esp32_port(p):
+                esp_port = p
+                LOG.info(f"[SerialResolver] Probed ESP32/Hoverboard found at {p}")
+                break
+
+    # 4. Thăm dò RPLiDAR nếu chưa phát hiện
     if lidar_port is None:
         for p in ports:
-            if p != hoverboard_port and probe_rplidar(p):
+            if p != esp_port and probe_rplidar(p):
                 lidar_port = p
                 LOG.info(f"[SerialResolver] Probed RPLiDAR found at {p}")
                 break
 
-    # 4. Pair remaining port
-    if hoverboard_port is None and lidar_port is not None:
+    # 5. Phân bổ cổng còn lại
+    if esp_port is None:
         for p in ports:
-            if p != lidar_port:
-                hoverboard_port = p
+            if p.endswith("ttyUSB0") or p.endswith("ttyACM0"):
+                esp_port = p
                 break
+    if esp_port is None:
+        esp_port = ports[0]
 
-    if lidar_port is None and hoverboard_port is not None:
+    # Đảm bảo lidar_port trỏ tới thiết bị vật lý KHÁC esp_port
+    try:
+        esp_real = os.path.realpath(esp_port)
+    except Exception:
+        esp_real = esp_port
+
+    if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
+        lidar_port = None
         for p in ports:
-            if p != hoverboard_port:
+            try:
+                p_real = os.path.realpath(p)
+            except Exception:
+                p_real = p
+            if p_real != esp_real:
                 lidar_port = p
                 break
 
-    # 5. Final fallback assignments
-    if hoverboard_port is None:
-        hoverboard_port = "/dev/ttyUSB0" if "/dev/ttyUSB0" in ports else ports[0]
+    # Fallback nếu chỉ có 1 cổng
+    if lidar_port is None or os.path.realpath(lidar_port) == esp_real:
+        lidar_port = "/dev/ttyUSB1" if esp_real != "/dev/ttyUSB1" else "/dev/ttyUSB0"
 
-    if lidar_port is None or lidar_port == hoverboard_port:
-        candidates = [p for p in ports if p != hoverboard_port]
-        lidar_port = candidates[0] if candidates else "/dev/ttyUSB1"
+    if force_swap:
+        return lidar_port, esp_port, "swap_override"
 
-    method = "auto_probed" if (hoverboard_port in ports or lidar_port in ports) else "fallback_defaults"
-    return hoverboard_port, lidar_port, method
+    method = "scan" if (esp_port in ports or lidar_port in ports) else "fallback_defaults"
+    return esp_port, lidar_port, method

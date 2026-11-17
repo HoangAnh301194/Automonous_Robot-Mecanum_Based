@@ -44,6 +44,8 @@ class ROS2SystemDetailScreen(QWidget):
     stop_layer_requested = pyqtSignal(str)
     emergency_cleanup_requested = pyqtSignal()
     log_filter_changed = pyqtSignal(str)
+    swap_ports_requested = pyqtSignal()
+    rescan_ports_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -545,23 +547,24 @@ class ROS2SystemDetailScreen(QWidget):
                 self._logs_by_layer[self._current_filter].clear()
         self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
 
-    def _on_rescan_ports(self) -> None:
-        try:
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-            hb, lidar, method = detect_serial_ports()
-            res_str = f"Hoverboard: {hb} | LiDAR: {lidar} ({method})"
-        except Exception:
-            res_str = ""
+    def set_detected_ports(self, esp_port: str, lidar_port: str, detect_src: str) -> None:
+        """Cập nhật thông tin cổng Serial hiển thị lên giao diện."""
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         unique_ports = list(dict.fromkeys(ports))
         ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện"
-        if res_str:
-            self.lbl_ports_info.setText(f"{res_str} | Tất cả cổng: {ports_str}")
-        else:
-            self.lbl_ports_info.setText(f"Cổng phát hiện: {ports_str}")
+        self.lbl_ports_info.setText(f"Hoverboard/ESP: {esp_port} | LiDAR: {lidar_port} ({detect_src}) | Cổng: {ports_str}")
+
+    def _on_rescan_ports(self) -> None:
+        self.rescan_ports_requested.emit()
+        try:
+            from robot_ui.kiosk.serial_resolver import detect_serial_ports
+            hb, lidar, method = detect_serial_ports()
+            self.set_detected_ports(hb, lidar, method)
+        except Exception:
+            pass
 
     def _on_swap_ports(self) -> None:
-        self.lbl_ports_info.setText("Đã yêu cầu đảo cổng cấu hình Serial Hoverboard/ESP32.")
+        self.swap_ports_requested.emit()
 
     def _on_emergency_cleanup_clicked(self) -> None:
         dialog = DangerousActionDialog(

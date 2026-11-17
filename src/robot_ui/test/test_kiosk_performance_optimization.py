@@ -267,6 +267,7 @@ class MockLifecycleRosNode:
         self._active_launch_tokens = {}
         self._layer_log_buffers = {k: [] for k in ("layer1", "layer2", "layer3", "layer4", "layer5", "all")}
         self._console_active = False
+        self._force_swap_ports = False
         self._slam_proc = None
         self._localization_proc = None
         self.signals = MagicMock()
