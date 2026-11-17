@@ -257,6 +257,7 @@ class SystemConfigPage(QWidget):
     stop_all_requested = pyqtSignal()
     swap_ports_requested = pyqtSignal()
     rescan_ports_requested = pyqtSignal()
+    map_selected = pyqtSignal(str)
 
     # Actuator Quick-Test Signals
     actuator_test_requested = pyqtSignal(str)
@@ -453,6 +454,7 @@ class SystemConfigPage(QWidget):
         self.ros2_screen.stop_all_requested.connect(self.stop_all_requested.emit)
         self.ros2_screen.swap_ports_requested.connect(self.swap_ports_requested.emit)
         self.ros2_screen.rescan_ports_requested.connect(self.rescan_ports_requested.emit)
+        self.ros2_screen.map_selected.connect(self.map_selected.emit)
         self.stack.addWidget(self.ros2_screen)
 
         # Screen 4: Module D (Diagnostics & Tests)

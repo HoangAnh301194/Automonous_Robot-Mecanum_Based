@@ -1896,7 +1896,7 @@ class NavigationPage(QWidget):
         if map_data is not None:
             self.set_map(map_data)
             stem = Path(yaml_path).stem if yaml_path else "bản đồ"
-            self.status_label.setText(f"Đã nạp bản đồ: {stem}")
+            self.status_label.setText(f"Bản đồ: {stem} | Bấm '📍 2D ESTIMATE' để định vị robot")
             return True
         return False
 

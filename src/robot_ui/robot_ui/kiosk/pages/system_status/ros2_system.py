@@ -51,6 +51,7 @@ class ROS2SystemDetailScreen(QWidget):
     stop_all_requested = pyqtSignal()
     swap_ports_requested = pyqtSignal()
     rescan_ports_requested = pyqtSignal()
+    map_selected = pyqtSignal(str)
 
     def __init__(
         self,
@@ -144,12 +145,12 @@ class ROS2SystemDetailScreen(QWidget):
         self.cmb_backend.addItems(["AMCL", "SLAM Toolbox"])
         self.cmb_backend.setFixedHeight(36)
         self.cmb_backend.setStyleSheet(self.cmb_operation_mode.styleSheet())
-        self.cmb_backend.setEnabled(False)  # Mặc định tắt nếu đang là SLAM Mapping
+        self.cmb_backend.setEnabled(False)
         mode_row.addWidget(self.cmb_backend)
 
         m_layout.addLayout(mode_row)
 
-        # 2. Hàng chọn Bản đồ (Map selector) khi ở chế độ Localization
+        # 2. Hàng chọn Bản đồ (Map selector) tập trung chuẩn gui_v3
         self.map_row_widget = QWidget()
         map_row = QHBoxLayout(self.map_row_widget)
         map_row.setContentsMargins(0, 0, 0, 0)
@@ -162,6 +163,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.cmb_maps = QComboBox()
         self.cmb_maps.setFixedHeight(36)
         self.cmb_maps.setStyleSheet(self.cmb_operation_mode.styleSheet())
+        self.cmb_maps.currentIndexChanged.connect(self._on_map_selection_changed)
         map_row.addWidget(self.cmb_maps, stretch=1)
 
         self.btn_refresh_maps = QPushButton("Làm mới Map")
@@ -182,7 +184,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.btn_refresh_maps.clicked.connect(self.refresh_map_list)
         map_row.addWidget(self.btn_refresh_maps)
 
-        self.map_row_widget.setVisible(False)  # Mặc định ẩn nếu đang là SLAM Mapping
+        self.map_row_widget.setVisible(False)
         m_layout.addWidget(self.map_row_widget)
 
         # 3. Hàng 2 Nút Tổng Quan: START ALL & STOP ALL
@@ -323,6 +325,7 @@ class ROS2SystemDetailScreen(QWidget):
                 "status_lbl": lbl_st,
                 "start_btn": btn_start,
                 "stop_btn": btn_stop,
+                "desc_lbl": lbl_desc,
             }
 
         c_layout.addWidget(card_layers)
@@ -511,6 +514,17 @@ class ROS2SystemDetailScreen(QWidget):
         self.cmb_backend.setEnabled(is_loc)
         self.map_row_widget.setVisible(is_loc)
 
+    def _on_map_selection_changed(self, index: int) -> None:
+        """Thông báo bản đồ đã chọn và cập nhật mô tả cho Layer Navigation."""
+        map_path = self.cmb_maps.currentData()
+        if map_path:
+            self.map_selected.emit(map_path)
+            if "layer_navigation" in self.layer_rows and "desc_lbl" in self.layer_rows["layer_navigation"]:
+                pname = Path(map_path).name
+                self.layer_rows["layer_navigation"]["desc_lbl"].setText(
+                    f"Nav2 AMCL Localization | Bản đồ: {pname}"
+                )
+
     def refresh_map_list(self) -> None:
         """Quét và làm mới danh sách các file bản đồ YAML có sẵn."""
         self.cmb_maps.blockSignals(True)
@@ -532,6 +546,8 @@ class ROS2SystemDetailScreen(QWidget):
                         self.cmb_maps.addItem(f"{p.name} ({p.parent.name})", sp)
 
         self.cmb_maps.blockSignals(False)
+        if self.cmb_maps.count() > 0:
+            self._on_map_selection_changed(self.cmb_maps.currentIndex())
 
     def set_detected_ports(self, esp_port: str, lidar_port: str, detect_src: str) -> None:
         """Cập nhật thông tin cổng Serial hiển thị lên giao diện."""
@@ -582,6 +598,10 @@ class ROS2SystemDetailScreen(QWidget):
         self.rescan_ports_requested.emit()
 
     def _on_start_layer_clicked(self, key: str, name: str) -> None:
+        if key == "layer_navigation":
+            selected_map = self.cmb_maps.currentData()
+            if selected_map:
+                self.map_selected.emit(selected_map)
         self.append_process_log(key, f"Gửi yêu cầu khởi động: {name}...")
         self.start_layer_requested.emit(key)
 

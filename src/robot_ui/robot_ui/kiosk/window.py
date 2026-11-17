@@ -641,6 +641,7 @@ class KioskWindow(QMainWindow):
         self.system_config_page.swap_ports_requested.connect(self._on_swap_serial_ports)
         self.system_config_page.rescan_ports_requested.connect(self._on_rescan_serial_ports)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
+        self.system_config_page.map_selected.connect(self._on_map_selected_from_system)
         self.detection_debug_page.home_requested.connect(self.return_to_home)
         self.detection_debug_page.back_requested.connect(self.go_back)
         self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
@@ -752,6 +753,9 @@ class KioskWindow(QMainWindow):
         self._session_timer.timeout.connect(self._expire_idle_session)
         self._session_timer.start(1000)
         QTimer.singleShot(800, self.ros_node.request_locations)
+        default_map = Path.home() / "ros2_ws" / "my_map" / "my_map.yaml"
+        if default_map.is_file():
+            self._on_map_selected_from_system(str(default_map))
 
     def resizeEvent(self, event: Any) -> None:
         central = self.centralWidget()
@@ -954,6 +958,16 @@ class KioskWindow(QMainWindow):
         if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "load_map_yaml"):
             self.navigation_page.load_map_yaml(map_path)
         self.show_page("admin")
+
+    def _on_map_selected_from_system(self, map_path: str) -> None:
+        """Đồng bộ bản đồ được chọn từ System Configuration sang ROS Node và Navigation Page."""
+        if not map_path:
+            return
+        LOG.info("[UI System] Bản đồ được chọn từ System Status: %s", map_path)
+        if hasattr(self, "ros_node"):
+            self.ros_node._selected_map_yaml = map_path
+        if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "load_map_yaml"):
+            self.navigation_page.load_map_yaml(map_path)
 
     def _on_admin_detection(self) -> None:
         LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
