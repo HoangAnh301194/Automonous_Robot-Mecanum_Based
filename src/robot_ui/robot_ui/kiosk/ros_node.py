@@ -146,6 +146,10 @@ class KioskRosNode(Node):
         self._localization_proc: subprocess.Popen | None = None
         self._selected_map_yaml: str = ""
         self._selected_backend: str = "amcl"
+        self._serial_ports_base: tuple[str, str, str] | None = None
+        self._serial_swap_override = False
+        self._start_all_cancel = threading.Event()
+        self._start_all_thread: threading.Thread | None = None
 
         # System telemetry & Configuration tracking
         self._dbg_lock = threading.Lock()
@@ -844,6 +848,29 @@ class KioskRosNode(Node):
         elif self.trigger_finish_client.wait_for_service(timeout_sec=0.2):
             self.trigger_finish_client.call_async(Trigger.Request())
 
+    def get_detected_ports(self, refresh: bool = False) -> tuple[str, str, str]:
+        """Resolve physical ports; never actively probe while Hardware is running."""
+        running = self._layer_procs.get("layer1")
+        if running is not None and running.poll() is None:
+            if self._serial_ports_base is None:
+                return "/dev/ttyUSB0", "/dev/ttyUSB1", "running_unverified"
+        elif refresh or self._serial_ports_base is None:
+            from robot_ui.kiosk.serial_resolver import detect_serial_ports
+            self._serial_ports_base = detect_serial_ports()
+        if self._serial_ports_base is None:
+            return "/dev/ttyUSB0", "/dev/ttyUSB1", "unavailable"
+        hb, lidar, source = self._serial_ports_base
+        if self._serial_swap_override:
+            return lidar, hb, "swap_override"
+        return hb, lidar, source
+
+    def swap_serial_ports(self) -> tuple[str, str, str]:
+        """Change the assignment for the NEXT Layer 1 launch, not a running driver."""
+        self._serial_swap_override = not self._serial_swap_override
+        ports = self.get_detected_ports()
+        self._record_layer_log("all", "Serial assignment for next Hardware launch: " + str(ports))
+        return ports
+
     def _get_ws_prefix(self) -> str:
         ws_root = FilePath(__file__).resolve().parents[4]
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
@@ -1377,9 +1404,7 @@ class KioskRosNode(Node):
         cmd = ""
         prefix = self._get_ws_prefix()
         if launch_key == "layer1":
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-
-            hb_port, lidar_port, detect_method = detect_serial_ports()
+            hb_port, lidar_port, detect_method = self.get_detected_ports(refresh=True)
             self.get_logger().info(
                 f"[LAYER 1] Auto-detected serial ports ({detect_method}): Hoverboard={hb_port}, LiDAR={lidar_port}"
             )
@@ -1389,7 +1414,18 @@ class KioskRosNode(Node):
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
-            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=false"
+            backend = self._selected_backend if self._selected_backend in ("amcl", "slam_toolbox") else "amcl"
+            cmd = (
+                prefix
+                + "ros2 launch mo_hinh real_localization_nav2.launch.py "
+                + f"localization_mode:={backend} use_sim_time:=false use_rviz:=false"
+            )
+            if backend == "amcl" and self._selected_map_yaml:
+                map_file = FilePath(self._selected_map_yaml).expanduser()
+                if map_file.is_file() and map_file.suffix.lower() in (".yaml", ".yml"):
+                    cmd += f" map_yaml:={shlex.quote(str(map_file.resolve()))}"
+                else:
+                    self._record_layer_log("all", "Map AMCL không hợp lệ; sử dụng mặc định.")
         elif launch_key == "layer3":
             cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
