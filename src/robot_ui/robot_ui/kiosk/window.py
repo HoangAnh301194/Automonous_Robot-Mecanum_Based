@@ -840,6 +840,21 @@ class KioskWindow(QMainWindow):
             self.idle_page.video.pause()
             if hasattr(self, "_wakeword_worker"):
                 self._wakeword_worker.pause_listening()
+
+        if hasattr(self, "_robot_status") and self._robot_status:
+            if page_id == "navigation":
+                self.navigation_page.set_robot_status(self._robot_status)
+            elif page_id == "admin":
+                self.admin_page.set_robot_status(self._robot_status)
+            elif page_id == "system_config" and hasattr(self, "system_config_page"):
+                self.system_config_page.update_battery_water(self._robot_status, force=True)
+            elif page_id == "detection_debug" and hasattr(self, "detection_debug_page"):
+                bat = self._robot_status.get("battery_percent") or self._robot_status.get("battery")
+                if isinstance(bat, (int, float)):
+                    self.detection_debug_page.update_battery(float(bat))
+            elif page_id == "slam" and hasattr(self, "slam_page"):
+                self.slam_page.set_battery(self._robot_status.get("battery_percent") or self._robot_status.get("battery"))
+
         if page_id == "navigation":
             self.ros_node.request_locations()
             if hasattr(self, "navigation_page"):
@@ -1029,18 +1044,22 @@ class KioskWindow(QMainWindow):
     def _on_robot_status(self, status: dict[str, Any]) -> None:
         self._robot_status = status
         self._robot_status_received_at = time.monotonic()
-        self.idle_page.set_robot_status(status)
-        self.admin_page.set_robot_status(status)
-        self.navigation_page.set_robot_status(status)
-        if hasattr(self, "slam_page"):
+        active = getattr(self, "_active_page", "")
+        if active == "idle":
+            self.idle_page.set_robot_status(status)
+            self._update_emotion()
+        elif active == "admin":
+            self.admin_page.set_robot_status(status)
+        elif active == "navigation":
+            self.navigation_page.set_robot_status(status)
+        elif active == "slam" and hasattr(self, "slam_page"):
             self.slam_page.set_battery(status.get("battery_percent") or status.get("battery"))
-        if hasattr(self, "system_config_page"):
+        elif active == "system_config" and hasattr(self, "system_config_page"):
             self.system_config_page.update_battery_water(status)
-        if hasattr(self, "detection_debug_page"):
+        elif active == "detection_debug" and hasattr(self, "detection_debug_page"):
             bat = status.get("battery_percent") or status.get("battery")
             if isinstance(bat, (int, float)):
                 self.detection_debug_page.update_battery(float(bat))
-        self._update_emotion()
 
     def _on_navigation_status(self, status: dict[str, Any]) -> None:
         self._navigation_status = status
