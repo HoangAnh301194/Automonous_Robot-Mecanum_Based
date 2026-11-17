@@ -454,7 +454,7 @@ class ROS2SystemDetailScreen(QWidget):
         ports_row.addWidget(self.btn_swap_ports)
         port_layout.addLayout(ports_row)
 
-        self.lbl_ports_info = QLabel("Cổng phát hiện: Đang quét...")
+        self.lbl_ports_info = QLabel("Nhấn Quét Lại Cổng Serial để nhận diện thiết bị.")
         self.lbl_ports_info.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px; padding: 4px 0;")
         port_layout.addWidget(self.lbl_ports_info)
         c_layout.addWidget(card_ports)
@@ -489,8 +489,8 @@ class ROS2SystemDetailScreen(QWidget):
         scroll.setWidget(container)
         layout.addWidget(scroll)
 
-        # Initial ports scan
-        self._on_rescan_ports()
+        # Serial detection is triggered on demand after KioskWindow wires the
+        # signal. Probing live devices in this constructor would block Qt.
 
     LAYER_NAME_MAP = {
         "layer1": "layer_hardware",
