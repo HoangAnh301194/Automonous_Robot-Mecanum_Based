@@ -467,7 +467,7 @@ class KioskRosNode(Node):
         # Khi Kiosk chủ động phát initial pose, việc chuyển sang LOCALIZED được thực hiện nguyên tử qua _verify_localization_worker.
         # Nếu người dùng dùng RViz2 (2D Pose Estimate) độc lập, tự động đồng bộ khi đạt chuẩn hội tụ và TF:
         if not self._loc_session_token and self._localization_state != LocalizationState.LOCALIZED:
-            if cov_norm <= 0.60:
+            if cov_norm <= 0.85:
                 tf_ok = False
                 try:
                     tf_ok = self._tf_buffer.can_transform("map", "odom", rclpy.time.Time())
@@ -1180,7 +1180,7 @@ class KioskRosNode(Node):
                     + "ros2 launch mo_hinh real_localization_nav2.launch.py "
                     + f"localization_mode:={shlex.quote(backend)} use_sim_time:={sim_time_str} "
                     + f"map_yaml:={shlex.quote(map_yaml_path)} "
-                    + f"map_graph:={shlex.quote(graph_path)} use_rviz:=true"
+                    + f"map_graph:={shlex.quote(graph_path)} use_rviz:=false"
                 )
                 self.get_logger().info(f"[KIOSK LOCALIZATION] START fallback: {cmd}")
                 clean_env = self._get_clean_env() if hasattr(self, "_get_clean_env") else os.environ.copy()
@@ -1485,7 +1485,7 @@ class KioskRosNode(Node):
         start_t = time.monotonic()
         timeout = 10.0
         tf_detected = False
-        MAX_COVARIANCE_NORM = 0.60
+        MAX_COVARIANCE_NORM = 0.85
 
         while time.monotonic() - start_t < timeout:
             if self._loc_session_token != token:
@@ -1924,7 +1924,7 @@ class KioskRosNode(Node):
                 prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py",
                 f"localization_mode:={shlex.quote(backend)}",
                 f"use_sim_time:={sim_time_str}",
-                "use_rviz:=true",
+                "use_rviz:=false",
             ]
             map_yaml = getattr(self, "_selected_map_yaml", None)
             if map_yaml and os.path.exists(map_yaml):

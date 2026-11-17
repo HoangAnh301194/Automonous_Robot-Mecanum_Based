@@ -166,7 +166,7 @@ def test_p1_2_stop_slam_non_blocking_worker(app):
 
 
 def test_p0_1_build_layer_cmd_layer2_with_selected_map():
-    """P0-1: _build_layer_cmd cho layer2 truyền chính xác map_yaml, map_graph và use_rviz:=true."""
+    """P0-1: _build_layer_cmd cho layer2 truyền chính xác map_yaml, map_graph và use_rviz:=false."""
     node = KioskRosNode.__new__(KioskRosNode)
     node._get_ws_prefix = lambda: "export ROS_DOMAIN_ID=94 && "
     node._selected_backend = "amcl"
@@ -179,7 +179,7 @@ def test_p0_1_build_layer_cmd_layer2_with_selected_map():
     assert "localization_mode:=amcl" in cmd
     assert "map_yaml:=/tmp/test_map.yaml" in cmd
     assert "map_graph:=/tmp/test_map" in cmd
-    assert "use_rviz:=true" in cmd
+    assert "use_rviz:=false" in cmd
 
 
 def test_cleanup_ros_processes_non_blocking():

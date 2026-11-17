@@ -522,7 +522,7 @@ def test_scan_overlay_after_pose_and_rviz_launch_configuration(ros_node):
 
     layer2_command = ros_node._build_layer_cmd("layer2")
     assert "real_localization_nav2.launch.py" in layer2_command
-    assert "use_rviz:=true" in layer2_command
+    assert "use_rviz:=false" in layer2_command
 
 
 def _setup_mock_map(widget: InteractiveNavMapWidget, width: int = 200, height: int = 200) -> None:
