@@ -1,19 +1,19 @@
 map_name: labt3.yaml
 locations:
   khoihanh:
-    x: -0.574
-    y: 0.136
-    yaw: 2.034271581436844
+    x: -0.443
+    y: -1.606
+    yaw: 2.159132097080095
     note: Khởi hành / Trạm nước
   diem1:
-    x: -1.734
-    y: 2.457
-    yaw: -2.6301845472329135
+    x: -1.367
+    y: -0.221
+    yaw: 0.31169675548821146
     note: Điểm tuần tra 1
   diem2:
-    x: -18.047
-    y: -6.698
-    yaw: 0.3728258693461726
+    x: 0.579
+    y: 0.406
+    yaw: -2.0407855075422687
     note: Điểm tuần tra 2
 routes:
   patrol_route:
@@ -22,17 +22,17 @@ routes:
   - diem2
 waypoints:
 - name: khoihanh
-  x: -0.574
-  y: 0.136
-  yaw: 2.034271581436844
+  x: -0.443
+  y: -1.606
+  yaw: 2.159132097080095
   note: Khởi hành / Trạm nước
 - name: diem1
-  x: -1.734
-  y: 2.457
-  yaw: -2.6301845472329135
+  x: -1.367
+  y: -0.221
+  yaw: 0.31169675548821146
   note: Điểm tuần tra 1
 - name: diem2
-  x: -18.047
-  y: -6.698
-  yaw: 0.3728258693461726
+  x: 0.579
+  y: 0.406
+  yaw: -2.0407855075422687
   note: Điểm tuần tra 2

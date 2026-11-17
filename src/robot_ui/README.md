@@ -9,8 +9,8 @@ Giao diện PyQt5 gồm **Home, Navigation, Chatbot (9router + RAG) & Voice Assi
 ### Trên Jetson Orin (`~/ros2_ws`):
 ```bash
 cd ~/ros2_ws
-git checkout simulator_interface
-git pull origin simulator_interface
+git checkout simulator_interface_lord
+git pull origin simulator_interface_lord
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select robot_ui
 source install/setup.bash
@@ -28,6 +28,12 @@ LLM_MODEL=your-model-id
 trong `PATH`, hoặc Docker container **đã tạo trước** tên `9router`).
 Kiosk sẽ **tự khởi động 9router nếu chưa chạy** và tự đọc file ENV.
 
+## Chay guiv3
+```
+cd ~/ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
+cd src 
+python gui_v3.py
+```
 ## 2. Khởi chạy Kiosk UI
 
 ### A. Trên Jetson Orin (Màn hình cảm ứng Robot thực tế):
