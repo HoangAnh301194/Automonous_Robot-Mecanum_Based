@@ -1012,6 +1012,11 @@ class KioskWindow(QMainWindow):
         esp, lidar, src = self.ros_node.get_detected_ports()
         if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
             self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+        if hasattr(self.ros_node, "rescan_serial_ports_async"):
+            def _async_update(e, l, s):
+                if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+                    self.system_config_page.ros2_screen.set_detected_ports(e, l, s)
+            self.ros_node.rescan_serial_ports_async(_async_update)
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected

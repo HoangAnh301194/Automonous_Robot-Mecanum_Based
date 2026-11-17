@@ -154,3 +154,26 @@ def test_ros_node_swap_serial_ports():
             assert node._force_swap_ports is False
             assert esp2 == "/dev/ttyUSB0"
             assert lidar2 == "/dev/ttyUSB1"
+
+
+def test_detect_serial_ports_fast_pairing_without_probing():
+    """Kiểm tra tối ưu hóa ghép đôi tức thì khi có 1 thiết bị định danh và 1 cổng duy nhất còn lại."""
+    ports = [
+        "/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_0001-port0",
+        "/dev/ttyUSB1",
+    ]
+    with patch("os.path.exists", return_value=False), patch(
+        "robot_ui.kiosk.serial_resolver.list_serial_ports", return_value=ports
+    ), patch("os.path.realpath", side_effect=lambda p: p), patch(
+        "robot_ui.kiosk.serial_resolver.is_esp32_port"
+    ) as mock_is_esp32, patch(
+        "robot_ui.kiosk.serial_resolver.probe_rplidar"
+    ) as mock_probe_lidar:
+        hb, lidar, method = detect_serial_ports()
+        assert "CP2102" in lidar
+        assert hb == "/dev/ttyUSB1"
+        assert method == "scan"
+        # Tuyệt đối không gọi hàm probe gây delay
+        mock_is_esp32.assert_not_called()
+        mock_probe_lidar.assert_not_called()
+

@@ -628,12 +628,6 @@ class ROS2SystemDetailScreen(QWidget):
 
     def _on_rescan_ports(self) -> None:
         self.rescan_ports_requested.emit()
-        try:
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-            hb, lidar, method = detect_serial_ports()
-            self.set_detected_ports(hb, lidar, method)
-        except Exception:
-            pass
 
     def _on_swap_ports(self) -> None:
         self.swap_ports_requested.emit()

@@ -120,6 +120,7 @@ class KioskRosNode(Node):
         self.signals = signals
         self._pose: dict[str, Any] = {}
         self._last_pose_emit_time: float = 0.0
+        self._cached_serial_ports: tuple[str, str, str] | None = None
         self._direct_go_client = ActionClient(
             self,
             DirectGo,
@@ -1876,10 +1877,7 @@ class KioskRosNode(Node):
         """Sinh chuỗi lệnh khởi chạy cho tầng tiến trình."""
         prefix = self._get_ws_prefix()
         if launch_key == "layer1":
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-
-            force_swap = getattr(self, "_force_swap_ports", False)
-            hb_port, lidar_port, detect_method = detect_serial_ports(force_swap=force_swap)
+            hb_port, lidar_port, detect_method = self.get_detected_ports()
             self.get_logger().info(
                 f"[LAYER 1] Auto-detected serial ports ({detect_method}): Hoverboard={hb_port}, LiDAR={lidar_port}"
             )
@@ -1916,15 +1914,33 @@ class KioskRosNode(Node):
         from robot_ui.kiosk.serial_resolver import detect_serial_ports
 
         esp, lidar, src = detect_serial_ports(force_swap=self._force_swap_ports)
+        self._cached_serial_ports = (esp, lidar, src)
         self.get_logger().info(f"[SERIAL] Đảo cổng thành công: ESP={esp}, LiDAR={lidar} (nguồn: {src})")
         self._record_layer_log("layer1", f"[SERIAL] Đã đảo cổng cấu hình: ESP={esp}, LiDAR={lidar} (nguồn: {src})")
         return esp, lidar, src
 
     def get_detected_ports(self) -> tuple[str, str, str]:
-        """Trả về tuple (esp_port, lidar_port, detect_src)."""
+        """Trả về tuple (esp_port, lidar_port, detect_src) từ cache hoặc quét nhanh."""
+        if getattr(self, "_cached_serial_ports", None) is not None:
+            return self._cached_serial_ports
         from robot_ui.kiosk.serial_resolver import detect_serial_ports
 
-        return detect_serial_ports(force_swap=self._force_swap_ports)
+        self._cached_serial_ports = detect_serial_ports(force_swap=self._force_swap_ports)
+        return self._cached_serial_ports
+
+    def rescan_serial_ports_async(self, callback: Any = None) -> None:
+        """Quét và làm mới thông tin cổng Serial trên luồng nền (non-blocking)."""
+        def _scan_worker():
+            from robot_ui.kiosk.serial_resolver import detect_serial_ports
+            ports = detect_serial_ports(force_swap=self._force_swap_ports)
+            self._cached_serial_ports = ports
+            self.get_logger().info(f"[SERIAL] Đã quét cổng nền xong ({ports[2]}): ESP={ports[0]}, LiDAR={ports[1]}")
+            if callback:
+                try:
+                    callback(*ports)
+                except Exception:
+                    pass
+        threading.Thread(target=_scan_worker, daemon=True).start()
 
     def start_layer(self, layer_key: str) -> None:
         """Khởi động tầng tiến trình tương ứng bảo đảm thread-safe và nguyên tử."""
@@ -2343,12 +2359,7 @@ class KioskRosNode(Node):
             "front_astra_optical_alias",
             "rqt_image_view",
         ]
-        for p in patterns:
-            try:
-                subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=1.0)
-            except Exception:
-                pass
-
+        # 1. Cập nhật state machine ngay lập tức dưới lock (non-blocking)
         with self._lifecycle_lock:
             self._active_launch_tokens.clear()
             self._cancel_starting_layers.clear()
@@ -2371,5 +2382,20 @@ class KioskRosNode(Node):
 
         self.signals.layer_status_changed.emit(stopped_states)
         self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
-        self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
+
+        # 2. Thực thi pkill trên background thread để không bao giờ block Qt UI main loop
+        def _cleanup_worker():
+            regex = "|".join(patterns)
+            try:
+                subprocess.run(["pkill", "-9", "-f", regex], capture_output=True, timeout=2.0)
+            except Exception:
+                for p in patterns:
+                    try:
+                        subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=0.2)
+                    except Exception:
+                        pass
+            self.get_logger().info("[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
+            self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
+
+        threading.Thread(target=_cleanup_worker, daemon=True).start()
 

@@ -180,3 +180,76 @@ def test_p0_1_build_layer_cmd_layer2_with_selected_map():
     assert "map_yaml:=/tmp/test_map.yaml" in cmd
     assert "map_graph:=/tmp/test_map" in cmd
     assert "use_rviz:=true" in cmd
+
+
+def test_cleanup_ros_processes_non_blocking():
+    """Emergency Cleanup không block luồng gọi mà chạy ngầm qua background daemon thread."""
+    import threading
+    node = KioskRosNode.__new__(KioskRosNode)
+    node.signals = KioskSignals()
+    node._lifecycle_lock = threading.RLock()
+    node._active_launch_tokens = {"layer1": "token1"}
+    node._starting_layers = set()
+    node._stopping_layers = set()
+    node._error_layers = set()
+    node._cancel_starting_layers = set()
+    node._loc_session_token = ""
+    from robot_ui.kiosk.ros_node import LocalizationState
+    node._localization_state = LocalizationState.NOT_INITIALIZED
+    node._layer_states = {"layer1": LayerState.RUNNING}
+    node._layer_procs = {"layer1": MagicMock()}
+    node._slam_proc = MagicMock()
+    node._localization_proc = MagicMock()
+    node.get_logger = MagicMock(return_value=MagicMock())
+    node._record_layer_log = MagicMock()
+    node.LAYER_ALIAS_MAP = {"layer1": "layer_hardware", "layer_hardware": "layer1"}
+
+    with patch("threading.Thread") as mock_thread_cls:
+        thread_instance = MagicMock()
+        mock_thread_cls.return_value = thread_instance
+
+        node.cleanup_ros_processes()
+
+        # State machine reset ngay lập tức dưới lock
+        assert node._layer_states["layer1"] == LayerState.STOPPED
+        assert len(node._layer_procs) == 0
+        assert node._slam_proc is None
+        assert node._localization_proc is None
+
+        # pkill được chạy trong daemon worker thread
+        mock_thread_cls.assert_called_once()
+        _, kwargs = mock_thread_cls.call_args
+        assert kwargs.get("daemon") is True
+        thread_instance.start.assert_called_once()
+
+
+def test_get_detected_ports_cached_non_blocking():
+    """get_detected_ports trả về ngay từ cache mà không gọi lại I/O probe."""
+    node = KioskRosNode.__new__(KioskRosNode)
+    node._cached_serial_ports = ("/dev/ttyUSB1", "/dev/ttyUSB0", "cached_scan")
+    node._force_swap_ports = False
+
+    with patch("robot_ui.kiosk.serial_resolver.detect_serial_ports") as mock_detect:
+        hb, lidar, src = node.get_detected_ports()
+        assert hb == "/dev/ttyUSB1"
+        assert lidar == "/dev/ttyUSB0"
+        assert src == "cached_scan"
+        mock_detect.assert_not_called()
+
+
+def test_rescan_serial_ports_async():
+    """rescan_serial_ports_async quét cổng ngầm trên daemon thread và gọi callback."""
+    node = KioskRosNode.__new__(KioskRosNode)
+    node._force_swap_ports = False
+    node.get_logger = MagicMock(return_value=MagicMock())
+
+    with patch("threading.Thread") as mock_thread_cls:
+        thread_instance = MagicMock()
+        mock_thread_cls.return_value = thread_instance
+
+        node.rescan_serial_ports_async()
+        mock_thread_cls.assert_called_once()
+        _, kwargs = mock_thread_cls.call_args
+        assert kwargs.get("daemon") is True
+        thread_instance.start.assert_called_once()
+

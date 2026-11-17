@@ -50,7 +50,7 @@ def is_esp32_port(port: str, baudrate: int = 115200, timeout: float = 0.1) -> bo
         ser = serial.Serial(port, baudrate=baudrate, timeout=timeout)
         ser.reset_input_buffer()
         start_time = time.monotonic()
-        while time.monotonic() - start_time < 0.6:
+        while time.monotonic() - start_time < 0.25:
             raw = ser.read(64)
             if not raw:
                 continue
@@ -137,6 +137,25 @@ def detect_serial_ports(force_swap: bool = False) -> Tuple[str, str, str]:
             lidar_port = p
         if esp_port is None and any(tag in key for tag in ("hoverboard", "esp32", "esp")):
             esp_port = p
+
+    # Nếu 1 thiết bị đã xác định rõ và chỉ còn đúng 1 cổng vật lý khác, ghép đôi tức thì (<0.1ms, không I/O probe)
+    if (lidar_port is not None) ^ (esp_port is not None):
+        known = lidar_port or esp_port
+        try:
+            known_real = os.path.realpath(known)
+        except Exception:
+            known_real = known
+        remaining_candidates = [
+            p for p in ports
+            if p != known and (os.path.realpath(p) != known_real if hasattr(os.path, "realpath") else True)
+        ]
+        if len(remaining_candidates) == 1:
+            if lidar_port is not None:
+                esp_port = remaining_candidates[0]
+                LOG.info(f"[SerialResolver] Ghép đôi tức thì cổng còn lại cho Hoverboard/ESP32: {esp_port}")
+            else:
+                lidar_port = remaining_candidates[0]
+                LOG.info(f"[SerialResolver] Ghép đôi tức thì cổng còn lại cho RPLiDAR: {lidar_port}")
 
     # 3. Thăm dò byte thực tế ESP32/Hoverboard (thụ động như gui_v3)
     if esp_port is None:

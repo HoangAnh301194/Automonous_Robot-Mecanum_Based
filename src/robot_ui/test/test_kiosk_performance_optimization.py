@@ -246,6 +246,10 @@ class MockLifecycleRosNode:
     _build_layer_cmd = KioskRosNode._build_layer_cmd
     _publish_system_telemetry = KioskRosNode._publish_system_telemetry
     cleanup_ros_processes = KioskRosNode.cleanup_ros_processes
+    get_detected_ports = KioskRosNode.get_detected_ports
+    swap_serial_ports = KioskRosNode.swap_serial_ports
+    rescan_serial_ports_async = KioskRosNode.rescan_serial_ports_async
+    _get_clean_env = staticmethod(KioskRosNode._get_clean_env)
 
     def __init__(self):
         import threading
@@ -268,6 +272,7 @@ class MockLifecycleRosNode:
         self._layer_log_buffers = {k: [] for k in ("layer1", "layer2", "layer3", "layer4", "layer5", "all")}
         self._console_active = False
         self._force_swap_ports = False
+        self._cached_serial_ports = None
         self._slam_proc = None
         self._localization_proc = None
         self.signals = MagicMock()
