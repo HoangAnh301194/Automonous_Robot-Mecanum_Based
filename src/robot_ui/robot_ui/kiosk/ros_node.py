@@ -124,6 +124,7 @@ class KioskRosNode(Node):
         self.finish_serving_pub = self.create_publisher(Bool, "/mission/finish_serving", 10)
         self._initial_goal_dist: float | None = None
         self._last_scan_ui_pub = 0.0
+        self._last_odom_pose_pub = 0.0
         self._last_obs_ui_pub = {"front": 0.0, "rear": 0.0}
         self._location_client = self.create_client(
             GetLocationList,
@@ -138,6 +139,7 @@ class KioskRosNode(Node):
         self._remaining_locations = 0
         self._goal_handle: Any = None
         self._have_localized_pose = False
+        self._pose: dict[str, Any] = {}
         self._last_robot_status_at: float | None = None
         self._connected = False
         self._slam_proc: subprocess.Popen | None = None
@@ -149,6 +151,7 @@ class KioskRosNode(Node):
         self._dbg_lock = threading.Lock()
         self._topic_stats: dict[str, dict[str, Any]] = {}
         self._battery_voltages: deque[float] = deque(maxlen=25)
+        self._last_battery_emit_at: float = 0.0
         self._battery_pct = 0.0
         self._battery_smooth_v = 36.0
         self._battery_raw_v = 36.0
@@ -373,20 +376,18 @@ class KioskRosNode(Node):
 
     def _emit_pose(self, pose: Any, frame_id: str, source: str) -> None:
         orientation = pose.orientation
-        self.signals.pose_changed.emit(
-            {
-                "source": source,
-                "frame_id": frame_id,
-                "x": float(pose.position.x),
-                "y": float(pose.position.y),
-                "yaw": quaternion_to_yaw(
-                    orientation.x,
-                    orientation.y,
-                    orientation.z,
-                    orientation.w,
-                ),
-            }
-        )
+        pose_data = {
+            "source": source,
+            "frame_id": frame_id,
+            "x": float(pose.position.x),
+            "y": float(pose.position.y),
+            "yaw": quaternion_to_yaw(
+                orientation.x, orientation.y, orientation.z, orientation.w
+            ),
+        }
+        # Cache the pose used to place LiDAR points in the map frame.
+        self._pose = pose_data
+        self.signals.pose_changed.emit(pose_data)
 
     def _on_amcl_pose(self, msg: PoseWithCovarianceStamped) -> None:
         self._have_localized_pose = True
@@ -397,7 +398,10 @@ class KioskRosNode(Node):
         wz = float(msg.twist.twist.angular.z)
         self._mark_topic_rx("odom", {"vx": vx, "wz": wz})
         if not self._have_localized_pose:
-            self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
+            now = time.monotonic()
+            if now - self._last_odom_pose_pub >= 0.1:
+                self._last_odom_pose_pub = now
+                self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "odom")
 
     def _on_path(self, msg: Path) -> None:
         poses = msg.poses
@@ -716,7 +720,7 @@ class KioskRosNode(Node):
         self._mark_topic_rx("lidar", {"min_dist": min_lidar, "count": len(valid_ranges)})
 
         now = time.monotonic()
-        if now - self._last_scan_ui_pub < 0.1:
+        if now - self._last_scan_ui_pub < 0.2:
             return
         self._last_scan_ui_pub = now
         if not self._pose:
@@ -1104,7 +1108,12 @@ class KioskRosNode(Node):
         if d > 0.0:
             self._closest_person_dist = d
 
-    def _emit_battery_water(self) -> None:
+    def _emit_battery_water(self, force: bool = False) -> None:
+        # Throttle display updates, not incoming battery samples or smoothing.
+        now = time.monotonic()
+        if not force and now - self._last_battery_emit_at < 1.0:
+            return
+        self._last_battery_emit_at = now
         self.signals.robot_status_changed.emit(
             {
                 "battery_percent": self._battery_pct,
