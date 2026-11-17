@@ -205,6 +205,7 @@ class KioskRosNode(Node):
         self._dbg_lock = threading.Lock()
         self._topic_stats: dict[str, dict[str, Any]] = {}
         self._battery_voltages: deque[float] = deque(maxlen=25)
+        self._last_battery_emit_at: float = 0.0
         self._battery_pct = 0.0
         self._battery_smooth_v = 36.0
         self._battery_raw_v = 36.0
@@ -864,7 +865,7 @@ class KioskRosNode(Node):
         self._mark_topic_rx("lidar", {"min_dist": min_lidar, "count": len(valid_ranges)})
 
         now = time.monotonic()
-        if now - self._last_scan_ui_pub < 0.1:
+        if now - self._last_scan_ui_pub < 0.2:
             return
         self._last_scan_ui_pub = now
         if not self._pose:
@@ -880,7 +881,7 @@ class KioskRosNode(Node):
         lx_base, ly_base = 0.175, 0.0
         origin_x = robot_x + cos_yaw * lx_base - sin_yaw * ly_base
         origin_y = robot_y + sin_yaw * lx_base + cos_yaw * ly_base
-        step = max(1, len(ranges) // 360)
+        step = max(1, len(ranges) // 180)
         points: list[tuple[float, float]] = []
         for i in range(0, len(ranges), step):
             r = ranges[i]
@@ -897,7 +898,7 @@ class KioskRosNode(Node):
         self._mark_topic_rx(f"obs_{side}", {"min_dist": min_obs})
 
         now = time.monotonic()
-        if now - self._last_obs_ui_pub.get(side, 0.0) < 0.15:
+        if now - self._last_obs_ui_pub.get(side, 0.0) < 0.25:
             return
         self._last_obs_ui_pub[side] = now
         if not self._pose:
@@ -914,7 +915,7 @@ class KioskRosNode(Node):
         ly_base = 0.0
         origin_x = robot_x + cos_yaw * lx_base - sin_yaw * ly_base
         origin_y = robot_y + sin_yaw * lx_base + cos_yaw * ly_base
-        step = max(1, len(ranges) // 120)
+        step = max(1, len(ranges) // 60)
         points: list[tuple[float, float]] = []
         for i in range(0, len(ranges), step):
             r = ranges[i]
@@ -1717,7 +1718,11 @@ class KioskRosNode(Node):
         if d > 0.0:
             self._closest_person_dist = d
 
-    def _emit_battery_water(self) -> None:
+    def _emit_battery_water(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and (now - self._last_battery_emit_at) < 1.0:
+            return
+        self._last_battery_emit_at = now
         self.signals.robot_status_changed.emit(
             {
                 "battery_percent": self._battery_pct,

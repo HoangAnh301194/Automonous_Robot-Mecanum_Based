@@ -50,30 +50,29 @@ class HostTelemetryWorker(QThread):
     def __init__(self, parent: Optional[QObject] = None) -> None:
         super().__init__(parent)
         self._running = True
+        self._last_cloud_check: float = 0.0
+        self._cached_cloud_ok: bool = False
+        self._cached_cloud_latency: int = 0
 
     def stop(self) -> None:
         self._running = False
-        self.wait(500)
 
     def run(self) -> None:
-        # Warm-up: đợi 2s để kiosk khởi động xong mới bắt đầu thu thập
-        for _ in range(20):
-            if not self._running:
-                return
-            time.sleep(0.1)
         while self._running:
+            p = self.parent()
+            is_hidden = (p is not None and hasattr(p, "isVisible") and p.parent() is not None and not p.isVisible())
             try:
-                snap = self._collect()
+                snap = self._collect(is_hidden=is_hidden)
                 self.telemetry_ready.emit(snap)
             except Exception:
                 pass
-            # Poll 5s/lần thay vì 2s — giảm 60% tải CPU nền
-            for _ in range(50):
+            sleep_ticks = 40 if is_hidden else 20  # 4s khi ẩn, 2s khi hiện
+            for _ in range(sleep_ticks):
                 if not self._running:
                     break
                 time.sleep(0.1)
 
-    def _collect(self) -> dict[str, Any]:
+    def _collect(self, is_hidden: bool = False) -> dict[str, Any]:
         # 1. CPU & RAM
         cpu_pct = float(psutil.cpu_percent(interval=None))
         vmem = psutil.virtual_memory()
@@ -94,31 +93,32 @@ class HostTelemetryWorker(QThread):
         # 3. Temperatures (SoC / CPU / GPU)
         cpu_temp = 0.0
         gpu_temp = 0.0
-        thermal_zones = glob.glob("/sys/class/thermal/thermal_zone*") + glob.glob(
-            "/sys/devices/virtual/thermal/thermal_zone*"
-        )
-        seen_dirs = set()
-        for tz in thermal_zones:
-            rp = os.path.realpath(tz)
-            if rp in seen_dirs:
-                continue
-            seen_dirs.add(rp)
-            try:
-                type_file = os.path.join(tz, "type")
-                temp_file = os.path.join(tz, "temp")
-                if os.path.isfile(type_file) and os.path.isfile(temp_file):
-                    with open(type_file, "r", encoding="utf-8") as f:
-                        z_type = f.read().strip().lower()
-                    with open(temp_file, "r", encoding="utf-8") as f:
-                        z_temp = float(f.read().strip()) / 1000.0
-                    if any(k in z_type for k in ("cpu", "soc", "tcpu", "pkg")):
-                        cpu_temp = max(cpu_temp, z_temp)
-                    elif any(k in z_type for k in ("gpu", "tegra")):
-                        gpu_temp = max(gpu_temp, z_temp)
-                    elif cpu_temp == 0.0 and z_temp > 10.0:
-                        cpu_temp = z_temp
-            except Exception:
-                pass
+        if not is_hidden:
+            thermal_zones = glob.glob("/sys/class/thermal/thermal_zone*") + glob.glob(
+                "/sys/devices/virtual/thermal/thermal_zone*"
+            )
+            seen_dirs = set()
+            for tz in thermal_zones:
+                rp = os.path.realpath(tz)
+                if rp in seen_dirs:
+                    continue
+                seen_dirs.add(rp)
+                try:
+                    type_file = os.path.join(tz, "type")
+                    temp_file = os.path.join(tz, "temp")
+                    if os.path.isfile(type_file) and os.path.isfile(temp_file):
+                        with open(type_file, "r", encoding="utf-8") as f:
+                            z_type = f.read().strip().lower()
+                        with open(temp_file, "r", encoding="utf-8") as f:
+                            z_temp = float(f.read().strip()) / 1000.0
+                        if any(k in z_type for k in ("cpu", "soc", "tcpu", "pkg")):
+                            cpu_temp = max(cpu_temp, z_temp)
+                        elif any(k in z_type for k in ("gpu", "tegra")):
+                            gpu_temp = max(gpu_temp, z_temp)
+                        elif cpu_temp == 0.0 and z_temp > 10.0:
+                            cpu_temp = z_temp
+                except Exception:
+                    pass
 
         # 4. Local IP
         local_ip = "127.0.0.1"
@@ -152,71 +152,89 @@ class HostTelemetryWorker(QThread):
         # 6. AI Services Connectivity (9Router & Voice STT)
         router_ok = False
         router_port = 20128
-        try:
-            sock_r = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_r.settimeout(0.1)
-            res = sock_r.connect_ex(("127.0.0.1", router_port))
-            sock_r.close()
-            router_ok = (res == 0)
-        except Exception:
-            router_ok = False
+        if not is_hidden:
+            try:
+                sock_r = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock_r.settimeout(0.2)
+                res = sock_r.connect_ex(("127.0.0.1", router_port))
+                sock_r.close()
+                router_ok = (res == 0)
+            except Exception:
+                router_ok = False
 
-        stt_ok = False
-        stt_latency_ms = 0
-        try:
-            t0 = time.monotonic()
-            sock_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock_s.settimeout(0.15)
-            sock_s.connect(("api.groq.com", 443))
-            sock_s.close()
-            stt_latency_ms = int((time.monotonic() - t0) * 1000)
-            stt_ok = True
-        except Exception:
+        now = time.monotonic()
+        if not is_hidden and (now - self._last_cloud_check >= 30.0 or self._last_cloud_check == 0.0):
+            self._last_cloud_check = now
             stt_ok = False
+            stt_latency_ms = 0
+            try:
+                t0 = time.monotonic()
+                sock_s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock_s.settimeout(0.5)
+                sock_s.connect(("api.groq.com", 443))
+                sock_s.close()
+                stt_latency_ms = int((time.monotonic() - t0) * 1000)
+                stt_ok = True
+            except Exception:
+                stt_ok = False
+                try:
+                    t0 = time.monotonic()
+                    sock_d = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    sock_d.settimeout(0.5)
+                    sock_d.connect(("8.8.8.8", 53))
+                    sock_d.close()
+                    stt_latency_ms = int((time.monotonic() - t0) * 1000)
+                    stt_ok = True
+                except Exception:
+                    stt_ok = False
+            self._cached_cloud_ok = stt_ok
+            self._cached_cloud_latency = stt_latency_ms
 
-        cloud_ok = stt_ok
-        cloud_latency_ms = stt_latency_ms
+        cloud_ok = self._cached_cloud_ok
+        cloud_latency_ms = self._cached_cloud_latency
 
         # Real Jetson GPU percentage from sysfs
         real_gpu_pct = 0.0
-        for gpu_path in (
-            "/sys/devices/gpu.0/load",
-            "/sys/devices/platform/17000000.gpu/load",
-            "/sys/devices/platform/gpu.0/load",
-        ):
-            if os.path.exists(gpu_path):
-                try:
-                    with open(gpu_path, "r", encoding="utf-8") as gf:
-                        raw_val = float(gf.read().strip())
-                        real_gpu_pct = (raw_val / 10.0) if raw_val > 100.0 else raw_val
-                        break
-                except Exception:
-                    pass
+        if not is_hidden:
+            for gpu_path in (
+                "/sys/devices/gpu.0/load",
+                "/sys/devices/platform/17000000.gpu/load",
+                "/sys/devices/platform/gpu.0/load",
+            ):
+                if os.path.exists(gpu_path):
+                    try:
+                        with open(gpu_path, "r", encoding="utf-8") as gf:
+                            raw_val = float(gf.read().strip())
+                            real_gpu_pct = (raw_val / 10.0) if raw_val > 100.0 else raw_val
+                            break
+                    except Exception:
+                        pass
 
         # 7. Top Processes for Process Monitor
         top_procs = []
-        try:
-            for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status"]):
-                try:
-                    p_info = p.info
-                    name = p_info.get("name") or "unknown"
-                    if any(ignored in name.lower() for ignored in ("kworker", "systemd", "migration")):
-                        continue
-                    mem_info = p_info.get("memory_info")
-                    mem_mb = (mem_info.rss / (1024 * 1024)) if mem_info else 0.0
-                    top_procs.append({
-                        "pid": p_info.get("pid", 0),
-                        "name": name,
-                        "cpu": float(p_info.get("cpu_percent") or 0.0),
-                        "mem_mb": mem_mb,
-                        "status": str(p_info.get("status") or "running"),
-                    })
-                except Exception:
-                    pass
-            top_procs.sort(key=lambda x: (x["cpu"], x["mem_mb"]), reverse=True)
-            top_procs = top_procs[:5]
-        except Exception:
-            pass
+        if not is_hidden:
+            try:
+                for p in psutil.process_iter(["pid", "name", "cpu_percent", "memory_info", "status"]):
+                    try:
+                        p_info = p.info
+                        name = p_info.get("name") or "unknown"
+                        if any(ignored in name.lower() for ignored in ("kworker", "systemd", "migration")):
+                            continue
+                        mem_info = p_info.get("memory_info")
+                        mem_mb = (mem_info.rss / (1024 * 1024)) if mem_info else 0.0
+                        top_procs.append({
+                            "pid": p_info.get("pid", 0),
+                            "name": name,
+                            "cpu": float(p_info.get("cpu_percent") or 0.0),
+                            "mem_mb": mem_mb,
+                            "status": str(p_info.get("status") or "running"),
+                        })
+                    except Exception:
+                        pass
+                top_procs.sort(key=lambda x: (x["cpu"], x["mem_mb"]), reverse=True)
+                top_procs = top_procs[:5]
+            except Exception:
+                pass
 
         return {
             "cpu_pct": cpu_pct,
