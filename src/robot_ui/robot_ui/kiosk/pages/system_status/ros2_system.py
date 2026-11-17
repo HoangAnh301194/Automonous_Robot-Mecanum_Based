@@ -152,6 +152,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.cmb_backend.setFixedHeight(36)
         self.cmb_backend.setStyleSheet(self.cmb_operation_mode.styleSheet())
         self.cmb_backend.setEnabled(False)  # Mặc định tắt nếu đang là SLAM Mapping
+        self.cmb_backend.currentIndexChanged.connect(self._on_backend_changed)
         mode_row.addWidget(self.cmb_backend)
 
         m_layout.addLayout(mode_row)
@@ -200,7 +201,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.btn_start_all.setFixedHeight(44)
         self.btn_start_all.setCursor(Qt.PointingHandCursor)
         self.btn_start_all.setToolTip(
-            "Khởi động Layer 1 (Hardware/Odom), sau 1.2s tự động khởi động tiếp Layer 2 (theo Mode đã chọn) giống gui_v3"
+            "Khởi động Hardware, đợi /odom và /scan (tối đa 30s), rồi bật SLAM hoặc Nav2"
         )
         self.btn_start_all.setStyleSheet("""
             QPushButton {
@@ -248,6 +249,8 @@ class ROS2SystemDetailScreen(QWidget):
 
         m_layout.addLayout(actions_row)
         c_layout.addWidget(card_master)
+        self.refresh_map_list()
+        self._on_mode_changed(0)
 
         # B. QUẢN LÝ TIẾN TRÌNH 5 LAYER ROS 2
         card_layers, l_layout = create_section_card("QUẢN LÝ 5 LAYER KIẾN TRÚC PHẦN MỀM ROBOT", KioskTheme.COLOR_ACCENT)
@@ -501,14 +504,22 @@ class ROS2SystemDetailScreen(QWidget):
         """Bật/tắt các widget phụ thuộc theo chế độ SLAM hoặc Localization."""
         is_loc = index == 1
         self.cmb_backend.setEnabled(is_loc)
-        self.map_row_widget.setVisible(is_loc)
+        self._on_backend_changed(self.cmb_backend.currentIndex())
+
+    def _on_backend_changed(self, index: int) -> None:
+        """AMCL uses YAML maps; SLAM Toolbox localization uses its graph."""
+        is_loc = self.cmb_operation_mode.currentIndex() == 1
+        is_amcl = self.cmb_backend.currentIndex() == 0
+        self.map_row_widget.setVisible(is_loc and is_amcl)
 
     def refresh_map_list(self) -> None:
         """Quét và làm mới danh sách các file bản đồ YAML có sẵn."""
         self.cmb_maps.blockSignals(True)
         self.cmb_maps.clear()
         found_maps: list[str] = []
+        ws = Path(os.environ.get("ROS2_WS", str(Path.home() / "ros2_ws")))
         search_dirs = [
+            ws / "my_map",
             Path.home() / "ros2_ws" / "my_map",
             Path.home() / "ros2_ws" / "src" / "mo_hinh" / "maps",
             Path.home() / "ros2_ws" / "install" / "mo_hinh" / "share" / "mo_hinh" / "maps",
@@ -527,9 +538,10 @@ class ROS2SystemDetailScreen(QWidget):
 
     def set_detected_ports(self, esp_port: str, lidar_port: str, detect_src: str) -> None:
         """Cập nhật thông tin cổng Serial hiển thị lên giao diện."""
-        self.lbl_esp_port.setText(f"ESP32 / Hoverboard: {esp_port}")
-        self.lbl_lidar_port.setText(f"LiDAR SLAMTEC: {lidar_port}")
-        self.lbl_ports_info.setText(f"Cơ chế nhận diện: {detect_src}")
+        self.lbl_ports_info.setText(
+            f"Hoverboard/ESP32: {esp_port} | LiDAR: {lidar_port} | Nhận diện: {detect_src} "
+            "(đổi cổng có hiệu lực sau khi khởi động lại Layer 1)"
+        )
 
     def update_layer_status(self, layers_state: dict[str, Any]) -> None:
         """Cập nhật trạng thái hiển thị cho từng Layer và Header counter."""
@@ -731,44 +743,23 @@ class ROS2SystemDetailScreen(QWidget):
         self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
 
     def _on_start_all_clicked(self) -> None:
-        """Bắt đầu chạy toàn bộ hệ thống theo chuẩn gui_v3."""
-        mode_idx = self.cmb_operation_mode.currentIndex()
-        mode = "slam_mapping" if mode_idx == 0 else "localization"
-        backend = self.cmb_backend.currentText().strip().lower()
-        if "slam" in backend:
-            backend = "slam_toolbox"
-        else:
-            backend = "amcl"
-        selected_map = self.cmb_maps.currentData() or ""
-        self.append_process_log(
-            "SYSTEM",
-            f"Bắt đầu quy trình CHẠY TOÀN BỘ (Start All)... Mode: {self.cmb_operation_mode.currentText()}",
-            flush_now=True,
-        )
-        self.start_all_requested.emit(mode, selected_map, backend)
+        mode = "slam_mapping" if self.cmb_operation_mode.currentIndex() == 0 else "localization"
+        backend = "slam_toolbox" if self.cmb_backend.currentIndex() == 1 else "amcl"
+        selected_map = self.cmb_maps.currentData() if mode == "localization" and backend == "amcl" else ""
+        self.append_layer_log("all", f"[START ALL] Yêu cầu: {mode}, backend={backend}")
+        self.start_all_requested.emit(mode, selected_map or "", backend)
 
     def _on_stop_all_clicked(self) -> None:
-        """Dừng toàn bộ hệ thống."""
-        self.append_process_log("SYSTEM", "Gửi lệnh DỪNG TOÀN BỘ (Stop All)...", flush_now=True)
+        self.append_layer_log("all", "[STOP ALL] Yêu cầu dừng toàn bộ Layer.")
         self.stop_all_requested.emit()
 
     def _on_rescan_ports(self) -> None:
-        try:
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-            hb, lidar, method = detect_serial_ports()
-            res_str = f"Hoverboard: {hb} | LiDAR: {lidar} ({method})"
-        except Exception:
-            res_str = ""
-        ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
-        unique_ports = list(dict.fromkeys(ports))
-        ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện"
-        if res_str:
-            self.lbl_ports_info.setText(f"{res_str} | Tất cả cổng: {ports_str}")
-        else:
-            self.lbl_ports_info.setText(f"Cổng phát hiện: {ports_str}")
+        self.lbl_ports_info.setText("Đang quét Serial... (không quét thiết bị đang chạy)")
+        self.rescan_ports_requested.emit()
 
     def _on_swap_ports(self) -> None:
-        self.lbl_ports_info.setText("Đã yêu cầu đảo cổng cấu hình Serial Hoverboard/ESP32.")
+        self.lbl_ports_info.setText("Đang đổi thứ tự cổng cho lần khởi động Layer 1 tiếp theo...")
+        self.swap_ports_requested.emit()
 
     def _on_emergency_cleanup_clicked(self) -> None:
         dialog = DangerousActionDialog(
