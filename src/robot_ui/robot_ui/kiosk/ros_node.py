@@ -578,22 +578,22 @@ class KioskRosNode(Node):
             return
         is_ready, reason = self.is_navigation_ready()
         if not is_ready:
-            self.get_logger().warn(f"[NAV GATE] Từ chối navigate_to: {reason}")
-            self.signals.command_status_changed.emit("warning", reason)
+            self.get_logger().error(f"[NAV][ERROR] Từ chối navigate_to: {reason}")
+            self.signals.command_status_changed.emit("warning", f"[ERROR] {reason}")
             return
         if not self._direct_go_client.server_is_ready():
-            self.get_logger().warn(f"[DIRECT_GO] Action server /navigation/direct_go chưa sẵn sàng (target='{target}')!")
+            self.get_logger().error(f"[NAV][ERROR] Action server /navigation/direct_go chưa sẵn sàng (target='{target}')!")
             self.signals.command_status_changed.emit(
                 "warning",
-                "Navigation Manager chưa sẵn sàng",
+                "[ERROR] Navigation Manager chưa sẵn sàng (Layer 5)",
             )
             return
 
-        self.get_logger().info(f"[DIRECT_GO] Gửi mục tiêu địa điểm: '{target}'")
+        self.get_logger().info(f"[NAV][INFO] Gửi mục tiêu địa điểm: '{target}'")
         self.signals.navigation_active_changed.emit(True)
         goal = DirectGo.Goal()
         goal.target_location = target
-        self.signals.command_status_changed.emit("progress", f"Đang gửi điểm đến {target}")
+        self.signals.command_status_changed.emit("progress", f"[INFO] Đang gửi điểm đến {target}...")
         future = self._direct_go_client.send_goal_async(
             goal,
             feedback_callback=self._on_navigation_feedback,
@@ -604,18 +604,18 @@ class KioskRosNode(Node):
         try:
             goal_handle = future.result()
         except Exception as error:  # pragma: no cover - depends on ROS transport
-            self.get_logger().error(f"[DIRECT_GO] Lỗi khi gửi mục tiêu: {error}")
-            self.signals.command_status_changed.emit("error", "Không gửi được điểm đến")
+            self.get_logger().error(f"[NAV][ERROR] Lỗi khi gửi mục tiêu: {error}")
+            self.signals.command_status_changed.emit("error", f"[ERROR] Không gửi được điểm đến: {error}")
             self.signals.navigation_active_changed.emit(False)
             return
         if not goal_handle.accepted:
-            self.get_logger().error("[DIRECT_GO] Mục tiêu bị Action server TỪ CHỐI!")
-            self.signals.command_status_changed.emit("error", "Điểm đến bị từ chối")
+            self.get_logger().error("[NAV][ERROR] Mục tiêu bị Action server TỪ CHỐI!")
+            self.signals.command_status_changed.emit("error", "[ERROR] Điểm đến bị từ chối")
             self.signals.navigation_active_changed.emit(False)
             return
-        self.get_logger().info("[DIRECT_GO] Mục tiêu đã được CHẤP THUẬN (ACCEPTED), bắt đầu di chuyển.")
+        self.get_logger().info("[NAV][INFO] Mục tiêu đã được CHẤP THUẬN (ACCEPTED), bắt đầu di chuyển.")
         self._goal_handle = goal_handle
-        self.signals.command_status_changed.emit("progress", "Robot bắt đầu di chuyển")
+        self.signals.command_status_changed.emit("progress", "[INFO] Robot bắt đầu di chuyển")
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self._on_navigation_result)
 
@@ -623,10 +623,10 @@ class KioskRosNode(Node):
         feedback = feedback_message.feedback
         distance = getattr(feedback, "distance_remaining", None)
         if distance is not None:
-            self.get_logger().info(f"[DIRECT_GO Feedback] Khoảng cách còn lại: {float(distance):.2f} m")
+            self.get_logger().info(f"[NAV][DEBUG] Khoảng cách còn lại: {float(distance):.2f} m")
             self.signals.command_status_changed.emit(
                 "progress",
-                f"Còn {float(distance):.1f} m",
+                f"[INFO] Còn {float(distance):.1f} m",
             )
 
     def _on_navigation_result(self, future: Any) -> None:
@@ -636,31 +636,34 @@ class KioskRosNode(Node):
             wrapped_result = future.result()
             result = wrapped_result.result
         except Exception as error:  # pragma: no cover - depends on ROS transport
-            self.get_logger().error(f"[DIRECT_GO] Lỗi khi nhận kết quả hành trình: {error}")
-            self.signals.command_status_changed.emit("error", "Mất kết quả dẫn đường")
+            self.get_logger().error(f"[NAV][ERROR] Lỗi khi nhận kết quả hành trình: {error}")
+            self.signals.command_status_changed.emit("error", f"[ERROR] Mất kết quả dẫn đường: {error}")
             return
         tone = "success" if result.success else "error"
-        self.get_logger().info(f"[DIRECT_GO Result] Kết quả: success={result.success}, msg='{result.finish_message}'")
-        self.signals.command_status_changed.emit(tone, str(result.finish_message))
+        tag = "[INFO]" if result.success else "[ERROR]"
+        self.get_logger().info(f"[NAV][{tag[1:-1]}] Kết quả hành trình: success={result.success}, msg='{result.finish_message}'")
+        self.signals.command_status_changed.emit(tone, f"{tag} {result.finish_message}")
 
     def navigate_to_pose(self, x: float, y: float, yaw: float) -> None:
         is_ready, reason = self.is_navigation_ready()
         if not is_ready:
-            self.get_logger().warn(f"[NAV GATE] Từ chối navigate_to_pose: {reason}")
-            self.signals.command_status_changed.emit("warning", reason)
+            self.get_logger().error(f"[NAV][ERROR] Từ chối navigate_to_pose: {reason}")
+            self.signals.command_status_changed.emit("warning", f"[ERROR] {reason}")
             self.signals.navigation_active_changed.emit(False)
             return
 
         if not self._nav2_client.server_is_ready():
-            self.get_logger().warn(f"[NAV2] Action server /navigate_to_pose chưa sẵn sàng (x={x:.2f}, y={y:.2f})!")
+            self.get_logger().error(
+                f"[NAV][ERROR] Nav2 Action Server /navigate_to_pose chưa online (target: X={x:.2f}, Y={y:.2f})! Hãy kiểm tra Layer 2."
+            )
             self.signals.command_status_changed.emit(
-                "warning",
-                "Nav2 chưa sẵn sàng nhận điểm đến",
+                "error",
+                "[ERROR] Nav2 Action Server chưa online (Hãy kiểm tra Layer 2)",
             )
             self.signals.navigation_active_changed.emit(False)
             return
 
-        self.get_logger().info(f"[NAV2] Gửi mục tiêu tọa độ: X={x:.2f}, Y={y:.2f}, Yaw={yaw:.2f} rad")
+        self.get_logger().info(f"[NAV][INFO] Bắt đầu điều hướng tới tọa độ: X={x:.2f}, Y={y:.2f}, Yaw={yaw:.2f} rad")
         goal = NavigateToPose.Goal()
         goal.pose.header.frame_id = "map"
         goal.pose.header.stamp = self.get_clock().now().to_msg()
@@ -672,7 +675,7 @@ class KioskRosNode(Node):
         self.signals.navigation_active_changed.emit(True)
         self.signals.command_status_changed.emit(
             "progress",
-            f"Đang đi tới X {x:.2f}, Y {y:.2f}",
+            f"[INFO] Đang đi tới X {x:.2f}, Y {y:.2f}",
         )
         future = self._nav2_client.send_goal_async(
             goal,
@@ -684,17 +687,23 @@ class KioskRosNode(Node):
         try:
             goal_handle = future.result()
         except Exception as error:  # pragma: no cover - depends on ROS transport
-            self.get_logger().error(f"[NAV2] Lỗi khi gửi mục tiêu Nav2: {error}")
-            self.signals.command_status_changed.emit("error", "Không gửi được điểm đến")
+            self.get_logger().error(f"[NAV][ERROR] Lỗi khi gửi mục tiêu Nav2: {error}")
+            self.signals.command_status_changed.emit("error", f"[ERROR] Lỗi gửi mục tiêu Nav2: {error}")
             self.signals.navigation_active_changed.emit(False)
             return
         if not goal_handle.accepted:
-            self.get_logger().error("[NAV2] Mục tiêu bị Nav2 server TỪ CHỐI!")
-            self.signals.command_status_changed.emit("error", "Nav2 từ chối điểm đến")
+            self.get_logger().error(
+                "[NAV][ERROR] Mục tiêu bị Nav2 server TỪ CHỐI (Goal Rejected - có thể điểm đến rơi vào vật cản costmap hoặc ngoài bản đồ)!"
+            )
+            self.signals.command_status_changed.emit(
+                "error",
+                "[ERROR] Nav2 từ chối mục tiêu (Rơi vào vật cản hoặc ngoài bản đồ)",
+            )
             self.signals.navigation_active_changed.emit(False)
             return
-        self.get_logger().info("[NAV2] Mục tiêu đã được Nav2 CHẤP THUẬN (ACCEPTED), bắt đầu di chuyển.")
+        self.get_logger().info("[NAV][INFO] Mục tiêu đã được Nav2 CHẤP THUẬN (Goal Accepted). Robot bắt đầu di chuyển.")
         self._goal_handle = goal_handle
+        self.signals.command_status_changed.emit("progress", "[INFO] Nav2 đã chấp nhận. Robot đang di chuyển...")
         result_future = goal_handle.get_result_async()
         result_future.add_done_callback(self._on_nav2_result)
 
@@ -710,8 +719,10 @@ class KioskRosNode(Node):
         if self._initial_goal_dist is None or distance > self._initial_goal_dist:
             self._initial_goal_dist = distance
 
-        self.get_logger().debug(f"[NAV2 Feedback] Khoảng cách còn lại: {distance:.2f} m | Tự cứu: {recov}")
-        self.signals.command_status_changed.emit("progress", f"Còn {distance:.1f} m")
+        self.get_logger().info(
+            f"[NAV][DEBUG] Tiến độ: Còn lại {distance:.2f} m | Thời gian chạy: {nav_sec:.1f} s | Ước tính: {est_sec:.1f} s | Tự cứu: {recov}"
+        )
+        self.signals.command_status_changed.emit("progress", f"[INFO] Còn {distance:.1f} m (Tự cứu: {recov})")
         self.signals.nav_feedback_changed.emit({
             "distance_remaining": distance,
             "initial_distance": self._initial_goal_dist,
@@ -727,27 +738,29 @@ class KioskRosNode(Node):
         try:
             status = int(future.result().status)
         except Exception as error:  # pragma: no cover - depends on ROS transport
-            self.get_logger().error(f"[NAV2] Lỗi nhận kết quả từ Nav2: {error}")
-            self.signals.command_status_changed.emit("error", "Mất kết quả dẫn đường")
+            self.get_logger().error(f"[NAV][ERROR] Lỗi nhận kết quả từ Nav2: {error}")
+            self.signals.command_status_changed.emit("error", f"[ERROR] Mất kết quả dẫn đường: {error}")
             return
         if status == GoalStatus.STATUS_SUCCEEDED:
-            self.get_logger().info("[NAV2 Result] Đã tới điểm đến thành công (STATUS_SUCCEEDED).")
-            self.signals.command_status_changed.emit("success", "Đã tới điểm đến")
+            self.get_logger().info("[NAV][INFO] Đã tới điểm đến thành công (STATUS_SUCCEEDED).")
+            self.signals.command_status_changed.emit("success", "[INFO] Đã tới điểm đến thành công")
         elif status == GoalStatus.STATUS_CANCELED:
-            self.get_logger().warn("[NAV2 Result] Đã hủy hành trình (STATUS_CANCELED).")
-            self.signals.command_status_changed.emit("warning", "Đã dừng hành trình")
+            self.get_logger().warn("[NAV][WARN] Đã hủy hành trình điều hướng (STATUS_CANCELED).")
+            self.signals.command_status_changed.emit("warning", "[WARN] Đã dừng hành trình điều hướng")
         else:
-            self.get_logger().error(f"[NAV2 Result] Dẫn đường kết thúc với mã trạng thái: {status}")
-            self.signals.command_status_changed.emit("error", "Không thể tới điểm đến")
+            self.get_logger().error(
+                f"[NAV][ERROR] Điều hướng kết thúc với mã lỗi: {status} (Có thể robot bị kẹt vật cản hoặc hết thời gian tìm đường)"
+            )
+            self.signals.command_status_changed.emit("error", f"[ERROR] Không thể tới điểm đến (Status code: {status})")
 
     def cancel_navigation(self) -> None:
         """Hủy hành trình điều hướng hiện tại một cách an toàn mà không kích hoạt Emergency Stop."""
-        self.get_logger().info("[NAV] Yêu cầu hủy hành trình điều hướng từ UI.")
+        self.get_logger().info("[NAV][INFO] Nhận yêu cầu hủy hành trình điều hướng từ UI.")
         if self._goal_handle is not None:
             try:
                 self._goal_handle.cancel_goal_async()
             except Exception as exc:
-                self.get_logger().warn(f"[NAV] Lỗi khi gửi cancel goal: {exc}")
+                self.get_logger().warn(f"[NAV][WARN] Lỗi khi gửi cancel goal: {exc}")
             self._goal_handle = None
         # Dừng robot êm bằng cách phát vận tốc 0 vào /cmd_vel
         try:
@@ -756,11 +769,11 @@ class KioskRosNode(Node):
         except Exception:
             pass
         self.signals.navigation_status_changed.emit({"status": "CANCELLED", "state": "CANCELLED"})
-        self.signals.command_status_changed.emit("warning", "Đã dừng hành trình")
+        self.signals.command_status_changed.emit("warning", "[WARN] Đã dừng hành trình điều hướng")
 
     def trigger_emergency_stop(self) -> None:
         """Dừng khẩn cấp toàn diện: phanh tức thì, hủy mọi Goal Nav2/DirectGo và kích hoạt P0 Emergency trong BT."""
-        self.get_logger().warn("🚨 EMERGENCY STOP TRIGGERED FROM UI!")
+        self.get_logger().warn("[EMERGENCY][WARN] EMERGENCY STOP TRIGGERED FROM UI!")
 
         # 1. Phát liên tục vận tốc 0.0 vào /cmd_vel để phanh dừng bánh lập tức
         stop_twist = Twist()
@@ -800,7 +813,7 @@ class KioskRosNode(Node):
             elif self.pause_patrol_client.wait_for_service(timeout_sec=0.2):
                 self.pause_patrol_client.call_async(Trigger.Request())
 
-        self.signals.command_status_changed.emit("error", "🚨 ĐÃ KÍCH HOẠT DỪNG KHẨN CẤP!")
+        self.signals.command_status_changed.emit("error", "[ERROR] DA KICH HOAT DUNG KHAN CAP!")
         self.signals.navigation_active_changed.emit(False)
 
     def reset_emergency_stop(self) -> None:
@@ -809,7 +822,8 @@ class KioskRosNode(Node):
             self.reset_emergency_client.call_async(Trigger.Request())
         elif self.reset_emergency_client.wait_for_service(timeout_sec=0.2):
             self.reset_emergency_client.call_async(Trigger.Request())
-        self.signals.command_status_changed.emit("success", "Đã mở khóa dừng khẩn cấp")
+        self.get_logger().info("[EMERGENCY][INFO] Da mo khoa dung khan cap.")
+        self.signals.command_status_changed.emit("success", "[INFO] Da mo khoa dung khan cap")
 
     def _on_scan(self, msg: LaserScan) -> None:
         self._last_scan_time = time.monotonic()
@@ -883,15 +897,18 @@ class KioskRosNode(Node):
         """Kích hoạt bắt đầu tuần tra từ Mission Controller."""
         is_ready, reason = self.is_navigation_ready()
         if not is_ready:
-            self.get_logger().warn(f"[NAV GATE] Từ chối start_patrol: {reason}")
-            self.signals.command_status_changed.emit("warning", reason)
+            self.get_logger().error(f"[PATROL][ERROR] Từ chối start_patrol: {reason}")
+            self.signals.command_status_changed.emit("warning", f"[ERROR] {reason}")
             return
 
-        self.get_logger().info("[MISSION] Kích hoạt bắt đầu tuần tra (/mission/start_patrol)")
+        self.get_logger().info("[PATROL][INFO] Kích hoạt bắt đầu tuần tra (/mission/start_patrol)")
         if not self.start_patrol_client.service_is_ready():
             if not self.start_patrol_client.wait_for_service(timeout_sec=0.5):
-                self.get_logger().warn("[MISSION] Service /mission/start_patrol chưa sẵn sàng!")
-                self.signals.command_status_changed.emit("warning", "Chưa kết nối Mission Controller")
+                self.get_logger().error("[PATROL][ERROR] Service /mission/start_patrol chưa sẵn sàng (Hãy kiểm tra Layer 5)!")
+                self.signals.command_status_changed.emit(
+                    "warning",
+                    "[ERROR] Chưa kết nối Mission Controller (Layer 5)",
+                )
                 return
         req = Trigger.Request()
         future = self.start_patrol_client.call_async(req)
@@ -901,20 +918,26 @@ class KioskRosNode(Node):
         try:
             res = future.result()
             tone = "success" if res.success else "warning"
-            self.signals.command_status_changed.emit(tone, str(res.message))
+            tag = "[INFO]" if res.success else "[ERROR]"
+            if res.success:
+                self.get_logger().info(f"[PATROL][INFO] Khởi động tuần tra thành công: {res.message}")
+            else:
+                self.get_logger().error(f"[PATROL][ERROR] Khởi động tuần tra thất bại: {res.message}")
+            self.signals.command_status_changed.emit(tone, f"{tag} Tuần tra: {res.message}")
         except Exception as e:
-            self.get_logger().error(f"[MISSION] Lỗi gọi start_patrol: {e}")
+            self.get_logger().error(f"[PATROL][ERROR] Lỗi gọi start_patrol: {e}")
+            self.signals.command_status_changed.emit("error", f"[ERROR] Lỗi gọi tuần tra: {e}")
 
     def pause_patrol(self) -> None:
         """Tạm dừng hành trình tuần tra."""
-        self.get_logger().info("[MISSION] Kích hoạt tạm dừng tuần tra (/mission/pause_patrol)")
+        self.get_logger().info("[PATROL][INFO] Kích hoạt tạm dừng tuần tra (/mission/pause_patrol)")
         if not self.pause_patrol_client.service_is_ready():
             if not self.pause_patrol_client.wait_for_service(timeout_sec=0.5):
-                self.get_logger().warn("[MISSION] Service /mission/pause_patrol chưa sẵn sàng!")
+                self.get_logger().warn("[PATROL][WARN] Service /mission/pause_patrol chưa sẵn sàng!")
                 return
         req = Trigger.Request()
         self.pause_patrol_client.call_async(req)
-        self.signals.command_status_changed.emit("warning", "Đã tạm dừng tuần tra")
+        self.signals.command_status_changed.emit("warning", "[WARN] Đã tạm dừng tuần tra")
 
     def reload_route(self) -> None:
         """Yêu cầu Mission Controller nạp lại cấu hình routes.yaml."""
@@ -1418,8 +1441,8 @@ class KioskRosNode(Node):
     ) -> bool:
         """Phát tọa độ PoseWithCovarianceStamped lên /initialpose để AMCL định vị robot."""
         if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(yaw):
-            self.get_logger().error(f"[INITIAL POSE] Tọa độ không hợp lệ: x={x}, y={y}, yaw={yaw}")
-            self._set_localization_state(LocalizationState.ERROR, "Tọa độ hoặc góc yaw không hợp lệ (NaN/Inf)")
+            self.get_logger().error(f"[ESTIMATE][ERROR] Tọa độ không hợp lệ: x={x}, y={y}, yaw={yaw}")
+            self._set_localization_state(LocalizationState.ERROR, "[ERROR] Tọa độ hoặc góc yaw không hợp lệ (NaN/Inf)")
             return False
 
         if map_name and not getattr(self, "_selected_map_yaml", None):
@@ -1430,14 +1453,14 @@ class KioskRosNode(Node):
             curr_stem = FilePath(self._selected_map_yaml).stem.lower() if self._selected_map_yaml else ""
             if curr_stem and req_stem != curr_stem:
                 reason = f"Bản đồ yêu cầu ({req_stem}) không khớp với bản đồ đang mở ({curr_stem})"
-                self.get_logger().error(f"[INITIAL POSE] {reason}")
-                self._set_localization_state(LocalizationState.ERROR, reason)
+                self.get_logger().error(f"[ESTIMATE][ERROR] {reason}")
+                self._set_localization_state(LocalizationState.ERROR, f"[ERROR] {reason}")
                 return False
 
         ready, reason = self.check_localization_readiness()
         if not ready:
-            self.get_logger().warn(f"[INITIAL POSE] Không thể phát: {reason}")
-            self._set_localization_state(LocalizationState.ERROR, reason)
+            self.get_logger().warn(f"[ESTIMATE][WARN] Không thể phát Initial Pose: {reason}")
+            self._set_localization_state(LocalizationState.ERROR, f"[ERROR] {reason}")
             return False
 
         normalized_yaw = math.atan2(math.sin(float(yaw)), math.cos(float(yaw)))
@@ -1463,14 +1486,14 @@ class KioskRosNode(Node):
         self._loc_session_token = token
         self._last_initial_pose_sent_at = time.monotonic()
 
-        self._set_localization_state(LocalizationState.PUBLISHING, "Đang gửi tọa độ tới AMCL...")
+        self._set_localization_state(LocalizationState.PUBLISHING, "[INFO] Đang gửi tọa độ tới AMCL...")
         self._initial_pose_pub.publish(msg)
         self.get_logger().info(
-            f"[INITIAL POSE] Đã phát /initialpose (token={token}): x={x:.3f}, y={y:.3f}, yaw={normalized_yaw:.3f} rad"
+            f"[ESTIMATE][INFO] Đã phát /initialpose (token={token}): x={x:.3f}, y={y:.3f}, yaw={normalized_yaw:.3f} rad"
         )
         self._set_localization_state(
             LocalizationState.WAITING_FOR_LOCALIZATION,
-            f"Đã phát Initial Pose ({x:.2f}, {y:.2f}), chờ AMCL xác nhận..."
+            f"[INFO] Đã phát Initial Pose ({x:.2f}, {y:.2f}), chờ AMCL xác nhận..."
         )
 
         threading.Thread(
@@ -1503,9 +1526,12 @@ class KioskRosNode(Node):
 
                 if cov_ok:
                     self._loc_session_token = ""
+                    self.get_logger().info(
+                        f"[ESTIMATE][INFO] Định vị thành công (TF map->odom OK, sai số: {self._amcl_covariance_norm:.2f}m)"
+                    )
                     self._set_localization_state(
                         LocalizationState.LOCALIZED,
-                        f"Đã định vị thành công (TF map->odom OK, sai số: {self._amcl_covariance_norm:.2f}m)"
+                        f"[INFO] Đã định vị thành công (TF map->odom OK, sai số: {self._amcl_covariance_norm:.2f}m)"
                     )
                     self.signals.initial_pose_confirmed.emit({
                         "token": token,
@@ -1514,15 +1540,18 @@ class KioskRosNode(Node):
                     })
                     return
                 else:
+                    self.get_logger().warn(
+                        f"[ESTIMATE][WARN] Có liên kết TF nhưng độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
+                    )
                     self._set_localization_state(
                         LocalizationState.TF_AVAILABLE,
-                        f"Có liên kết TF nhưng độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
+                        f"[WARN] Có liên kết TF nhưng độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
                     )
             else:
                 if self._localization_state == LocalizationState.WAITING_FOR_LOCALIZATION:
                     self._set_localization_state(
                         LocalizationState.WAITING_FOR_LOCALIZATION,
-                        "Đang chờ liên kết TF map -> odom từ AMCL..."
+                        "[INFO] Đang chờ liên kết TF map -> odom từ AMCL..."
                     )
 
             if self._localization_state == LocalizationState.LOCALIZED:
@@ -1535,19 +1564,28 @@ class KioskRosNode(Node):
             self._loc_session_token = ""
             if tf_detected:
                 if self._amcl_covariance_norm > MAX_COVARIANCE_NORM:
+                    self.get_logger().error(
+                        f"[ESTIMATE][ERROR] Định vị thất bại: Độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
+                    )
                     self._set_localization_state(
                         LocalizationState.ERROR,
-                        f"Định vị thất bại: Độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
+                        f"[ERROR] Định vị thất bại: Độ phân tán hạt quá lớn ({self._amcl_covariance_norm:.2f}m > {MAX_COVARIANCE_NORM}m)"
                     )
                 else:
+                    self.get_logger().error(
+                        "[ESTIMATE][ERROR] Hết thời gian chờ (10s): Chưa nhận được ước lượng hội tụ từ /amcl_pose"
+                    )
                     self._set_localization_state(
                         LocalizationState.ERROR,
-                        "Hết thời gian chờ (10s): Chưa nhận được ước lượng hội tụ từ /amcl_pose"
+                        "[ERROR] Hết thời gian chờ (10s): Chưa nhận được ước lượng hội tụ từ /amcl_pose"
                     )
             else:
+                self.get_logger().error(
+                    "[ESTIMATE][ERROR] Hết thời gian chờ (10s): AMCL không tạo được liên kết TF map -> odom"
+                )
                 self._set_localization_state(
                     LocalizationState.ERROR,
-                    "Hết thời gian chờ (10s): AMCL không tạo được liên kết TF map -> odom"
+                    "[ERROR] Hết thời gian chờ (10s): AMCL không tạo được liên kết TF map -> odom"
                 )
 
     def stop_subprocesses(self) -> None:

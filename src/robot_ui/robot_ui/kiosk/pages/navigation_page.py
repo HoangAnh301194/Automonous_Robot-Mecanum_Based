@@ -954,7 +954,7 @@ class InteractiveNavMapWidget(QWidget):
                 painter.drawPolygon(poly_head)
 
                 # Nhãn tọa độ HUD
-                b_text = f"📍 2D POSE: ({self._candidate_initial_pose['x']:.2f}, {self._candidate_initial_pose['y']:.2f}, {deg:.0f}°)"
+                b_text = f"[2D POSE] ({self._candidate_initial_pose['x']:.2f}, {self._candidate_initial_pose['y']:.2f}, {deg:.0f}°)"
                 painter.setFont(QFont("Sans Serif", 9, QFont.Bold))
                 tw = painter.fontMetrics().horizontalAdvance(b_text) + 12
                 b_rect = QRectF(cpt.x() - tw / 2.0, cpt.y() - 32, tw, 20)
@@ -973,7 +973,7 @@ class InteractiveNavMapWidget(QWidget):
         # Zoom & Status HUD in bottom-left corner
         hud_text = f"Zoom: {self._zoom_factor:.1f}x"
         if self._initial_pose_mode:
-            hud_text += " | 📍 2D Pose (Chạm & kéo)"
+            hud_text += " | [2D POSE] (Chạm & kéo)"
         elif self._pick_mode:
             hud_text += f" | Đang chấm điểm ({len(self._batch_waypoints)} điểm)"
         painter.setPen(Qt.NoPen)
@@ -1088,7 +1088,7 @@ class InitialPoseDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         # Header
-        lbl_title = QLabel("📍 THIẾT LẬP VỊ TRÍ BAN ĐẦU (INITIAL POSE)")
+        lbl_title = QLabel("THIẾT LẬP VỊ TRÍ BAN ĐẦU (INITIAL POSE)")
         lbl_title.setStyleSheet("font-size: 16px; font-weight: 800; color: #f8fafc;")
         layout.addWidget(lbl_title)
 
@@ -2259,10 +2259,14 @@ class NavigationPage(QWidget):
         self._set_button_strength(self.start_button, True)
 
     def _show_warning(self, message: str) -> None:
-        self.status_label.setText(f"Cảnh báo: {message}")
+        self.set_command_status("warning", f"[WARN] {message}")
 
     def _start_single_navigation(self) -> None:
         if self._localization_state != "LOCALIZED":
+            self.set_command_status(
+                "error",
+                "[ERROR] Robot chưa hoàn tất định vị ban đầu (chưa đạt LOCALIZED). Vui lòng bấm 2D POSE ESTIMATE."
+            )
             QMessageBox.warning(
                 self,
                 "Chưa Định Vị Robot",
@@ -2272,19 +2276,28 @@ class NavigationPage(QWidget):
             )
             return
         if self._goal is None:
-            self._show_warning("Hãy chọn điểm đến trên bản đồ")
+            self._show_warning("Hãy chọn điểm đến trên bản đồ trước khi bắt đầu điều hướng")
             return
         self.set_navigation_active(True)
+        self.set_command_status(
+            "progress",
+            f"[INFO] Bắt đầu điều hướng tới tọa độ: X={self._goal[0]:.2f}, Y={self._goal[1]:.2f}..."
+        )
         self.start_requested.emit(*self._goal)
 
     def _stop_navigation(self) -> None:
         self.set_navigation_active(False)
+        self.set_command_status("warning", "[WARN] Đã yêu cầu dừng hành trình điều hướng.")
         self.cancel_requested.emit()
         self.nav_progress_bar.setValue(0)
         self.lbl_dist_remain.setText("Cự ly còn lại: -- m")
 
     def _start_patrol(self) -> None:
         if self._localization_state != "LOCALIZED":
+            self.set_command_status(
+                "error",
+                "[ERROR] Robot chưa hoàn tất định vị ban đầu. Vui lòng bấm 2D POSE ESTIMATE trước khi tuần tra."
+            )
             QMessageBox.warning(
                 self,
                 "Chưa Định Vị Robot",
@@ -2293,6 +2306,7 @@ class NavigationPage(QWidget):
                 "Vui lòng bấm '2D POSE ESTIMATE' để xác nhận vị trí xuất phát trước khi bắt đầu tuần tra!",
             )
             return
+        self.set_command_status("progress", "[INFO] Đang gửi yêu cầu bắt đầu tuần tra...")
         self.start_patrol_requested.emit()
 
     def _pause_patrol(self) -> None:
@@ -2304,7 +2318,7 @@ class NavigationPage(QWidget):
             self.map_widget.set_initial_pose_mode(False)
             self.btn_initial_pose.setText("2D POSE ESTIMATE")
             self.btn_initial_pose.setStyleSheet("")
-            self.status_label.setText("Đã hủy chế độ 2D Pose Estimate.")
+            self.set_command_status("warning", "[INFO] Đã hủy chế độ 2D Pose Estimate.")
             return
 
         self.map_widget.set_initial_pose_mode(True)
@@ -2312,7 +2326,7 @@ class NavigationPage(QWidget):
         self.btn_initial_pose.setStyleSheet(
             "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
         )
-        self.status_label.setText("📍 Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
+        self.set_command_status("progress", "[INFO] Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
 
     def _on_initial_pose_button_clicked(self) -> None:
         """Alias tương thích luồng cũ."""
@@ -2325,7 +2339,7 @@ class NavigationPage(QWidget):
         self.btn_initial_pose.setStyleSheet(
             "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
         )
-        self.status_label.setText("📍 Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
+        self.set_command_status("progress", "[INFO] Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
 
     def _on_map_initial_pose_picked(self, x: float, y: float, yaw: float) -> None:
         """Xử lý khi người dùng hoàn tất thao tác Press -> Drag -> Release trên bản đồ."""
@@ -2338,8 +2352,9 @@ class NavigationPage(QWidget):
     def _send_initial_pose(self, x: float, y: float, yaw: float, source: str) -> None:
         map_name = self._current_map_path.name if self._current_map_path else ""
         deg = math.degrees(yaw)
-        self.status_label.setText(
-            f"📍 Đang gửi 2D Pose: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)..."
+        self.set_command_status(
+            "progress",
+            f"[INFO] Đang gửi 2D Pose: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)..."
         )
         self.initial_pose_requested.emit({
             "x": float(x),
@@ -2533,6 +2548,14 @@ class NavigationPage(QWidget):
             self.set_navigation_active(False)
 
     def set_command_status(self, tone: str, message: str) -> None:
+        color_map = {
+            "success": "#10b981",  # Green
+            "error": "#ef4444",    # Red
+            "warning": "#f59e0b",  # Amber/Yellow
+            "progress": "#38bdf8", # Sky blue
+        }
+        color = color_map.get(tone, "#94a3b8")
+        self.status_label.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 13px;")
         self.status_label.setText(message)
         if tone in {"success", "error", "warning"}:
             self.set_navigation_active(False)
