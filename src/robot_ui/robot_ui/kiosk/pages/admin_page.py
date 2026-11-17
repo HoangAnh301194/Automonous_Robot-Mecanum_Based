@@ -79,14 +79,14 @@ class AdminPinDialog(QDialog):
         cancel.clicked.connect(self.reject)
         root.addWidget(cancel)
         self.setStyleSheet("""
-            QDialog#adminPinDialog { background: #ffffff; color: white; }
+            QDialog#adminPinDialog { background: #ffffff; color: #203247; }
             QLabel { color: #263747; font-size: 14px; }
             QLabel#adminPinTitle { color: #b32632; font-size: 20px; font-weight: 700; }
             QLabel#adminPinError { color: #ff8585; }
-            QLineEdit { color: white; background: #f1f5f9; border-radius: 8px; font-size: 22px; }
-            QPushButton { color: white; background: #e9eef6; border: none;
+            QLineEdit { color: #203247; background: #f1f5f9; border-radius: 8px; font-size: 22px; }
+            QPushButton { color: #203247; background: #e9eef6; border: none;
                           border-radius: 10px; font-size: 18px; font-weight: 700; }
-            QPushButton#adminPinConfirm { color: #161b23; background: #f6c16a; font-size: 18px; }
+            QPushButton#adminPinConfirm { color: #ffffff; background: #b32632; font-size: 18px; }
         """)
 
     def _check(self):
@@ -374,7 +374,7 @@ class AdminPage(QWidget):
             QLabel#adminBadgeText { color: #263747; font-size: 14px; font-weight: 700; }
             QLabel#adminStatusBanner {
                 background: #ffffff;
-                color: #a4b3c4;
+                color: #536477;
                 border: 1px solid #d6e1eb;
                 border-radius: 9px;
                 padding: 6px 14px;
