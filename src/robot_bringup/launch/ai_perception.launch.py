@@ -112,6 +112,7 @@ def generate_launch_description():
             'backend': pose_backend,
             'device': pose_device,
             'max_people': pose_max_people,
+            'min_process_interval': '0.08',
         }.items(),
     )
 
@@ -149,7 +150,7 @@ def generate_launch_description():
         DeclareLaunchArgument('yolo_device', default_value='cuda:0'),
         DeclareLaunchArgument('pose_backend', default_value='rtmpose'),
         DeclareLaunchArgument('pose_device', default_value='cpu'),
-        DeclareLaunchArgument('pose_max_people', default_value='5'),
+        DeclareLaunchArgument('pose_max_people', default_value='1'),
         DeclareLaunchArgument('base_frame', default_value='base_footprint'),
         DeclareLaunchArgument('map_frame', default_value='map'),
 

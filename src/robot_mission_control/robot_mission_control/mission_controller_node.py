@@ -61,9 +61,10 @@ class MissionControllerNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # 3. Action Client & Cancel Client tới Nav2 và DirectGo + khóa /cmd_vel
+        # 3. Action Client & Cancel Client tới Nav2, NavigateThroughPoses và DirectGo + khóa /cmd_vel
         self.nav2_client = ActionClient(self, NavigateToPose, 'navigate_to_pose')
         self.cancel_nav2_client = self.create_client(CancelGoal, '/navigate_to_pose/_action/cancel_goal')
+        self.cancel_through_client = self.create_client(CancelGoal, '/navigate_through_poses/_action/cancel_goal')
         self.cancel_direct_go_client = self.create_client(CancelGoal, '/navigation/direct_go/_action/cancel_goal')
 
         # 4. Publishers
@@ -137,7 +138,7 @@ class MissionControllerNode(Node):
         self.pub_cmd_vel.publish(Twist())
 
     def stop_robot_motion(self, cancel_nav2: bool = True):
-        """Immediately zero /cmd_vel and cancel any active Nav2 NavigateToPose or DirectGo goal."""
+        """Immediately zero /cmd_vel and cancel any active Nav2 NavigateToPose, NavigateThroughPoses, or DirectGo goal."""
         self.publish_zero_vel()
         if cancel_nav2:
             if self.cancel_nav2_client.service_is_ready():
@@ -145,6 +146,11 @@ class MissionControllerNode(Node):
                     self.cancel_nav2_client.call_async(CancelGoal.Request())
                 except Exception as exc:
                     self.get_logger().warn(f"Lỗi gọi cancel Nav2: {exc}")
+            if self.cancel_through_client.service_is_ready():
+                try:
+                    self.cancel_through_client.call_async(CancelGoal.Request())
+                except Exception as exc:
+                    self.get_logger().warn(f"Lỗi gọi cancel Nav2 Through: {exc}")
             if self.cancel_direct_go_client.service_is_ready():
                 try:
                     self.cancel_direct_go_client.call_async(CancelGoal.Request())

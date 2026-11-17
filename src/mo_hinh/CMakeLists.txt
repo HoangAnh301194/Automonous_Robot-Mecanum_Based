@@ -48,6 +48,12 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Install audio sound files
+install(
+  DIRECTORY audio
+  DESTINATION share/${PROJECT_NAME}
+)
+
 # Install scripts
 install(
   PROGRAMS

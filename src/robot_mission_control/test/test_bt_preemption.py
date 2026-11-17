@@ -207,7 +207,7 @@ def test_snapshot_one_shot_approach_freezes_goal():
     from robot_mission_control.bt_nodes import ActionApproachWavingPerson, Blackboard, NodeStatus
 
     action = ActionApproachWavingPerson("TestSnapshotApproach", node=None)
-    assert action.standoff_distance == 1.20
+    assert action.standoff_distance == 0.70
     assert action.enable_dynamic_replan is False
 
     sent_goals = []
@@ -297,7 +297,7 @@ def test_resolve_target_pose_uses_depth_stamp_with_fallback():
 
     assert pose_map is not None
     assert dist == pytest.approx(3.20)
-    assert pose_map.pose.position.x == pytest.approx(2.00)  # 3.20 - 1.20 standoff
+    assert pose_map.pose.position.x == pytest.approx(2.50)  # 3.20 - 0.70 standoff
     assert recorded_times == [98 * 10**9 + 500000000]
 
     # Now test fallback when stamped TF lookup fails
@@ -307,7 +307,7 @@ def test_resolve_target_pose_uses_depth_stamp_with_fallback():
 
     assert pose_map_fb is not None
     assert dist_fb == pytest.approx(3.20)
-    assert pose_map_fb.pose.position.x == pytest.approx(2.00)
+    assert pose_map_fb.pose.position.x == pytest.approx(2.50)
     assert recorded_times == [98 * 10**9 + 500000000, 0]
 
 
@@ -342,6 +342,62 @@ def test_serve_customer_resumes_interrupted_patrol_target():
     assert sent_targets == ["B", "B"]
 
 
+def test_action_patrol_sends_comma_separated_remaining_points():
+    """Verify ActionPatrol formats remaining waypoints into a comma-separated string for NavigateThroughPoses."""
+    from types import SimpleNamespace
+    from robot_mission_control.bt_nodes import ActionPatrol, Blackboard, NodeStatus
+
+    patrol = ActionPatrol("TestPatrolChain", node=None)
+    patrol._route_loaded = True
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2", "diem3"]
+    patrol.current_idx = 0
+
+    sent_targets = []
+    fake_client = SimpleNamespace(
+        server_is_ready=lambda: True,
+        send_goal_async=lambda goal: SimpleNamespace(
+            add_done_callback=lambda cb: sent_targets.append(goal.target_location)
+        )
+    )
+    patrol.action_client = fake_client
+
+    # 1. Starting at index 0 should dispatch full chain
+    patrol.send_next_goal()
+    assert len(sent_targets) == 1
+    assert sent_targets[0] == "khoihanh,diem1,diem2,diem3"
+
+    # 2. When current_idx is updated to 2, sending next goal dispatches remaining slice
+    patrol.is_waiting_for_result = False
+    patrol.current_idx = 2
+    patrol.send_next_goal()
+    assert len(sent_targets) == 2
+    assert sent_targets[1] == "diem2,diem3"
+
+
+def test_action_patrol_navigation_status_updates_current_idx():
+    """Verify ActionPatrol listens to NavigationStatus and dynamically updates current_idx."""
+    from robot_interfaces.msg import NavigationStatus
+    from robot_mission_control.bt_nodes import ActionPatrol
+
+    patrol = ActionPatrol("TestPatrolStatus", node=None)
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2", "diem3"]
+    patrol.current_idx = 0
+
+    status_msg = NavigationStatus()
+    status_msg.current_goal_name = "diem2"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 2
+
+    status_msg.current_goal_name = "diem3"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 3
+
+    # Unknown waypoint should not corrupt current_idx
+    status_msg.current_goal_name = "unrelated_point"
+    patrol.navigation_status_callback(status_msg)
+    assert patrol.current_idx == 3
+
+
 def test_emergency_stop_blackboard_triggers_p0_preemption():
     """Verify setting EMERGENCY_STOP on blackboard triggers IsEmergency immediately."""
     cond = IsEmergency("TestEmergency")
@@ -357,4 +413,68 @@ def test_emergency_stop_blackboard_triggers_p0_preemption():
     # HMI Emergency stop triggered
     bb.set("EMERGENCY_STOP", True)
     assert cond.tick(bb) == NodeStatus.SUCCESS
+
+
+def test_action_patrol_loop_closure_dispatches_start_point_first():
+    """Verify that when the full route is completed, ActionPatrol navigates back to start point to close the loop."""
+    from types import SimpleNamespace
+    from action_msgs.msg import GoalStatus
+    from robot_mission_control.bt_nodes import ActionPatrol
+
+    patrol = ActionPatrol("TestPatrolLoop", node=None)
+    patrol._route_loaded = True
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2"]
+    patrol.current_idx = 0
+
+    sent_targets = []
+    fake_client = SimpleNamespace(
+        server_is_ready=lambda: True,
+        send_goal_async=lambda goal: SimpleNamespace(
+            add_done_callback=lambda cb: sent_targets.append(goal.target_location)
+        )
+    )
+    patrol.action_client = fake_client
+
+    # 1. First dispatch: whole chain is dispatched
+    patrol.send_next_goal()
+    assert len(sent_targets) == 1
+    assert sent_targets[0] == "khoihanh,diem1,diem2"
+
+    # 2. Complete full route (reach diem2)
+    fake_future = SimpleNamespace(
+        result=lambda: SimpleNamespace(
+            result=SimpleNamespace(success=True),
+            status=GoalStatus.STATUS_SUCCEEDED,
+        )
+    )
+    patrol.result_callback(fake_future)
+    assert patrol._returning_to_start is True
+    assert patrol.current_idx == 2
+
+    # Simulate 2s wait expiry and current_idx wrap to 0
+    patrol.is_waiting_for_result = False
+    patrol.is_waiting_at_waypoint = False
+    patrol.current_idx = 0
+
+    # 3. Next dispatch must be ONLY the start point 'khoihanh' to close loop
+    patrol.send_next_goal()
+    assert len(sent_targets) == 2
+    assert sent_targets[1] == "khoihanh"
+    assert patrol._returning_goal is True
+
+    # 4. Robot arrives at start point 'khoihanh'
+    patrol.result_callback(fake_future)
+    assert patrol._returning_goal is False
+    assert patrol.current_idx == 0
+
+    # Simulate 2s wait expiry and advance to index 1
+    patrol.is_waiting_for_result = False
+    patrol.is_waiting_at_waypoint = False
+    patrol.current_idx = 1
+
+    # 5. Next dispatch smoothly continues through remainder of route
+    patrol.send_next_goal()
+    assert len(sent_targets) == 3
+    assert sent_targets[2] == "diem1,diem2"
+
 

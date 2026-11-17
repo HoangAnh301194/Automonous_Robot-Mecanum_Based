@@ -9,7 +9,7 @@ roi_x: 3
 roi_y: 4
 roi_width: 156
 roi_height: 115
-threshold: 52
+threshold: 100
 penalty_k: 25
 min_area: 38
 median_filter: 3
