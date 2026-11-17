@@ -37,7 +37,7 @@ def make_dataset_zip(collector, destination, source_dir=SOURCE_DEFAULT):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--collector", required=True)
+    parser.add_argument("--collector", required=True, help="Tên/mã người thu data (không dấu, không khoảng trắng), VD: c01 hoặc hoanganh")
     parser.add_argument("--source", type=Path, default=SOURCE_DEFAULT)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
