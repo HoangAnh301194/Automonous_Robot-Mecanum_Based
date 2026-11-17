@@ -876,13 +876,13 @@ class NavigationPage(QWidget):
             }
             QPushButton#navModeTab[active="true"] {
                 background: #2563eb;
-                color: #1d2938;
+                color: #ffffff;
                 border-color: #60a5fa;
             }
             /* Action Buttons */
             QPushButton#navStartBtn {
                 background: #16a34a;
-                color: #1d2938;
+                color: #ffffff;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: 800;
@@ -893,7 +893,7 @@ class NavigationPage(QWidget):
             }
             QPushButton#navStopBtn {
                 background: #dc2626;
-                color: #1d2938;
+                color: #ffffff;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: 800;
@@ -904,7 +904,7 @@ class NavigationPage(QWidget):
             }
             QPushButton#navPauseBtn {
                 background: #d97706;
-                color: #1d2938;
+                color: #ffffff;
                 border-radius: 8px;
                 font-size: 13px;
                 font-weight: 800;
@@ -928,7 +928,7 @@ class NavigationPage(QWidget):
             }
             QPushButton#navToolBtn[toggled_on="true"] {
                 background: #2563eb;
-                color: #1d2938;
+                color: #ffffff;
                 border-color: #60a5fa;
             }
             QFrame#navDashboardCard {
@@ -947,7 +947,7 @@ class NavigationPage(QWidget):
             }
             QTableWidget::item:selected {
                 background: #2563eb;
-                color: #1d2938;
+                color: #ffffff;
             }
             QHeaderView::section {
                 background: #f3f6fa;
