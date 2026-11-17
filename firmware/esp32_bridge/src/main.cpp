@@ -28,22 +28,6 @@
 
 #include <Arduino.h>
 
-// Kettle support is opt-in: the production esp32dev build keeps legacy motor
-// passthrough unchanged until the new ESP32 parser has been bench-tested.
-#ifndef ENABLE_KETTLE_BRIDGE
-#define ENABLE_KETTLE_BRIDGE 0
-#endif
-
-#if ENABLE_KETTLE_BRIDGE
-#include <atomic>
-#include <freertos/FreeRTOS.h>
-#include <freertos/queue.h>
-#include <freertos/task.h>
-#include <IRremoteESP8266.h>
-#include <IRsend.h>
-#include "command_parser.hpp"
-#endif
-
 // Định nghĩa chân UART và an toàn
 #define PC_BAUD            115200     // Khớp với ROS 2 Humble driver
 #define HOVER_BAUD         115200     // Khớp với Hoverboard firmware
@@ -74,61 +58,6 @@ static SerialCommand rcCommand;
 
 static uint32_t lastPcPacketTime = 0;
 static bool emergencyStopped = false;
-
-#if ENABLE_KETTLE_BRIDGE
-#define KETTLE_IR_TX_PIN           18
-#define KETTLE_IR_BITS             12
-#define KETTLE_IR_REPEAT           0 // One complete transmission; avoid duplicate POWER toggles
-#define KETTLE_STATIONARY_MS     1500
-#define KETTLE_COOLDOWN_MS       2000
-
-static robot_bridge::CommandParser pcPacketParser;
-static robot_bridge::ParsedCommand pcPacket;
-static IRsend kettleIr(KETTLE_IR_TX_PIN);
-static QueueHandle_t kettleQueue = nullptr;
-static std::atomic<bool> kettleInhibited{true};
-static std::atomic<int16_t> latestMotorSteer{0};
-static std::atomic<int16_t> latestMotorSpeed{0};
-static std::atomic<uint32_t> latestValidMotorMs{0};
-static std::atomic<uint32_t> latestNonzeroMotorMs{0};
-static uint32_t latestAcceptedKettleMs = 0;
-
-static uint16_t kettleCodeForId(uint16_t cmdId) {
-  switch (cmdId) {
-    case 1: return 0xD81; // POWER
-    case 2: return 0xD82; // BOIL
-    case 3: return 0xDC3; // PUMP
-    case 4: return 0xD84; // MODE
-    default: return 0;
-  }
-}
-
-// This is a COMMAND-LEVEL interlock, not a physical wheel-speed or kettle
-// state measurement. The host must also verify actual stationary odometry,
-// kettle presence, water level and safe operating conditions.
-static bool kettleCommandAllowed() {
-  const uint32_t now = millis();
-  return !kettleInhibited.load() &&
-         digitalRead(ESTOP_PIN) == HIGH &&
-         latestMotorSteer.load() == 0 &&
-         latestMotorSpeed.load() == 0 &&
-         (uint32_t)(now - latestValidMotorMs.load()) <= SAFETY_TIMEOUT_MS &&
-         (uint32_t)(now - latestNonzeroMotorMs.load()) >= KETTLE_STATIONARY_MS;
-}
-
-static void kettleIrTask(void * /*args*/) {
-  uint16_t code = 0;
-  for (;;) {
-    if (kettleQueue != nullptr &&
-        xQueueReceive(kettleQueue, &code, portMAX_DELAY) == pdTRUE &&
-        kettleCommandAllowed()) {
-      // Runs in a separate low-priority task pinned to the other CPU core.
-      // IRsend is blocking; do not call it from the motor/serial loop.
-      kettleIr.sendSymphony(code, KETTLE_IR_BITS, KETTLE_IR_REPEAT);
-    }
-  }
-}
-#endif
 
 // Biến lưu độ rộng xung PWM từ RC (đơn vị: micro-giây)
 volatile uint32_t rc_ch1_start = 0;
@@ -192,20 +121,6 @@ void setup() {
   Serial2.setRxBufferSize(BUFFER_SIZE);
 
   lastPcPacketTime = millis();
-
-#if ENABLE_KETTLE_BRIDGE
-  latestValidMotorMs.store(0);
-  latestNonzeroMotorMs.store(millis());
-  kettleQueue = xQueueCreate(1, sizeof(uint16_t));
-  if (kettleQueue != nullptr) {
-    kettleIr.begin();
-    if (xTaskCreatePinnedToCore(kettleIrTask, "KettleIR", 4096, nullptr, 1,
-                                nullptr, 0) != pdPASS) {
-      vQueueDelete(kettleQueue);
-      kettleQueue = nullptr;
-    }
-  }
-#endif
 }
 
 void loop() {
@@ -248,11 +163,6 @@ void loop() {
     }
     // Xóa bộ đệm PC để không tích lũy lệnh
     while (Serial.available()) Serial.read();
-#if ENABLE_KETTLE_BRIDGE
-    kettleInhibited.store(true);
-    pcPacketParser.reset();
-    if (kettleQueue != nullptr) xQueueReset(kettleQueue);
-#endif
   }
   else if (rcActive) {
     // Người điều khiển đang gạt cần RC -> Ưu tiên tuyệt đối lái bằng tay!
@@ -269,56 +179,13 @@ void loop() {
     emergencyStopped = false;
 
     // Xả bỏ lệnh từ PC để tránh giật khi nhả cần RC
-#if ENABLE_KETTLE_BRIDGE
-    kettleInhibited.store(true);
-    pcPacketParser.reset();
-    if (kettleQueue != nullptr) xQueueReset(kettleQueue);
-    while (Serial.available()) Serial.read();
-#else
     while (Serial.available()) {
       Serial.read();
       lastPcPacketTime = millis();
     }
-#endif
   }
   else {
     // Tay RC ở giữa hoặc tắt -> Chạy chế độ Tự hành từ PC (ROS 2)
-#if ENABLE_KETTLE_BRIDGE
-    kettleInhibited.store(false);
-    // USB serial is a BYTE STREAM, not a packet stream. Forward only validated
-    // 0xABCD motor frames; consume 0xABCE kettle frames locally.
-    int budget = 256; // Bound the work done each loop to protect watchdog/RC.
-    while (budget-- > 0 && Serial.available() > 0) {
-      const int incoming = Serial.read();
-      if (incoming < 0) break;
-      if (!pcPacketParser.feed(static_cast<uint8_t>(incoming), pcPacket)) continue;
-
-      const uint32_t now = millis();
-      if (pcPacket.start == robot_bridge::kMotorFrame) {
-        const int16_t steer = static_cast<int16_t>(pcPacket.word1);
-        const int16_t speed = static_cast<int16_t>(pcPacket.word2);
-        Serial2.write(pcPacket.bytes, robot_bridge::kFrameBytes);
-        lastPcPacketTime = now; // ONLY valid motor frames reset the watchdog.
-        latestValidMotorMs.store(now);
-        latestMotorSteer.store(steer);
-        latestMotorSpeed.store(speed);
-        if (steer != 0 || speed != 0) latestNonzeroMotorMs.store(now);
-        emergencyStopped = false;
-      } else if (pcPacket.start == robot_bridge::kKettleFrame) {
-        // param is reserved; reject any nonzero value rather than guessing.
-        const uint16_t code = kettleCodeForId(pcPacket.word1);
-        if (code != 0 && pcPacket.word2 == 0 &&
-            kettleQueue != nullptr && kettleCommandAllowed() &&
-            (uint32_t)(now - latestAcceptedKettleMs) >= KETTLE_COOLDOWN_MS) {
-          if (xQueueSend(kettleQueue, &code, 0) == pdPASS) {
-            latestAcceptedKettleMs = now;
-          }
-        }
-        // Intentionally no ACK yet: unsolicited bytes would contaminate the
-        // existing ROS hoverboard feedback parser. ACK requires driver support.
-      }
-    }
-#else
     bytesRead = Serial.available();
     if (bytesRead > 0) {
       if (bytesRead > sizeof(buffer)) bytesRead = sizeof(buffer);
@@ -329,7 +196,6 @@ void loop() {
       Serial2.write(buffer, bytesRead);
       emergencyStopped = false;
     }
-#endif
 
     // Safety Watchdog PC: mất kết nối PC quá 200ms -> ngắt động cơ
     if (millis() - lastPcPacketTime > SAFETY_TIMEOUT_MS) {
