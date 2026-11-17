@@ -739,7 +739,11 @@ class KioskWindow(QMainWindow):
 
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
+        # Temporary light-theme preview; set KIOSK_MOCHI_STATIC=0 to restore MP4 emotions.
+        if os.getenv("KIOSK_MOCHI_STATIC", "1").strip().lower() in {"0", "false", "no"}:
+            self.idle_page.video.set_video(self.emotions.path("idle"))
+        else:
+            self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)

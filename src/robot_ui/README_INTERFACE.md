@@ -68,6 +68,7 @@ The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 | Setting | Default | Purpose |
 |---|---|---|
 | `KIOSK_ADMIN_PIN` | `1` | **Prototype only.** PIN for opening Admin |
+| `KIOSK_MOCHI_STATIC` | `1` | Use the PTIT Mochi static idle image; set `0` to restore MP4 emotions |
 | `KIOSK_IDLE_TIMEOUT_SECONDS` | `120` | Inactivity on Home / Chat before returning to Idle |
 | `KIOSK_ADMIN_IDLE_SECONDS` | `90` | Inactivity on Admin / Navigation before locking to Idle |
 
