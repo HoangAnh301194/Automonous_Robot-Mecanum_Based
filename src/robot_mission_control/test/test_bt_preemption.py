@@ -414,3 +414,67 @@ def test_emergency_stop_blackboard_triggers_p0_preemption():
     bb.set("EMERGENCY_STOP", True)
     assert cond.tick(bb) == NodeStatus.SUCCESS
 
+
+def test_action_patrol_loop_closure_dispatches_start_point_first():
+    """Verify that when the full route is completed, ActionPatrol navigates back to start point to close the loop."""
+    from types import SimpleNamespace
+    from action_msgs.msg import GoalStatus
+    from robot_mission_control.bt_nodes import ActionPatrol
+
+    patrol = ActionPatrol("TestPatrolLoop", node=None)
+    patrol._route_loaded = True
+    patrol.patrol_points = ["khoihanh", "diem1", "diem2"]
+    patrol.current_idx = 0
+
+    sent_targets = []
+    fake_client = SimpleNamespace(
+        server_is_ready=lambda: True,
+        send_goal_async=lambda goal: SimpleNamespace(
+            add_done_callback=lambda cb: sent_targets.append(goal.target_location)
+        )
+    )
+    patrol.action_client = fake_client
+
+    # 1. First dispatch: whole chain is dispatched
+    patrol.send_next_goal()
+    assert len(sent_targets) == 1
+    assert sent_targets[0] == "khoihanh,diem1,diem2"
+
+    # 2. Complete full route (reach diem2)
+    fake_future = SimpleNamespace(
+        result=lambda: SimpleNamespace(
+            result=SimpleNamespace(success=True),
+            status=GoalStatus.STATUS_SUCCEEDED,
+        )
+    )
+    patrol.result_callback(fake_future)
+    assert patrol._returning_to_start is True
+    assert patrol.current_idx == 2
+
+    # Simulate 2s wait expiry and current_idx wrap to 0
+    patrol.is_waiting_for_result = False
+    patrol.is_waiting_at_waypoint = False
+    patrol.current_idx = 0
+
+    # 3. Next dispatch must be ONLY the start point 'khoihanh' to close loop
+    patrol.send_next_goal()
+    assert len(sent_targets) == 2
+    assert sent_targets[1] == "khoihanh"
+    assert patrol._returning_goal is True
+
+    # 4. Robot arrives at start point 'khoihanh'
+    patrol.result_callback(fake_future)
+    assert patrol._returning_goal is False
+    assert patrol.current_idx == 0
+
+    # Simulate 2s wait expiry and advance to index 1
+    patrol.is_waiting_for_result = False
+    patrol.is_waiting_at_waypoint = False
+    patrol.current_idx = 1
+
+    # 5. Next dispatch smoothly continues through remainder of route
+    patrol.send_next_goal()
+    assert len(sent_targets) == 3
+    assert sent_targets[2] == "diem1,diem2"
+
+

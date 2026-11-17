@@ -601,6 +601,8 @@ class ActionPatrol(Action):
         self._goal_seq = 0
         self._route_seq = 0
         self._advance_after_wait = True
+        self._returning_to_start = False
+        self._returning_goal = False
 
         if self.node:
             self.action_client = ActionClient(self.node, DirectGo, '/navigation/direct_go')
@@ -748,10 +750,22 @@ class ActionPatrol(Action):
         if self.current_idx >= len(self.patrol_points):
             self.current_idx = 0
 
-        remaining_points = self.patrol_points[self.current_idx:]
-        target_str = ",".join(remaining_points)
-        active_target = self.patrol_points[self.current_idx]
-        msg = f"🚀 [TUẦN TRA] Bắt đầu lộ trình: {target_str} (bắt đầu tại: {active_target})"
+        if self._returning_to_start and len(self.patrol_points) > 1:
+            # We just completed the full route at patrol_points[-1].
+            # Dispatch navigation to patrol_points[0] to close the loop smoothly without
+            # Nav2 goal_checker falsely declaring immediate success at patrol_points[-1].
+            self._returning_to_start = False
+            self._returning_goal = True
+            active_target = self.patrol_points[0]
+            target_str = active_target
+            msg = f"🔄 [TUẦN TRA] Bắt đầu vòng mới: Quay về điểm xuất phát {target_str}"
+        else:
+            self._returning_goal = False
+            remaining_points = self.patrol_points[self.current_idx:]
+            target_str = ",".join(remaining_points)
+            active_target = self.patrol_points[self.current_idx]
+            msg = f"🚀 [TUẦN TRA] Bắt đầu lộ trình: {target_str} (bắt đầu tại: {active_target})"
+
         if self.node:
             self.node.get_logger().info(msg)
             self.node.publish_log(msg)
@@ -794,15 +808,28 @@ class ActionPatrol(Action):
             success = False
 
         if success:
-            last_point = self.patrol_points[-1] if self.patrol_points else "None"
-            msg = f"🏁 [TUẦN TRA] Hoàn thành lộ trình tuần tra (điểm cuối: {last_point})"
-            # Full sequence reached successfully; position index at last waypoint so next advance wraps to 0
-            self.current_idx = len(self.patrol_points) - 1
-            if self.node:
-                self.node.get_logger().info(msg)
-                self.node.publish_log(msg)
-            self._schedule_wait(advance=True)
+            if self._returning_goal:
+                self._returning_goal = False
+                start_point = self.patrol_points[0] if self.patrol_points else "None"
+                msg = f"🏁 [TUẦN TRA] Đã quay về điểm bắt đầu ({start_point}), chuẩn bị tiếp tục tuyến tuần tra."
+                self.current_idx = 0
+                if self.node:
+                    self.node.get_logger().info(msg)
+                    self.node.publish_log(msg)
+                self._schedule_wait(advance=True)
+            else:
+                last_point = self.patrol_points[-1] if self.patrol_points else "None"
+                msg = f"🏁 [TUẦN TRA] Hoàn thành lộ trình tuần tra (điểm cuối: {last_point})"
+                # Full sequence reached successfully; position index at last waypoint so next advance wraps to 0
+                self.current_idx = len(self.patrol_points) - 1
+                self._returning_to_start = True
+                if self.node:
+                    self.node.get_logger().info(msg)
+                    self.node.publish_log(msg)
+                self._schedule_wait(advance=True)
         else:
+            self._returning_goal = False
+            self._returning_to_start = False
             curr_point = self.patrol_points[self.current_idx] if self.patrol_points and self.current_idx < len(self.patrol_points) else "Unknown"
             msg = f"⚠️ [TUẦN TRA] Không thể hoàn tất lộ trình tại {curr_point}, chuyển điểm tiếp theo."
             if self.node:
