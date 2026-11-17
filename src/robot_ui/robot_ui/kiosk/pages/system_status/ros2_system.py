@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QScroller,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -92,6 +93,8 @@ class ROS2SystemDetailScreen(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
 
         container = QWidget()
         c_layout = QVBoxLayout(container)
@@ -111,20 +114,20 @@ class ROS2SystemDetailScreen(QWidget):
 
         for key, name, desc in layers_info:
             row_frame = QFrame()
+            row_frame.setFixedHeight(54)
             row_frame.setStyleSheet(f"""
                 QFrame {{
                     background-color: {KioskTheme.COLOR_SURFACE_ALT};
                     border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
                     border-radius: 6px;
-                    padding: 4px 8px;
                 }}
             """)
             rl = QHBoxLayout(row_frame)
-            rl.setContentsMargins(10, 6, 10, 6)
+            rl.setContentsMargins(12, 4, 12, 4)
             rl.setSpacing(10)
 
             title_box = QVBoxLayout()
-            title_box.setSpacing(2)
+            title_box.setSpacing(1)
             lbl_name = QLabel(name)
             lbl_name.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-size: 13px; font-weight: 700;")
             lbl_desc = QLabel(desc)
@@ -138,7 +141,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addWidget(lbl_st)
 
             btn_start = QPushButton("BẬT")
-            btn_start.setFixedSize(54, KioskTheme.TOUCH_TARGET_MIN)
+            btn_start.setFixedSize(56, 38)
             btn_start.setCursor(Qt.PointingHandCursor)
             btn_start.setStyleSheet(f"""
                 QPushButton {{
@@ -155,7 +158,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addWidget(btn_start)
 
             btn_stop = QPushButton("TẮT")
-            btn_stop.setFixedSize(54, KioskTheme.TOUCH_TARGET_MIN)
+            btn_stop.setFixedSize(56, 38)
             btn_stop.setCursor(Qt.PointingHandCursor)
             btn_stop.setStyleSheet(f"""
                 QPushButton {{
@@ -300,9 +303,30 @@ class ROS2SystemDetailScreen(QWidget):
         ports_row.addWidget(self.btn_swap_ports)
         port_layout.addLayout(ports_row)
 
-        self.lbl_ports_info = QLabel("Cổng phát hiện: Đang quét...")
-        self.lbl_ports_info.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px; padding: 4px 0;")
-        port_layout.addWidget(self.lbl_ports_info)
+        ports_desc_frame = QFrame()
+        ports_desc_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 6px 10px;
+            }}
+        """)
+        pdf_layout = QVBoxLayout(ports_desc_frame)
+        pdf_layout.setContentsMargins(8, 6, 8, 6)
+        pdf_layout.setSpacing(4)
+
+        self.lbl_esp_port = QLabel("⚡ Động cơ Hoverboard / ESP32: Đang quét...")
+        self.lbl_esp_port.setStyleSheet(f"color: {KioskTheme.COLOR_HEALTHY}; font-size: 12px; font-weight: bold;")
+        self.lbl_lidar_port = QLabel("📡 Cảm biến LiDAR SLAMTEC: Đang quét...")
+        self.lbl_lidar_port.setStyleSheet(f"color: {KioskTheme.COLOR_ACCENT}; font-size: 12px; font-weight: bold;")
+        self.lbl_ports_info = QLabel("Cơ chế nhận diện: Chờ khởi tạo...")
+        self.lbl_ports_info.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px;")
+
+        pdf_layout.addWidget(self.lbl_esp_port)
+        pdf_layout.addWidget(self.lbl_lidar_port)
+        pdf_layout.addWidget(self.lbl_ports_info)
+        port_layout.addWidget(ports_desc_frame)
         c_layout.addWidget(card_ports)
 
         # C. ADVANCED CONTROLS / RISKY ACTIONS (SEPARATE SECTION)
@@ -331,6 +355,7 @@ class ROS2SystemDetailScreen(QWidget):
         danger_layout.addWidget(self.btn_emergency_cleanup)
 
         c_layout.addWidget(card_danger)
+        c_layout.addStretch(1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)
@@ -552,7 +577,11 @@ class ROS2SystemDetailScreen(QWidget):
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         unique_ports = list(dict.fromkeys(ports))
         ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện"
-        self.lbl_ports_info.setText(f"Hoverboard/ESP: {esp_port} | LiDAR: {lidar_port} ({detect_src}) | Cổng: {ports_str}")
+        if hasattr(self, "lbl_esp_port"):
+            self.lbl_esp_port.setText(f"⚡ Động cơ Hoverboard / ESP32: {esp_port}")
+        if hasattr(self, "lbl_lidar_port"):
+            self.lbl_lidar_port.setText(f"📡 Cảm biến LiDAR SLAMTEC: {lidar_port}")
+        self.lbl_ports_info.setText(f"Cơ chế: {detect_src} | Cổng hệ thống: {ports_str}")
 
     def _on_rescan_ports(self) -> None:
         self.rescan_ports_requested.emit()

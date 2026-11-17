@@ -22,6 +22,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QScroller,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -89,6 +90,8 @@ class DiagnosticsDetailScreen(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
 
         container = QWidget()
         c_layout = QVBoxLayout(container)
@@ -199,6 +202,7 @@ class DiagnosticsDetailScreen(QWidget):
         test_layout.addWidget(self.txt_console)
 
         c_layout.addWidget(card_tests)
+        c_layout.addStretch(1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)

@@ -216,16 +216,25 @@ QScrollArea {
     border: none;
 }
 QScrollBar:vertical {
-    width: 8px;
-    background: transparent;
+    width: 28px;
+    background: #0f1318;
+    margin: 0px;
+    border-radius: 6px;
 }
 QScrollBar::handle:vertical {
-    min-height: 28px;
-    background: #cad3d8;
-    border-radius: 4px;
+    min-height: 54px;
+    background: #475569;
+    border-radius: 6px;
+    margin: 3px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {
+    background: #ffb32c;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 QWidget#navigationPage {
     background: #000000;
