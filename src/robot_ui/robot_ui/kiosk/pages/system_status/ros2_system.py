@@ -353,12 +353,24 @@ class ROS2SystemDetailScreen(QWidget):
                 btn_start = self.layer_rows[k].get("start_btn")
                 btn_stop = self.layer_rows[k].get("stop_btn")
 
-                if is_on == "STOPPING":
+                if is_on == "STARTING":
+                    lbl.set_status("STARTING", HealthStatus.UNKNOWN)
+                    if btn_start:
+                        btn_start.setEnabled(False)
+                    if btn_stop:
+                        btn_stop.setEnabled(False)
+                elif is_on == "STOPPING":
                     lbl.set_status("STOPPING", HealthStatus.WARNING)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(False)
+                elif is_on == "ERROR":
+                    lbl.set_status("ERROR", HealthStatus.CRITICAL)
+                    if btn_start:
+                        btn_start.setEnabled(False)
+                    if btn_stop:
+                        btn_stop.setEnabled(True)
                 elif is_on is True or is_on == "RUNNING":
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
                     if btn_start:

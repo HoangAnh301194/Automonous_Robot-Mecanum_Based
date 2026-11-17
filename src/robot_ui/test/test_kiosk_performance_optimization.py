@@ -1,4 +1,4 @@
-"""Regression tests for Kiosk UI performance optimization and 5 critical fixes.
+"""Regression tests for Kiosk UI performance optimization and comprehensive lifecycle fixes.
 
 Verifies:
 1. Live log updating when ROS 2 System console is visible.
@@ -7,10 +7,14 @@ Verifies:
 4. Navigation pose, LiDAR scan, and obstacle points caching & refresh.
 5. Lazy map rebuild: no image processing while inactive, rebuilds on activation (P1 fix).
 6. Strictly single visible subpage telemetry rendering in System Config (P1 fix).
-7. Non-blocking stop_layer with STOPPING state and race condition prevention (P1 fix).
+7. Non-blocking stop_layer with STARTING/STOPPING/ERROR state lifecycle (P0/P1 fix).
 8. Souta video background using OpenCV C++/SIMD resizing and dimension caching (P1 fix).
 9. Preservation of Start/Stop, Nav2, SLAM, Patrol, and E-Stop contracts.
-10. Clean teardown and close events without unhandled exceptions.
+10. Clean teardown and cooperative shutdown without unhandled thread exceptions.
+11. cancel_navigation() emits dict with status and state (ROS 2 contract fix).
+12. SHOW_5S_INVITE popup does not auto-trigger service wait mode (Service logic fix).
+13. load_map_yaml() without waypoints does not overwrite global config files (Data protection fix).
+14. apply_localization_map() passes both map_yaml and map_graph for SLAM Toolbox (Nav2 fix).
 """
 from __future__ import annotations
 
@@ -92,26 +96,19 @@ def test_scenario_3_log_snapshot_sync_from_backend_provider(app):
         "[10:00:03] [LAYER3] SLAM graph optimized",
     ]
 
-    # Cung cấp mock provider mô phỏng ros_node.get_layer_log_snapshot
     mock_provider = MagicMock(return_value=backend_logs)
     screen.set_log_provider(mock_provider)
 
-    # Khi console đang ẩn, widget chưa có log mới này
     assert "Hardware initialized" not in screen.txt_layer_log.toPlainText()
 
-    # Người dùng mở lại console
     screen.set_console_visible(True)
-
-    # Provider phải được gọi để lấy snapshot
     mock_provider.assert_called_with("all")
 
-    # Log mới từ backend phải hiển thị đầy đủ trên giao diện
     content = screen.txt_layer_log.toPlainText()
     assert "Hardware initialized" in content
     assert "Nav2 stack online" in content
     assert "SLAM graph optimized" in content
 
-    # Test đổi filter layer: tự động kéo snapshot của layer đó
     mock_provider.return_value = ["[10:00:05] [LAYER2] Local costmap updated"]
     screen._set_log_filter("layer2")
     mock_provider.assert_called_with("layer2")
@@ -123,22 +120,18 @@ def test_scenario_4_navigation_pose_scan_obstacle_caching(app):
     icons = {"goal": Path("/nonexistent/goal.png")}
     nav = NavigationPage(icons=icons)
 
-    # Simulate navigating away to Home (inactive)
     nav.set_active(False)
     assert not nav._is_active
     assert not nav.map_widget._is_active
 
-    # Receive 50 Hz poses and scans while inactive
     nav.set_pose({"x": 1.25, "y": 3.45, "yaw": 0.78})
     nav.set_scan_points([(1.0, 2.0), (3.0, 4.0)])
     nav.set_obstacle_points("front", [(1.5, 2.5)])
 
-    # Cached data is stored
     assert nav.map_widget._pose == {"x": 1.25, "y": 3.45, "yaw": 0.78}
     assert nav.map_widget._scan_points == [(1.0, 2.0), (3.0, 4.0)]
     assert nav.map_widget._front_obs_points == [(1.5, 2.5)]
 
-    # Reactivate page upon return
     nav.set_active(True)
     assert nav._is_active
     assert nav.map_widget._is_active
@@ -154,7 +147,6 @@ def test_scenario_5_lazy_map_rebuild_on_activation(app):
     }
     slam = SlamMapPage(icons=icons)
 
-    # Deactivate page (simulate user being on Chat or Idle)
     slam.set_active(False)
     assert not slam._is_active
     assert not slam.live_map_widget._is_active
@@ -167,18 +159,13 @@ def test_scenario_5_lazy_map_rebuild_on_activation(app):
         "cells": [0] * 400,
     }
 
-    # Stream bản đồ thời gian thực tới SLAM page
     slam.set_map(fake_map)
-
-    # Kiểm tra: Khi inactive, cờ dirty phải bật và hoàn toàn KHÔNG dựng ảnh (QImage null)
     assert slam.live_map_widget._map_dirty is True
     assert slam.live_map_widget._map_image.isNull()
 
-    # Kích hoạt lại trang khi người dùng chuyển về tab SLAM
     slam.set_active(True)
     assert slam._is_active
     assert slam.live_map_widget._is_active
-    # Cờ dirty đã được xử lý và ảnh đã được dựng thành công
     assert slam.live_map_widget._map_dirty is False
     assert not slam.live_map_widget._map_image.isNull()
     assert slam.live_map_widget._map_image.width() == 20
@@ -208,7 +195,6 @@ def test_scenario_6_system_config_subpage_telemetry_isolation(app):
     page.sensors_screen.update_telemetry = spy_sensors
 
     try:
-        # Khi đang ở Overview (index 0)
         assert page.stack.currentIndex() == 0
         snap = {
             "cam_front_hz": 15.0,
@@ -221,19 +207,15 @@ def test_scenario_6_system_config_subpage_telemetry_isolation(app):
         }
         page.update_sensor_telemetry(snap)
 
-        # Overview phải được cập nhật, nhưng Sensors screen KHÔNG được gọi
         assert len(overview_calls) == 1
         assert len(sensors_calls) == 0
 
-        # Chuyển sang Sensors screen (index 1)
         overview_calls.clear()
         sensors_calls.clear()
         page._navigate_to_module("sensors")
         assert page.stack.currentIndex() == 1
-        # Lúc chuyển tab, _render_current_subpage sẽ nạp dữ liệu cho sensors screen
         assert len(sensors_calls) == 1
 
-        # Khi tiếp tục nhận telemetry ở Sensors screen: Sensors được gọi, Overview KHÔNG được gọi
         overview_calls.clear()
         sensors_calls.clear()
         page.update_sensor_telemetry(snap)
@@ -243,19 +225,17 @@ def test_scenario_6_system_config_subpage_telemetry_isolation(app):
         page.stop()
 
 
-def test_scenario_7_stop_layer_stopping_state_and_race_prevention(app, monkeypatch):
-    """7. P1 Fix: Trạng thái STOPPING và khóa chống khởi động trùng race condition."""
+def test_scenario_7_lifecycle_starting_stopping_error_and_race_prevention(app, monkeypatch):
+    """7. P0/P1 Fix: Vòng đời tiến trình STARTING, STOPPING, ERROR và ngăn chặn race condition."""
     import threading
     from robot_ui.kiosk.ros_node import KioskRosNode
 
-    # Giả lập process chưa thoát ngay, cần thời gian trong background thread
     proc_stopped_event = threading.Event()
 
     mock_proc = MagicMock()
     mock_proc.pid = 12345
     mock_proc.poll.side_effect = lambda: 0 if proc_stopped_event.is_set() else None
 
-    # Tránh gọi os.getpgid và os.killpg trên pid giả lập
     monkeypatch.setattr(os, "getpgid", lambda pid: 12345)
     monkeypatch.setattr(os, "killpg", lambda pgid, sig: None)
 
@@ -265,7 +245,10 @@ def test_scenario_7_stop_layer_stopping_state_and_race_prevention(app, monkeypat
         CANONICAL_LAYER_MAP = KioskRosNode.CANONICAL_LAYER_MAP
         LAYER_ALIAS_MAP = KioskRosNode.LAYER_ALIAS_MAP
         _canonical_layer_key = KioskRosNode._canonical_layer_key
+        _get_ws_prefix = lambda self: ""
         _layer_procs = {"layer1": mock_proc, "layer_hardware": mock_proc}
+        _starting_layers = set()
+        _cancel_starting_layers = set()
         _stopping_layers = set()
         _layer_log_buffers = {"layer1": [], "all": []}
         _console_active = False
@@ -280,32 +263,46 @@ def test_scenario_7_stop_layer_stopping_state_and_race_prevention(app, monkeypat
 
     node = DummyRosNode()
 
+    # A. Thử dừng khi tiến trình đang chạy
     t0 = time.monotonic()
     node.stop_layer("layer1")
     dt = time.monotonic() - t0
 
-    # 1. Trả về ngay lập tức (< 50ms), không block main thread
     assert dt < 0.05, f"stop_layer blocked for {dt*1000:.1f}ms!"
-
-    # 2. Layer phải được ghi nhận là STOPPING ngay
     assert "layer1" in node._stopping_layers
 
-    # 3. Signals phát trạng thái STOPPING
+    # B. Signals phát trạng thái STOPPING
     node.signals.layer_status_changed.emit.assert_called()
     called_dict = node.signals.layer_status_changed.emit.call_args[0][0]
     assert called_dict.get("layer1") == "STOPPING"
 
-    # 4. Khi đang STOPPING, lệnh start_layer phải bị từ chối và log cảnh báo
+    # C. Trong lúc STOPPING, lệnh start_layer phải bị từ chối
     node.start_layer("layer1")
     mock_logger.warn.assert_called()
     assert "STOPPING" in mock_logger.warn.call_args[0][0]
 
-    # 5. Cho phép background thread hoàn tất dừng process
+    # D. Cho phép background thread dừng tiến trình thành công
     proc_stopped_event.set()
     time.sleep(0.15)
-    # Lúc này layer1 đã được dọn khỏi stopping_layers và layer_procs
     assert "layer1" not in node._stopping_layers
     assert "layer1" not in node._layer_procs
+
+    # E. Test trường hợp tiến trình không chịu chết -> chuyển sang ERROR, giữ handle
+    mock_stuck_proc = MagicMock()
+    mock_stuck_proc.pid = 54321
+    mock_stuck_proc.poll.return_value = None  # Không bao giờ thoát
+    mock_stuck_proc.wait = MagicMock()
+    node._layer_procs["layer2"] = mock_stuck_proc
+
+    import time as real_time
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    node.stop_layer("layer2")
+    real_time.sleep(0.05)
+    # Vì tiến trình không thoát, nó KHÔNG được xóa khỏi _layer_procs, và phát trạng thái ERROR
+    assert "layer2" in node._layer_procs
+    last_dict = node.signals.layer_status_changed.emit.call_args[0][0]
+    assert last_dict.get("layer2") == "ERROR"
 
 
 def test_scenario_8_souta_video_simd_resize(app):
@@ -316,22 +313,18 @@ def test_scenario_8_souta_video_simd_resize(app):
     video_widget._frame_aspect = 16.0 / 9.0
     video_widget._update_target_dims()
 
-    # Kích thước target phải được cache chuẩn theo 16:9
     assert video_widget._cached_target_w > 0
     assert video_widget._cached_target_h > 0
     ratio = video_widget._cached_target_w / video_widget._cached_target_h
     assert abs(ratio - 16.0 / 9.0) < 0.1
 
-    # Tạo một dummy numpy frame 1920x1080
     dummy_frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
     dummy_frame[:, :] = (120, 150, 180)
 
-    # Giả lập capture trả về frame
     mock_capture = MagicMock()
     mock_capture.read.return_value = (True, dummy_frame)
     video_widget._capture = mock_capture
 
-    # Đọc frame: xử lý resize và chuyển đổi pixmap mượt mà
     video_widget._read_frame()
     assert not video_widget._pixmap.isNull()
     assert video_widget._pixmap.width() == video_widget._cached_target_w
@@ -364,3 +357,109 @@ def test_scenario_10_clean_teardown_no_exceptions(app):
     nav.close()
     slam.close()
     cfg.stop()
+
+
+def test_scenario_11_cancel_navigation_emits_dict(app):
+    """11. P0 Fix: cancel_navigation() phát dict đúng contract pyqtSignal(dict)."""
+    from robot_ui.kiosk.ros_node import KioskRosNode
+
+    class DummyRosNode:
+        cmd_vel_pub = MagicMock()
+        _goal_handle = None
+        signals = MagicMock()
+
+        def get_logger(self):
+            return MagicMock()
+
+        cancel_navigation = KioskRosNode.cancel_navigation
+
+    node = DummyRosNode()
+    node.cancel_navigation()
+
+    # Signal navigation_status_changed phải nhận 1 tham số dạng dict
+    node.signals.navigation_status_changed.emit.assert_called_once()
+    payload = node.signals.navigation_status_changed.emit.call_args[0][0]
+    assert isinstance(payload, dict)
+    assert payload.get("status") == "CANCELLED"
+
+
+def test_scenario_12_service_invite_popup_no_auto_serving(app):
+    """12. P0 Fix: Lệnh SHOW_5S_INVITE không tự động kích hoạt wait serving mode."""
+    from robot_ui.kiosk.window import KioskWindow
+
+    # Mock service page và show_page
+    win = MagicMock()
+    win.service_page = MagicMock()
+    win._active_page = "home"
+    win._on_service_popup_cmd = lambda cmd: KioskWindow._on_service_popup_cmd(win, cmd)
+
+    # 1. Nhận lệnh SHOW_5S_INVITE: Mở trang service nhưng KHÔNG gọi select_mode_programmatically
+    win._on_service_popup_cmd("SHOW_5S_INVITE")
+    win.show_page.assert_called_with("service")
+    win.service_page.select_mode_programmatically.assert_not_called()
+
+    # 2. Nhận lệnh SHOW_SERVING: Phải kích hoạt wait mode
+    win._on_service_popup_cmd("SHOW_SERVING")
+    win.service_page.select_mode_programmatically.assert_called_with("wait")
+
+
+def test_scenario_13_load_map_yaml_without_waypoints_protects_config(app, tmp_path):
+    """13. P0 Fix: Nạp map chưa có waypoint không ghi đè rỗng locations.yaml/routes.yaml."""
+    nav = NavigationPage(icons={"goal": Path("/nonexistent/goal.png")})
+
+    # Giả lập mock _sync_active_config_files
+    nav._sync_active_config_files = MagicMock()
+
+    # Tạo một file map YAML tạm
+    map_yaml = tmp_path / "new_empty_map.yaml"
+    map_yaml.write_text("image: test.png\nresolution: 0.05\norigin: [0, 0, 0]\n")
+
+    # Mock parse_nav_map_yaml để trả về dữ liệu hợp lệ
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "robot_ui.kiosk.pages.navigation_page.parse_nav_map_yaml",
+            lambda path: {"preview_width": 10, "preview_height": 10, "cells": [0]*100},
+        )
+        success = nav.load_map_yaml(map_yaml)
+
+    assert success is True
+    # Tuyệt đối KHÔNG được gọi _sync_active_config_files làm mất file route thật
+    nav._sync_active_config_files.assert_not_called()
+
+
+def test_scenario_14_apply_localization_map_passes_map_graph(app):
+    """14. P1 Fix: apply_localization_map() truyền đầy đủ cả map_yaml và map_graph."""
+    from robot_ui.kiosk.ros_node import KioskRosNode
+
+    spawned_cmds = []
+
+    class DummyRosNode:
+        _localization_proc = None
+        _selected_map_yaml = ""
+        _selected_backend = ""
+        stop_slam = MagicMock()
+        _get_ws_prefix = lambda self: ""
+
+        def get_logger(self):
+            return MagicMock()
+
+        apply_localization_map = KioskRosNode.apply_localization_map
+
+    node = DummyRosNode()
+
+    # Mock subprocess.Popen để bắt command line
+    def fake_popen(cmd_list, **kwargs):
+        spawned_cmds.append(cmd_list[2])
+        m = MagicMock()
+        m.poll.return_value = 0
+        return m
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr("subprocess.Popen", fake_popen)
+        node.apply_localization_map("/home/user/my_map/khoa_a1.yaml", backend="slam_toolbox")
+        time.sleep(0.05)
+
+    assert len(spawned_cmds) == 1
+    cmd = spawned_cmds[0]
+    assert "map_yaml:=/home/user/my_map/khoa_a1.yaml" in cmd
+    assert "map_graph:=/home/user/my_map/khoa_a1" in cmd

@@ -1848,9 +1848,9 @@ class NavigationPage(QWidget):
                 n = len(self._batch_waypoints)
                 self.status_label.setText(f"Đã nạp bản đồ: {stem} ({n} điểm waypoint)")
             else:
-                # Clear waypoints for maps that don't have saved waypoints yet
+                # Clear waypoints on UI for maps that don't have saved waypoints yet
+                # Protect global locations.yaml & routes.yaml from being overwritten
                 self._clear_batch_waypoints()
-                self._sync_active_config_files()
                 self.status_label.setText(f"Đã nạp bản đồ: {stem} (Chưa có điểm, hãy chấm điểm mới)")
             return True
         return False

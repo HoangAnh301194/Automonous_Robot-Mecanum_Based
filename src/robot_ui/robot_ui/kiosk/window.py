@@ -915,9 +915,12 @@ class KioskWindow(QMainWindow):
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
-        if cmd in ("SHOW_SERVING", "SHOW_5S_INVITE"):
+        if cmd == "SHOW_SERVING":
             if hasattr(self, "service_page"):
                 self.service_page.select_mode_programmatically("wait")
+            self.show_page("service")
+        elif cmd == "SHOW_5S_INVITE":
+            # Chỉ mở giao diện chào mời 5 giây, không tự động kích hoạt chế độ phục vụ
             self.show_page("service")
         elif cmd == "HIDE":
             if hasattr(self, "service_page"):

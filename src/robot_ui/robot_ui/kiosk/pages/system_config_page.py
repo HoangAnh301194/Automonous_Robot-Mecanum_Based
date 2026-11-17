@@ -667,23 +667,14 @@ class SystemConfigPage(QWidget):
             self.btn_fullscreen.setToolTip("Toàn màn hình (F11)")
 
     def stop(self) -> None:
-        """Stop background worker threads."""
+        """Stop background worker threads with cooperative shutdown."""
         if hasattr(self, "host_worker") and self.host_worker is not None:
             self.host_worker.stop()
-            self.host_worker.wait(1000)
-            if self.host_worker.isRunning():
-                self.host_worker.terminate()
-                self.host_worker.wait(500)
+            self.host_worker.wait(1500)
 
     def closeEvent(self, event: Any) -> None:
         self.stop()
         super().closeEvent(event)
-
-    def __del__(self) -> None:
-        try:
-            self.stop()
-        except Exception:
-            pass
 
     def __del__(self) -> None:
         try:
