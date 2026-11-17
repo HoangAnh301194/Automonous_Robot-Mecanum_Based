@@ -58,7 +58,7 @@ class VideoBackground(QWidget):
         self.update()
 
     def set_static_image(self, path: Path) -> None:
-        """Static light-theme mascot, without OpenCV video decode/loop."""
+        """Optional static PTIT mascot preview, without MP4 decoding."""
         self.stop()
         self._static_image = QPixmap(str(path))
         self.update()
@@ -133,7 +133,7 @@ class VideoBackground(QWidget):
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
+        painter.fillRect(self.rect(), QColor("#000000"))
         if not self._static_image.isNull():
             image = self._static_image.scaled(
                 max(1, round(self.width() * self._display_scale)),
@@ -148,7 +148,8 @@ class VideoBackground(QWidget):
             x = (self.width() - self._pixmap.width()) // 2
             y = (self.height() - self._pixmap.height()) // 2 + self._vertical_offset_px
             painter.drawPixmap(x, y, self._pixmap)
-        # Light theme: no dark overlay on idle mascot.
+        # Restore a subtle dark overlay for MP4 expressions.
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 22))
 
     def closeEvent(self, event: Any) -> None:
         self.stop()
