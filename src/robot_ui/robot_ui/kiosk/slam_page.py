@@ -495,7 +495,7 @@ class TouchMapNameDialog(QDialog):
                     background: #f4f0ff;
                     border: 2px solid #f59e0b;
                     border-radius: 10px;
-                    color: #fde68a;
+                    color: #916000;
                     font-size: 22px;
                     font-weight: 700;
                     padding: 0 14px;
@@ -523,7 +523,7 @@ class TouchMapNameDialog(QDialog):
                     background: #fff0f2;
                     border: 2px solid #ef4444;
                     border-radius: 10px;
-                    color: #fca5a5;
+                    color: #ad3443;
                     font-size: 22px;
                     font-weight: 700;
                     padding: 0 14px;
@@ -1136,7 +1136,7 @@ class SlamMapPage(QWidget):
                     background: #f3f6fa;
                     border: 2px solid #f59e0b;
                     border-radius: 8px;
-                    color: white;
+                    color: #203247;
                     font-size: 15px;
                     font-weight: 600;
                     padding: 0 12px;
@@ -1156,7 +1156,7 @@ class SlamMapPage(QWidget):
                     background: #fff0f2;
                     border: 2px solid #ef4444;
                     border-radius: 8px;
-                    color: #fca5a5;
+                    color: #ad3443;
                     font-size: 15px;
                     font-weight: 700;
                     padding: 0 12px;
@@ -1378,7 +1378,7 @@ class SlamMapPage(QWidget):
                 background: #ffffff;
                 border: 1px solid #dce4ec;
                 border-radius: 12px;
-                color: white;
+                color: #243447;
             }
             QPushButton#slamBackButton:hover, QPushButton#slamHomeButton:hover {
                 background: #e6edf5;
@@ -1451,7 +1451,7 @@ class SlamMapPage(QWidget):
             }
             QPushButton#slamStartButton:disabled {
                 background: #eaf8f0;
-                color: #86efac;
+                color: #438366;
             }
             QPushButton#slamStopButton {
                 background: #dc2626;
@@ -1465,8 +1465,8 @@ class SlamMapPage(QWidget):
                 background: #b91c1c;
             }
             QPushButton#slamStopButton:disabled {
-                background: #450a0a;
-                color: #fca5a5;
+                background: #fff0f2;
+                color: #9d3038;
             }
             QLabel#slamSaveTitle {
                 color: #1d2938;
@@ -1477,7 +1477,7 @@ class SlamMapPage(QWidget):
                 background: #f3f6fa;
                 border: 1px solid #dce4ec;
                 border-radius: 8px;
-                color: white;
+                color: #203247;
                 font-size: 15px;
                 font-weight: 600;
                 padding: 0 12px;
