@@ -628,6 +628,7 @@ class KioskWindow(QMainWindow):
         self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
         self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
         self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
+        self.navigation_page.initial_pose_requested.connect(self._on_initial_pose_requested)
         self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.slam_page.home_requested.connect(self.return_to_home)
         self.slam_page.back_requested.connect(self.go_back)
@@ -677,6 +678,8 @@ class KioskWindow(QMainWindow):
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
+        signals.localization_status_changed.connect(self.navigation_page.set_localization_status)
+        signals.initial_pose_confirmed.connect(self.navigation_page.on_initial_pose_confirmed)
         signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
         signals.scan_points_changed.connect(self.slam_page.set_scan_points)
         signals.obstacle_points_changed.connect(self.navigation_page.set_obstacle_points)
@@ -980,6 +983,14 @@ class KioskWindow(QMainWindow):
         if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "load_map_yaml"):
             self.navigation_page.load_map_yaml(map_path)
         self.show_page("admin")
+
+    def _on_initial_pose_requested(self, payload: dict) -> None:
+        x = float(payload.get("x", 0.0))
+        y = float(payload.get("y", 0.0))
+        yaw = float(payload.get("yaw", 0.0))
+        map_name = str(payload.get("map_name", ""))
+        LOG.info("[UI Navigation] Phát Initial Pose: X=%.2f, Y=%.2f, Yaw=%.2f (Map: %s)", x, y, yaw, map_name)
+        self.ros_node.publish_initial_pose(x, y, yaw, map_name=map_name)
 
     def _on_admin_detection(self) -> None:
         LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")

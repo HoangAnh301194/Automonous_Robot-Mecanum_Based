@@ -8,9 +8,12 @@ import signal
 import subprocess
 import threading
 import time
+import uuid
 from functools import partial
 from pathlib import Path as FilePath
 from typing import Any
+
+import yaml
 
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
@@ -86,6 +89,18 @@ class LayerState(str, Enum):
     ERROR = "ERROR"
 
 
+class LocalizationState(str, Enum):
+    """Máy trạng thái chuẩn cho AMCL Localization (Single Source of Truth)."""
+    NOT_INITIALIZED = "NOT_INITIALIZED"          # Chưa có ước lượng vị trí
+    WAITING_FOR_AMCL = "WAITING_FOR_AMCL"        # AMCL chưa active hoặc thiếu sensor
+    READY_TO_SET_POSE = "READY_TO_SET_POSE"      # Đủ điều kiện nhận pose ban đầu
+    PUBLISHING = "PUBLISHING"                    # Đang gửi dữ liệu lên /initialpose
+    WAITING_FOR_LOCALIZATION = "WAITING_FOR_LOCALIZATION" # Đã gửi, chờ AMCL hội tụ
+    TF_AVAILABLE = "TF_AVAILABLE"                # Đã có TF map -> odom hợp lệ
+    LOCALIZED = "LOCALIZED"                      # Đã định vị chính xác (TF + Covariance đạt)
+    ERROR = "ERROR"                              # Lỗi (Timeout, sensor stale, sai map)
+
+
 class KioskRosNode(Node):
     """Small ROS adapter dedicated to the native customer UI."""
 
@@ -153,6 +168,22 @@ class KioskRosNode(Node):
         self._localization_proc: subprocess.Popen | None = None
         self._selected_map_yaml: str = ""
         self._selected_backend: str = "amcl"
+
+        # AMCL Initial Pose & Localization Tracking
+        self._initial_pose_pub = self.create_publisher(
+            PoseWithCovarianceStamped,
+            "/initialpose",
+            QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE),
+        )
+        self._localization_state: LocalizationState = LocalizationState.NOT_INITIALIZED
+        self._localization_message: str = "Chưa thiết lập vị trí ban đầu"
+        self._loc_session_token: str = ""
+        self._last_initial_pose_sent_at: float = 0.0
+        self._last_amcl_pose_at: float = 0.0
+        self._amcl_covariance_norm: float = 999.0
+        self._last_scan_time: float = 0.0
+        self._last_odom_time: float = 0.0
+        self._auto_initial_pose_enabled: bool = False
 
         # System telemetry & Configuration tracking
         self._dbg_lock = threading.Lock()
@@ -409,9 +440,36 @@ class KioskRosNode(Node):
 
     def _on_amcl_pose(self, msg: PoseWithCovarianceStamped) -> None:
         self._have_localized_pose = True
+        self._last_amcl_pose_at = time.monotonic()
+        cov = msg.pose.covariance
+        cov_norm = math.sqrt(float(cov[0]) + float(cov[7]))
+        self._amcl_covariance_norm = cov_norm
+
+        if self._localization_state in (
+            LocalizationState.WAITING_FOR_LOCALIZATION,
+            LocalizationState.TF_AVAILABLE,
+        ):
+            if self._last_amcl_pose_at >= self._last_initial_pose_sent_at - 0.1:
+                self._set_localization_state(
+                    LocalizationState.LOCALIZED,
+                    f"Đã định vị thành công (sai số: {cov_norm:.2f}m)"
+                )
+                self.signals.initial_pose_confirmed.emit({
+                    "x": float(msg.pose.pose.position.x),
+                    "y": float(msg.pose.pose.position.y),
+                    "yaw": quaternion_to_yaw(
+                        msg.pose.pose.orientation.x,
+                        msg.pose.pose.orientation.y,
+                        msg.pose.pose.orientation.z,
+                        msg.pose.pose.orientation.w,
+                    ),
+                    "covariance_norm": cov_norm,
+                })
+
         self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "amcl")
 
     def _on_odom(self, msg: Odometry) -> None:
+        self._last_odom_time = time.monotonic()
         vx = float(msg.twist.twist.linear.x)
         wz = float(msg.twist.twist.angular.z)
         self._mark_topic_rx("odom", {"vx": vx, "wz": wz})
@@ -506,6 +564,11 @@ class KioskRosNode(Node):
         target = location.strip()
         if not target:
             return
+        is_ready, reason = self.is_navigation_ready()
+        if not is_ready:
+            self.get_logger().warn(f"[NAV GATE] Từ chối navigate_to: {reason}")
+            self.signals.command_status_changed.emit("warning", reason)
+            return
         if not self._direct_go_client.server_is_ready():
             self.get_logger().warn(f"[DIRECT_GO] Action server /navigation/direct_go chưa sẵn sàng (target='{target}')!")
             self.signals.command_status_changed.emit(
@@ -569,6 +632,13 @@ class KioskRosNode(Node):
         self.signals.command_status_changed.emit(tone, str(result.finish_message))
 
     def navigate_to_pose(self, x: float, y: float, yaw: float) -> None:
+        is_ready, reason = self.is_navigation_ready()
+        if not is_ready:
+            self.get_logger().warn(f"[NAV GATE] Từ chối navigate_to_pose: {reason}")
+            self.signals.command_status_changed.emit("warning", reason)
+            self.signals.navigation_active_changed.emit(False)
+            return
+
         if not self._nav2_client.server_is_ready():
             self.get_logger().warn(f"[NAV2] Action server /navigate_to_pose chưa sẵn sàng (x={x:.2f}, y={y:.2f})!")
             self.signals.command_status_changed.emit(
@@ -730,6 +800,7 @@ class KioskRosNode(Node):
         self.signals.command_status_changed.emit("success", "Đã mở khóa dừng khẩn cấp")
 
     def _on_scan(self, msg: LaserScan) -> None:
+        self._last_scan_time = time.monotonic()
         valid_ranges = [r for r in msg.ranges if math.isfinite(r) and msg.range_min <= r <= msg.range_max]
         min_lidar = min(valid_ranges) if valid_ranges else None
         self._mark_topic_rx("lidar", {"min_dist": min_lidar, "count": len(valid_ranges)})
@@ -798,6 +869,12 @@ class KioskRosNode(Node):
 
     def start_patrol(self) -> None:
         """Kích hoạt bắt đầu tuần tra từ Mission Controller."""
+        is_ready, reason = self.is_navigation_ready()
+        if not is_ready:
+            self.get_logger().warn(f"[NAV GATE] Từ chối start_patrol: {reason}")
+            self.signals.command_status_changed.emit("warning", reason)
+            return
+
         self.get_logger().info("[MISSION] Kích hoạt bắt đầu tuần tra (/mission/start_patrol)")
         if not self.start_patrol_client.service_is_ready():
             if not self.start_patrol_client.wait_for_service(timeout_sec=0.5):
@@ -859,8 +936,19 @@ class KioskRosNode(Node):
         elif self.trigger_finish_client.wait_for_service(timeout_sec=0.2):
             self.trigger_finish_client.call_async(Trigger.Request())
 
+    def _get_ws_root(self) -> FilePath:
+        return FilePath(__file__).resolve().parents[4]
+
+    def is_layer_running(self, layer_key: str) -> bool:
+        """Kiểm tra xem tầng tiến trình có đang ở trạng thái RUNNING hay không."""
+        canonical = self._canonical_layer_key(layer_key)
+        if not (canonical.startswith("layer") and canonical[5:].isdigit()):
+            canonical = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
+        with self._lifecycle_lock:
+            return self._layer_states.get(canonical) == LayerState.RUNNING
+
     def _get_ws_prefix(self) -> str:
-        ws_root = FilePath(__file__).resolve().parents[4]
+        ws_root = self._get_ws_root()
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
         ws_setup = ws_root / "install" / "setup.bash"
         domain_id = os.environ.get("ROS_DOMAIN_ID", "94")
@@ -992,6 +1080,13 @@ class KioskRosNode(Node):
         """Lưu cấu hình và khởi chạy chế độ định vị với bản đồ được chọn."""
         self._selected_map_yaml = map_yaml_path
         self._selected_backend = backend
+        if hasattr(self, "cancel_pending_initial_pose"):
+            self.cancel_pending_initial_pose()
+        if hasattr(self, "_set_localization_state"):
+            self._set_localization_state(
+                LocalizationState.NOT_INITIALIZED,
+                f"Đã nạp bản đồ: {FilePath(map_yaml_path).name}"
+            )
         self.get_logger().info(
             f"[KIOSK LOCALIZATION] Áp dụng bản đồ: {map_yaml_path} (Backend: {backend})"
         )
@@ -1033,6 +1128,226 @@ class KioskRosNode(Node):
                 self.get_logger().error(f"[KIOSK LOCALIZATION] Lỗi: {exc}")
 
         threading.Thread(target=_loc_worker, daemon=True).start()
+
+    # -------------------------------------------------------------------------
+    # AMCL Initial Pose & Localization Management
+    # -------------------------------------------------------------------------
+    def _set_localization_state(self, state: LocalizationState, message: str = "") -> None:
+        self._localization_state = state
+        self._localization_message = message
+        self.signals.localization_status_changed.emit(state.value, message)
+
+    def get_localization_status(self) -> dict[str, Any]:
+        """Trả về snapshot chi tiết trạng thái Localization hiện tại."""
+        return {
+            "state": self._localization_state.value,
+            "message": self._localization_message,
+            "covariance_norm": self._amcl_covariance_norm,
+            "last_initial_pose_sent_at": self._last_initial_pose_sent_at,
+            "last_amcl_pose_at": self._last_amcl_pose_at,
+            "have_localized_pose": self._have_localized_pose,
+            "auto_initial_pose_enabled": self._auto_initial_pose_enabled,
+        }
+
+    def set_auto_initial_pose_enabled(self, enabled: bool) -> None:
+        """Bật/tắt chế độ tự động định vị robot vào điểm xuất phát khi nạp map."""
+        self._auto_initial_pose_enabled = bool(enabled)
+        self.get_logger().info(f"[LOCALIZATION] Auto Initial Pose: {self._auto_initial_pose_enabled}")
+
+    def check_localization_readiness(self) -> tuple[bool, str]:
+        """Kiểm tra điều kiện tiên quyết trước khi phát Initial Pose hoặc chạy AMCL."""
+        if self._selected_backend == "slam_toolbox":
+            return True, "Chế độ SLAM Toolbox không yêu cầu AMCL Initial Pose"
+
+        # 1. Kiểm tra Layer 2 (Nav2 & AMCL)
+        if not self.is_layer_running("layer2") and not self.is_layer_running("layer_navigation"):
+            return False, "Layer 2 (Nav2 & AMCL) chưa khởi chạy hoặc chưa ở trạng thái RUNNING"
+
+        # 2. Kiểm tra dữ liệu cảm biến
+        now = time.monotonic()
+        if self._last_odom_time == 0.0 or (now - self._last_odom_time) > 4.0:
+            return False, "Chưa nhận được dữ liệu Odometry (/odom) hợp lệ hoặc bị gián đoạn (>4s)"
+
+        if self._last_scan_time == 0.0 or (now - self._last_scan_time) > 4.0:
+            return False, "Chưa nhận được dữ liệu LiDAR (/scan) hợp lệ hoặc bị gián đoạn (>4s)"
+
+        # 3. Kiểm tra TF odom -> base_footprint (hoặc base_link)
+        odom_tf_ok = False
+        try:
+            odom_tf_ok = self._tf_buffer.can_transform("odom", "base_footprint", rclpy.time.Time())
+        except Exception:
+            pass
+        if not odom_tf_ok:
+            try:
+                odom_tf_ok = self._tf_buffer.can_transform("odom", "base_link", rclpy.time.Time())
+            except Exception:
+                pass
+        if not odom_tf_ok:
+            return False, "Chưa có liên kết TF từ odom -> base_footprint"
+
+        return True, "Sẵn sàng nhận vị trí ban đầu (Ready to set pose)"
+
+    def is_navigation_ready(self) -> tuple[bool, str]:
+        """Localization Readiness Gate: Chặn Navigation Goal / Patrol nếu robot chưa sẵn sàng."""
+        if self._selected_backend == "slam_toolbox":
+            return True, "Sẵn sàng điều hướng (SLAM Toolbox)"
+
+        if self._localization_state != LocalizationState.LOCALIZED:
+            return False, (
+                "Robot chưa hoàn tất định vị ban đầu (Initial Pose).\n"
+                f"Trạng thái hiện tại: {self._localization_state.value} ({self._localization_message}).\n"
+                "Vui lòng vào 'ĐỊNH VỊ ROBOT' để xác nhận vị trí trước khi chạy điều hướng!"
+            )
+        return True, "Hệ thống định vị sẵn sàng"
+
+    def cancel_pending_initial_pose(self) -> None:
+        """Hủy phiên định vị đang chờ (dùng khi đổi map, dừng Layer 2 hoặc người dùng hủy)."""
+        with self._lifecycle_lock:
+            self._loc_session_token = ""
+            if self._localization_state in (
+                LocalizationState.PUBLISHING,
+                LocalizationState.WAITING_FOR_LOCALIZATION,
+                LocalizationState.TF_AVAILABLE,
+            ):
+                self._set_localization_state(
+                    LocalizationState.NOT_INITIALIZED,
+                    "Đã hủy phiên định vị ban đầu"
+                )
+
+    def resolve_start_pose_for_map(self, map_path: str | FilePath | None = None) -> dict[str, Any] | None:
+        """Đọc waypoint 'khoihanh' từ file <map_stem>_waypoints.yaml của bản đồ tương ứng."""
+        target_path = map_path or self._selected_map_yaml
+        if not target_path:
+            return None
+        p = FilePath(target_path).resolve()
+        stem = p.stem
+        candidates = [
+            p.parent / f"{stem}_waypoints.yaml",
+            self._get_ws_root() / "my_map" / f"{stem}_waypoints.yaml",
+        ]
+        for c in candidates:
+            if c.is_file():
+                try:
+                    with c.open("r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    locs = data.get("locations", {}) if "locations" in data else data
+                    if isinstance(locs, dict) and "khoihanh" in locs:
+                        kh = locs["khoihanh"]
+                        if isinstance(kh, dict) and "x" in kh and "y" in kh:
+                            return {
+                                "name": "khoihanh",
+                                "x": float(kh.get("x", 0.0)),
+                                "y": float(kh.get("y", 0.0)),
+                                "yaw": float(kh.get("yaw", 0.0)),
+                                "note": str(kh.get("note", "Điểm xuất phát")),
+                                "source_file": str(c),
+                            }
+                except Exception:
+                    pass
+        return None
+
+    def publish_initial_pose(
+        self,
+        x: float,
+        y: float,
+        yaw: float,
+        cov_xy: float = 0.25,
+        cov_yaw: float = 0.0685,
+        map_name: str = "",
+    ) -> bool:
+        """Phát tọa độ PoseWithCovarianceStamped lên /initialpose để AMCL định vị robot."""
+        if not math.isfinite(x) or not math.isfinite(y) or not math.isfinite(yaw):
+            self.get_logger().error(f"[INITIAL POSE] Tọa độ không hợp lệ: x={x}, y={y}, yaw={yaw}")
+            self._set_localization_state(LocalizationState.ERROR, "Tọa độ hoặc góc yaw không hợp lệ (NaN/Inf)")
+            return False
+
+        ready, reason = self.check_localization_readiness()
+        if not ready:
+            self.get_logger().warn(f"[INITIAL POSE] Không thể phát: {reason}")
+            self._set_localization_state(LocalizationState.ERROR, reason)
+            return False
+
+        normalized_yaw = math.atan2(math.sin(float(yaw)), math.cos(float(yaw)))
+
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+        msg.pose.pose.orientation.x = 0.0
+        msg.pose.pose.orientation.y = 0.0
+        msg.pose.pose.orientation.z = math.sin(normalized_yaw / 2.0)
+        msg.pose.pose.orientation.w = math.cos(normalized_yaw / 2.0)
+
+        cov = [0.0] * 36
+        cov[0] = float(cov_xy)
+        cov[7] = float(cov_xy)
+        cov[35] = float(cov_yaw)
+        msg.pose.covariance = cov
+
+        token = uuid.uuid4().hex[:8]
+        self._loc_session_token = token
+        self._last_initial_pose_sent_at = time.monotonic()
+
+        self._set_localization_state(LocalizationState.PUBLISHING, "Đang gửi tọa độ tới AMCL...")
+        self._initial_pose_pub.publish(msg)
+        self.get_logger().info(
+            f"[INITIAL POSE] Đã phát /initialpose (token={token}): x={x:.3f}, y={y:.3f}, yaw={normalized_yaw:.3f} rad"
+        )
+        self._set_localization_state(
+            LocalizationState.WAITING_FOR_LOCALIZATION,
+            f"Đã phát Initial Pose ({x:.2f}, {y:.2f}), chờ AMCL xác nhận..."
+        )
+
+        threading.Thread(
+            target=self._verify_localization_worker,
+            args=(token,),
+            daemon=True,
+        ).start()
+        return True
+
+    def _verify_localization_worker(self, token: str) -> None:
+        """Worker nền kiểm tra TF map -> odom và trạng thái Localization sau khi gửi Initial Pose."""
+        start_t = time.monotonic()
+        timeout = 5.0
+        tf_detected = False
+
+        while time.monotonic() - start_t < timeout:
+            if self._loc_session_token != token:
+                return
+
+            if not tf_detected:
+                tf_ok = False
+                try:
+                    tf_ok = self._tf_buffer.can_transform("map", "odom", rclpy.time.Time())
+                except Exception:
+                    pass
+
+                if tf_ok:
+                    tf_detected = True
+                    if self._localization_state == LocalizationState.WAITING_FOR_LOCALIZATION:
+                        self._set_localization_state(
+                            LocalizationState.TF_AVAILABLE,
+                            "Đã nhận liên kết TF map -> odom từ AMCL"
+                        )
+
+            if self._localization_state == LocalizationState.LOCALIZED:
+                return
+
+            time.sleep(0.2)
+
+        if self._loc_session_token == token and self._localization_state != LocalizationState.LOCALIZED:
+            if tf_detected:
+                self._set_localization_state(
+                    LocalizationState.TF_AVAILABLE,
+                    "Có TF map -> odom nhưng chưa nhận đủ ước lượng tin cậy từ AMCL"
+                )
+            else:
+                self._set_localization_state(
+                    LocalizationState.ERROR,
+                    "Hết thời gian chờ (5s): AMCL không tạo được liên kết TF map -> odom"
+                )
 
     def stop_subprocesses(self) -> None:
         """Dọn dẹp các tiến trình nền khi đóng ứng dụng."""
@@ -1754,6 +2069,13 @@ class KioskRosNode(Node):
                     self._slam_proc = None
                 elif canonical == "layer2":
                     self._localization_proc = None
+                    if hasattr(self, "cancel_pending_initial_pose"):
+                        self.cancel_pending_initial_pose()
+                    if hasattr(self, "_set_localization_state"):
+                        self._set_localization_state(
+                            LocalizationState.NOT_INITIALIZED,
+                            "Layer 2 (Nav2 & AMCL) đã dừng"
+                        )
 
                 self._set_layer_state(canonical, LayerState.STOPPED)
                 self._cancel_starting_layers.discard(canonical)
@@ -1845,6 +2167,13 @@ class KioskRosNode(Node):
             self._layer_procs.clear()
             self._slam_proc = None
             self._localization_proc = None
+            if hasattr(self, "cancel_pending_initial_pose"):
+                self.cancel_pending_initial_pose()
+            if hasattr(self, "_set_localization_state"):
+                self._set_localization_state(
+                    LocalizationState.NOT_INITIALIZED,
+                    "Đã dừng toàn bộ tiến trình"
+                )
 
             stopped_states = {}
             for k in self.LAYER_ALIAS_MAP:

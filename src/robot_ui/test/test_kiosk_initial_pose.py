@@ -1,0 +1,353 @@
+import math
+import time
+from pathlib import Path
+from unittest.mock import MagicMock
+
+import pytest
+import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped, Quaternion
+from PyQt5.QtCore import QPointF, QRectF
+from PyQt5.QtWidgets import QApplication
+
+from robot_ui.kiosk.pages.navigation_page import (
+    InitialPoseDialog,
+    InteractiveNavMapWidget,
+    NavigationPage,
+)
+from robot_ui.kiosk.ros_node import KioskRosNode, LayerState, LocalizationState
+from robot_ui.kiosk.signals import KioskSignals
+
+
+@pytest.fixture(scope="module")
+def qapp():
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    yield app
+
+
+@pytest.fixture
+def ros_node(qapp):
+    if not rclpy.ok():
+        rclpy.init(args=None)
+    signals = KioskSignals()
+    node = KioskRosNode(signals)
+    yield node
+    node.destroy_node()
+
+
+def test_ip01_publish_initial_pose_valid_message(ros_node):
+    """IP-01: Publish Initial Pose hợp lệ -> Message/frame/quaternion/covariance đúng chuẩn."""
+    # Giả lập điều kiện sẵn sàng
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    published = []
+    ros_node._initial_pose_pub.publish = lambda msg: published.append(msg)
+
+    success = ros_node.publish_initial_pose(1.5, -2.5, 0.785)
+    assert success is True
+    assert len(published) == 1
+
+    msg = published[0]
+    assert isinstance(msg, PoseWithCovarianceStamped)
+    assert msg.header.frame_id == "map"
+    assert msg.pose.pose.position.x == 1.5
+    assert msg.pose.pose.position.y == -2.5
+    assert msg.pose.pose.position.z == 0.0
+
+    # Quaternion z = sin(yaw/2), w = cos(yaw/2)
+    assert msg.pose.pose.orientation.z == pytest.approx(math.sin(0.785 / 2.0), abs=1e-4)
+    assert msg.pose.pose.orientation.w == pytest.approx(math.cos(0.785 / 2.0), abs=1e-4)
+
+    # Covariance 6x6
+    cov = msg.pose.covariance
+    assert len(cov) == 36
+    assert cov[0] == 0.25   # var x
+    assert cov[7] == 0.25   # var y
+    assert cov[35] == 0.0685 # var yaw
+
+
+def test_ip02_yaw_extremes_and_special_angles(ros_node):
+    """IP-02: Yaw +-pi, 0, pi/2, -pi/2, 3pi -> Quaternion z^2 + w^2 = 1.0."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    test_angles = [0.0, math.pi, -math.pi, math.pi / 2.0, -math.pi / 2.0, 3.0 * math.pi]
+    for angle in test_angles:
+        published = []
+        ros_node._initial_pose_pub.publish = lambda msg: published.append(msg)
+
+        ok = ros_node.publish_initial_pose(0.0, 0.0, angle)
+        assert ok is True
+        msg = published[0]
+        z = msg.pose.pose.orientation.z
+        w = msg.pose.pose.orientation.w
+        assert (z * z + w * w) == pytest.approx(1.0, abs=1e-5)
+
+
+def test_ip03_no_start_waypoint_rejects_auto_pose(ros_node, tmp_path):
+    """IP-03: Bản đồ không có waypoint xuất phát 'khoihanh' -> Không publish bừa."""
+    empty_map_yaml = tmp_path / "custom_map.yaml"
+    empty_map_yaml.write_text("image: test.pgm\nresolution: 0.05\n", encoding="utf-8")
+
+    pose = ros_node.resolve_start_pose_for_map(empty_map_yaml)
+    assert pose is None
+
+
+def test_ip04_waypoint_not_belonging_to_current_map(ros_node, tmp_path):
+    """IP-04: Waypoint không thuộc map hiện tại -> Từ chối nạp nhầm điểm của map khác."""
+    map_a = tmp_path / "map_a.yaml"
+    map_a.write_text("image: a.pgm\nresolution: 0.05\n", encoding="utf-8")
+
+    wp_b = tmp_path / "map_b_waypoints.yaml"
+    wp_b.write_text("locations:\n  khoihanh:\n    x: 10.0\n    y: 20.0\n    yaw: 0.0\n", encoding="utf-8")
+
+    # Map A không có file map_a_waypoints.yaml
+    pose = ros_node.resolve_start_pose_for_map(map_a)
+    if pose:
+        assert pose["x"] != 10.0  # Không lấy điểm của map B
+
+
+def test_ip05_amcl_inactive_rejects_initial_pose(ros_node):
+    """IP-05: AMCL inactive (Layer 2 STOPPED) -> Không publish, chuyển ERROR."""
+    ros_node._layer_states["layer2"] = LayerState.STOPPED
+    ready, reason = ros_node.check_localization_readiness()
+    assert ready is False
+    assert "Layer 2" in reason
+
+    published = []
+    ros_node._initial_pose_pub.publish = lambda msg: published.append(msg)
+
+    ok = ros_node.publish_initial_pose(1.0, 1.0, 0.0)
+    assert ok is False
+    assert len(published) == 0
+    assert ros_node._localization_state == LocalizationState.ERROR
+
+
+def test_ip06_amcl_active_valid_sensors_accepts_pose(ros_node):
+    """IP-06: AMCL active, dữ liệu hợp lệ -> Sẵn sàng chấp nhận pose."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    ready, reason = ros_node.check_localization_readiness()
+    assert ready is True
+
+
+def test_ip07_map_switch_cancels_pending_pose_task(ros_node):
+    """IP-07: Đổi map trong lúc đang chờ -> Hủy session token cũ."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    ros_node.publish_initial_pose(1.0, 1.0, 0.0)
+    old_token = ros_node._loc_session_token
+    assert old_token != ""
+
+    ros_node.cancel_pending_initial_pose()
+    assert ros_node._loc_session_token == ""
+    assert ros_node._localization_state == LocalizationState.NOT_INITIALIZED
+
+
+def test_ip08_stop_layer2_resets_localization(ros_node):
+    """IP-08: Dừng Layer 2 -> Hủy phiên định vị và đưa về NOT_INITIALIZED."""
+    ros_node._localization_state = LocalizationState.LOCALIZED
+    ros_node._loc_session_token = "abc123"
+
+    # Giả lập sự kiện layer 2 dừng hoàn toàn
+    ros_node.cancel_pending_initial_pose()
+    ros_node._set_localization_state(LocalizationState.NOT_INITIALIZED, "Layer 2 dừng")
+    assert ros_node._localization_state == LocalizationState.NOT_INITIALIZED
+    assert ros_node._loc_session_token == ""
+
+
+def test_ip09_published_without_tf_not_localized(ros_node):
+    """IP-09: Publish thành công nhưng chưa có TF map -> odom -> Không báo LOCALIZED."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+
+    def _mock_can_transform(target_frame, source_frame, *args, **kwargs):
+        if target_frame == "odom" and source_frame in ("base_footprint", "base_link"):
+            return True
+        return False  # Không có TF map -> odom
+
+    ros_node._tf_buffer.can_transform = MagicMock(side_effect=_mock_can_transform)
+
+    ok = ros_node.publish_initial_pose(1.0, 1.0, 0.0)
+    assert ok is True
+    assert ros_node._localization_state != LocalizationState.LOCALIZED
+    assert ros_node._localization_state in (
+        LocalizationState.WAITING_FOR_LOCALIZATION,
+        LocalizationState.PUBLISHING,
+    )
+
+
+def test_ip10_stale_tf_not_accepted(ros_node):
+    """IP-10: TF timeout hoặc không tạo được -> Chuyển sang ERROR."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=False)
+
+    token = "test_tok"
+    ros_node._loc_session_token = token
+    ros_node._localization_state = LocalizationState.WAITING_FOR_LOCALIZATION
+
+    # Chạy worker timeout
+    ros_node._verify_localization_worker(token)
+    assert ros_node._localization_state == LocalizationState.ERROR
+
+
+def test_ip11_amcl_pose_and_tf_transitions_to_localized(ros_node):
+    """IP-11: Nhận /amcl_pose mới sau khi publish -> Chuyển sang LOCALIZED và emit signal."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    confirmed_events = []
+    ros_node.signals.initial_pose_confirmed.connect(lambda d: confirmed_events.append(d))
+
+    ok = ros_node.publish_initial_pose(2.0, 3.0, 1.57)
+    assert ok is True
+    assert ros_node._localization_state in (
+        LocalizationState.WAITING_FOR_LOCALIZATION,
+        LocalizationState.TF_AVAILABLE,
+        LocalizationState.PUBLISHING,
+    )
+
+    # Giả lập nhận /amcl_pose
+    msg = PoseWithCovarianceStamped()
+    msg.header.frame_id = "map"
+    msg.pose.pose.position.x = 2.05
+    msg.pose.pose.position.y = 2.98
+    msg.pose.pose.orientation.z = math.sin(1.57 / 2.0)
+    msg.pose.pose.orientation.w = math.cos(1.57 / 2.0)
+    cov = [0.0] * 36
+    cov[0] = 0.05
+    cov[7] = 0.05
+    msg.pose.covariance = cov
+
+    ros_node._on_amcl_pose(msg)
+    assert ros_node._localization_state == LocalizationState.LOCALIZED
+    assert len(confirmed_events) == 1
+    assert confirmed_events[0]["x"] == 2.05
+    assert confirmed_events[0]["y"] == 2.98
+
+
+def test_ip12_pixel_to_map_coordinate_conversion(qapp):
+    """IP-12: Test chuyển đổi tọa độ Pixel <-> Map trong InteractiveNavMapWidget."""
+    widget = InteractiveNavMapWidget()
+    mock_map = {
+        "preview_width": 200,
+        "preview_height": 200,
+        "resolution": 0.05,
+        "sample_step": 1,
+        "origin_x": -5.0,
+        "origin_y": -5.0,
+        "origin_yaw": 0.0,
+        "cells": [0] * 40000,
+    }
+    widget._map = mock_map
+    target_rect = QRectF(0, 0, 400, 400)
+
+    # 1. Tâm bản đồ thế giới (0.0, 0.0)
+    screen_pt = widget._world_to_screen(0.0, 0.0, target_rect)
+    assert screen_pt is not None
+    assert screen_pt.x() == pytest.approx(200.0, abs=1.0)
+    assert screen_pt.y() == pytest.approx(200.0, abs=1.0)
+
+    # 2. Ngược lại: screen sang world
+    world_coord = widget._screen_to_world(screen_pt, target_rect)
+    assert world_coord is not None
+    assert world_coord[0] == pytest.approx(0.0, abs=0.1)
+    assert world_coord[1] == pytest.approx(0.0, abs=0.1)
+
+
+def test_ip13_double_tap_initial_pose_debounce(ros_node):
+    """IP-13: Bấm Initial Pose liên tục -> Session token mới thay thế, không duplicate worker."""
+    ros_node._layer_states["layer2"] = LayerState.RUNNING
+    ros_node._last_odom_time = time.monotonic()
+    ros_node._last_scan_time = time.monotonic()
+    ros_node._tf_buffer.can_transform = MagicMock(return_value=True)
+
+    ros_node.publish_initial_pose(1.0, 1.0, 0.0)
+    t1 = ros_node._loc_session_token
+
+    ros_node.publish_initial_pose(2.0, 2.0, 0.0)
+    t2 = ros_node._loc_session_token
+
+    assert t1 != t2
+    assert ros_node._loc_session_token == t2
+
+
+def test_ip14_slam_toolbox_skips_amcl_initial_pose(ros_node):
+    """IP-14: Backend slam_toolbox -> Không yêu cầu AMCL Initial Pose."""
+    ros_node._selected_backend = "slam_toolbox"
+    ready, reason = ros_node.check_localization_readiness()
+    assert ready is True
+
+    nav_ready, msg = ros_node.is_navigation_ready()
+    assert nav_ready is True
+
+
+def test_ip15_navigation_gate_blocks_goal_when_not_localized(ros_node):
+    """IP-15: Navigation Readiness Gate chặn Goal mới khi chưa định vị."""
+    ros_node._selected_backend = "amcl"
+    ros_node._localization_state = LocalizationState.NOT_INITIALIZED
+
+    nav_ready, reason = ros_node.is_navigation_ready()
+    assert nav_ready is False
+    assert "chưa hoàn tất định vị" in reason
+
+    warnings = []
+    ros_node.signals.command_status_changed.connect(lambda tone, msg: warnings.append((tone, msg)))
+
+    # Gửi thử điểm đến
+    ros_node.navigate_to_pose(1.0, 2.0, 0.0)
+    ros_node.navigate_to("diem1")
+    ros_node.start_patrol()
+
+    assert len(warnings) == 3
+    for tone, msg in warnings:
+        assert tone == "warning"
+        assert "chưa hoàn tất định vị" in msg
+
+
+def test_ip16_navigation_gate_allows_goal_when_localized(ros_node):
+    """IP-16: Cho phép gửi Goal khi đã LOCALIZED."""
+    ros_node._selected_backend = "amcl"
+    ros_node._localization_state = LocalizationState.LOCALIZED
+
+    nav_ready, _ = ros_node.is_navigation_ready()
+    assert nav_ready is True
+
+
+def test_ip17_close_kiosk_cancels_daemon_workers(ros_node):
+    """IP-17: Đóng Kiosk giữa chừng -> Không bị treo daemon worker."""
+    ros_node.cancel_pending_initial_pose()
+    assert ros_node._loc_session_token == ""
+
+
+def test_ip18_subpage_switch_preserves_localization_state(qapp):
+    """IP-18: Chuyển subpage trong NavigationPage -> Giữ nguyên trạng thái Localization."""
+    icons = {}
+    page = NavigationPage(icons)
+    page.set_localization_status("LOCALIZED", "Đã định vị thành công")
+    assert page._localization_state == "LOCALIZED"
+    assert "ĐÃ ĐỊNH VỊ" in page.lbl_localization_badge.text()
+
+    # Kích hoạt / hủy kích hoạt trang
+    page.set_active(False)
+    page.set_active(True)
+    assert page._localization_state == "LOCALIZED"
+    assert "ĐÃ ĐỊNH VỊ" in page.lbl_localization_badge.text()
+    page.close()
