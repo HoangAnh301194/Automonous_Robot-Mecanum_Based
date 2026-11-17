@@ -581,7 +581,15 @@ class KioskRosNode(Node):
             self.get_logger().error(f"[NAV][ERROR] Từ chối navigate_to: {reason}")
             self.signals.command_status_changed.emit("warning", f"[ERROR] {reason}")
             return
-        if not self._direct_go_client.server_is_ready():
+        client = self._direct_go_client
+        server_ok = False
+        if client is not None:
+            if hasattr(client, "server_is_ready") and client.server_is_ready():
+                server_ok = True
+            elif hasattr(client, "wait_for_server") and client.wait_for_server(timeout_sec=1.5):
+                server_ok = True
+
+        if not server_ok:
             self.get_logger().error(f"[NAV][ERROR] Action server /navigation/direct_go chưa sẵn sàng (target='{target}')!")
             self.signals.command_status_changed.emit(
                 "warning",
@@ -652,7 +660,15 @@ class KioskRosNode(Node):
             self.signals.navigation_active_changed.emit(False)
             return
 
-        if not self._nav2_client.server_is_ready():
+        client = getattr(self, "_nav2_client", None) or getattr(self, "_nav_action_client", None)
+        server_ok = False
+        if client is not None:
+            if hasattr(client, "server_is_ready") and client.server_is_ready():
+                server_ok = True
+            elif hasattr(client, "wait_for_server") and client.wait_for_server(timeout_sec=1.5):
+                server_ok = True
+
+        if not server_ok:
             self.get_logger().error(
                 f"[NAV][ERROR] Nav2 Action Server /navigate_to_pose chưa online (target: X={x:.2f}, Y={y:.2f})! Hãy kiểm tra Layer 2."
             )
@@ -902,14 +918,21 @@ class KioskRosNode(Node):
             return
 
         self.get_logger().info("[PATROL][INFO] Kích hoạt bắt đầu tuần tra (/mission/start_patrol)")
-        if not self.start_patrol_client.service_is_ready():
-            if not self.start_patrol_client.wait_for_service(timeout_sec=0.5):
-                self.get_logger().error("[PATROL][ERROR] Service /mission/start_patrol chưa sẵn sàng (Hãy kiểm tra Layer 5)!")
-                self.signals.command_status_changed.emit(
-                    "warning",
-                    "[ERROR] Chưa kết nối Mission Controller (Layer 5)",
-                )
-                return
+        client = getattr(self, "start_patrol_client", None)
+        service_ok = False
+        if client is not None:
+            if hasattr(client, "service_is_ready") and client.service_is_ready():
+                service_ok = True
+            elif hasattr(client, "wait_for_service") and client.wait_for_service(timeout_sec=1.5):
+                service_ok = True
+
+        if not service_ok:
+            self.get_logger().error("[PATROL][ERROR] Service /mission/start_patrol chưa sẵn sàng (Hãy kiểm tra Layer 5)!")
+            self.signals.command_status_changed.emit(
+                "warning",
+                "[ERROR] Chưa kết nối Mission Controller (Layer 5)",
+            )
+            return
         req = Trigger.Request()
         future = self.start_patrol_client.call_async(req)
         future.add_done_callback(self._on_start_patrol_response)

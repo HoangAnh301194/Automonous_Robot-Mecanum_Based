@@ -21,6 +21,7 @@ Features:
 """
 from __future__ import annotations
 
+import html
 import math
 import time
 from datetime import datetime
@@ -42,6 +43,7 @@ from PyQt5.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QTextCursor,
 )
 from PyQt5.QtWidgets import (
     QDialog,
@@ -60,6 +62,7 @@ from PyQt5.QtWidgets import (
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -1296,6 +1299,8 @@ class NavigationPage(QWidget):
         self._is_active = True
         self._localization_state = "NOT_INITIALIZED"
         self._localization_message = "Chưa định vị"
+        self._last_log_feedback_time = 0.0
+        self.patrol_log_text: QTextEdit | None = None
 
         self._init_ui()
         default_map = Path("my_map/a2_amcl.yaml")
@@ -1904,7 +1909,51 @@ class NavigationPage(QWidget):
         self.table_waypoints.setHorizontalHeaderLabels(["Tên điểm", "X (m)", "Y (m)", "Ghi chú"])
         self.table_waypoints.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_waypoints.verticalHeader().setVisible(False)
-        t_layout.addWidget(self.table_waypoints, 1)
+        self.table_waypoints.cellClicked.connect(self._on_waypoint_cell_clicked)
+        t_layout.addWidget(self.table_waypoints, 3)
+
+        # Log Console under waypoint table
+        log_head = QHBoxLayout()
+        lbl_log_title = QLabel("[NHẬT KÝ ĐIỀU HƯỚNG & TUẦN TRA]")
+        lbl_log_title.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 800;")
+        log_head.addWidget(lbl_log_title)
+        log_head.addStretch(1)
+
+        self.btn_clear_patrol_log = QPushButton("Xóa Log")
+        self.btn_clear_patrol_log.setStyleSheet("""
+            QPushButton {
+                background: #171c22;
+                color: #94a3b8;
+                border: 1px solid #242c36;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 2px 8px;
+            }
+            QPushButton:hover {
+                background: #242c36;
+                color: #ffffff;
+            }
+        """)
+        self.btn_clear_patrol_log.clicked.connect(self._clear_patrol_log)
+        log_head.addWidget(self.btn_clear_patrol_log)
+        t_layout.addLayout(log_head)
+
+        self.patrol_log_text = QTextEdit()
+        self.patrol_log_text.setReadOnly(True)
+        self.patrol_log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #0b0f14;
+                color: #e2e8f0;
+                border: 1px solid #242c36;
+                border-radius: 6px;
+                font-family: 'DejaVu Sans Mono', 'Ubuntu Mono', 'Monospace', monospace;
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 6px;
+            }
+        """)
+        t_layout.addWidget(self.patrol_log_text, 2)
 
         right_box.addWidget(table_card, 1)
         root_layout.addLayout(right_box, 2)
@@ -1966,6 +2015,10 @@ class NavigationPage(QWidget):
         self.btn_pick_mode.setText(f"Chấm điểm trên Map: {'ON' if enabled else 'OFF'}")
         self.btn_pick_mode.style().unpolish(self.btn_pick_mode)
         self.btn_pick_mode.style().polish(self.btn_pick_mode)
+        if enabled:
+            self.append_patrol_log("[WAYPOINT][INFO] Đã bật chế độ chấm điểm tuần tra (Chạm lên map để thêm điểm).", "progress")
+        else:
+            self.append_patrol_log("[WAYPOINT][INFO] Đã tắt chế độ chấm điểm trên bản đồ.", "info")
 
     def _on_waypoint_picked_on_map(self, x: float, y: float, yaw: float) -> None:
         idx = len(self._batch_waypoints)
@@ -1981,16 +2034,60 @@ class NavigationPage(QWidget):
         self._batch_waypoints.append(new_wp)
         recompute_cyclic_waypoint_yaws(self._batch_waypoints)
         self._sync_views_from_waypoints()
+        self.append_patrol_log(f"[WAYPOINT][INFO] Đã thêm điểm '{name}': X={x:.3f}, Y={y:.3f} m", "success")
 
     def _undo_batch_waypoint(self) -> None:
         if self._batch_waypoints:
-            self._batch_waypoints.pop()
+            popped = self._batch_waypoints.pop()
             recompute_cyclic_waypoint_yaws(self._batch_waypoints)
             self._sync_views_from_waypoints()
+            p_name = popped.get("name", "gần nhất")
+            self.append_patrol_log(f"[WAYPOINT][WARN] Đã xóa điểm '{p_name}'.", "warning")
 
     def _clear_batch_waypoints(self) -> None:
         self._batch_waypoints.clear()
         self._sync_views_from_waypoints()
+        self.append_patrol_log("[WAYPOINT][WARN] Đã xóa toàn bộ danh sách điểm tuần tra.", "warning")
+
+    def _on_waypoint_cell_clicked(self, row: int, column: int) -> None:
+        """Xử lý khi người dùng chạm vào một hàng waypoint trong bảng."""
+        if 0 <= row < len(self._batch_waypoints):
+            wp = self._batch_waypoints[row]
+            name = str(wp.get("name", f"point_{row}"))
+            x = float(wp.get("x", 0.0))
+            y = float(wp.get("y", 0.0))
+            yaw = float(wp.get("yaw", 0.0))
+            self._goal = (x, y, yaw)
+            self.map_widget.set_goal(x, y, yaw)
+            self._set_button_strength(self.start_button, True)
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã chọn waypoint '{name}' trên bảng: X={x:.3f}, Y={y:.3f}",
+                "info"
+            )
+
+    def append_patrol_log(self, text: str, tone: str = "info") -> None:
+        """Ghi dòng nhật ký mới vào khung log tuần tra với timestamp và mã màu."""
+        if not hasattr(self, "patrol_log_text") or self.patrol_log_text is None:
+            return
+        t_str = datetime.now().strftime("%H:%M:%S")
+        color_map = {
+            "success": "#10b981",  # Green
+            "error": "#ef4444",    # Red
+            "warning": "#f59e0b",  # Amber/Yellow
+            "progress": "#38bdf8", # Sky blue
+            "info": "#94a3b8",     # Muted slate
+        }
+        color = color_map.get(tone, "#94a3b8")
+        escaped_text = html.escape(text)
+        html_line = f"<span style='color: #64748b;'>[{t_str}]</span> <span style='color: {color}; font-weight: 600;'>{escaped_text}</span>"
+        self.patrol_log_text.append(html_line)
+        self.patrol_log_text.moveCursor(QTextCursor.End)
+
+    def _clear_patrol_log(self) -> None:
+        """Xóa trắng nội dung khung log tuần tra."""
+        if hasattr(self, "patrol_log_text") and self.patrol_log_text is not None:
+            self.patrol_log_text.clear()
+            self.append_patrol_log("[INFO] Đã xóa nhật ký điều hướng.", "info")
 
     def _sync_views_from_waypoints(self) -> None:
         """Update both maps, table, and summary label from current waypoints."""
@@ -2155,6 +2252,7 @@ class NavigationPage(QWidget):
                     "Nạp cấu hình thành công",
                     f"Đã nạp {len(loaded)} điểm tuần tra từ:\n{wp_file.name}",
                 )
+            self.append_patrol_log(f"[WAYPOINT][INFO] Đã nạp {len(loaded)} điểm tuần tra từ file {wp_file.name}.", "info")
             return True
         except Exception as exc:
             if not silent:
@@ -2226,6 +2324,10 @@ class NavigationPage(QWidget):
             self._sync_active_config_files()
             self._sync_views_from_waypoints()
 
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã lưu {len(self._batch_waypoints)} điểm vào {target_wp_file.name}.",
+                "success"
+            )
             QMessageBox.information(
                 self,
                 "Lưu lộ trình thành công",
@@ -2262,6 +2364,7 @@ class NavigationPage(QWidget):
         self.set_command_status("warning", f"[WARN] {message}")
 
     def _start_single_navigation(self) -> None:
+        self.append_patrol_log("[NAV][INFO] Đã bấm nút: BẮT ĐẦU ĐI.", "progress")
         if self._localization_state != "LOCALIZED":
             self.set_command_status(
                 "error",
@@ -2286,6 +2389,7 @@ class NavigationPage(QWidget):
         self.start_requested.emit(*self._goal)
 
     def _stop_navigation(self) -> None:
+        self.append_patrol_log("[NAV][WARN] Đã bấm nút: DỪNG HÀNH TRÌNH.", "warning")
         self.set_navigation_active(False)
         self.set_command_status("warning", "[WARN] Đã yêu cầu dừng hành trình điều hướng.")
         self.cancel_requested.emit()
@@ -2293,6 +2397,7 @@ class NavigationPage(QWidget):
         self.lbl_dist_remain.setText("Cự ly còn lại: -- m")
 
     def _start_patrol(self) -> None:
+        self.append_patrol_log("[PATROL][INFO] Đã bấm nút: BẮT ĐẦU TUẦN TRA.", "progress")
         if self._localization_state != "LOCALIZED":
             self.set_command_status(
                 "error",
@@ -2310,6 +2415,7 @@ class NavigationPage(QWidget):
         self.start_patrol_requested.emit()
 
     def _pause_patrol(self) -> None:
+        self.append_patrol_log("[PATROL][WARN] Đã bấm nút: TẠM DỪNG TUẦN TRA.", "warning")
         self.pause_patrol_requested.emit()
 
     def _toggle_2d_estimate(self) -> None:
@@ -2318,6 +2424,7 @@ class NavigationPage(QWidget):
             self.map_widget.set_initial_pose_mode(False)
             self.btn_initial_pose.setText("2D POSE ESTIMATE")
             self.btn_initial_pose.setStyleSheet("")
+            self.append_patrol_log("[ESTIMATE][INFO] Đã hủy chế độ 2D Pose Estimate.", "info")
             self.set_command_status("warning", "[INFO] Đã hủy chế độ 2D Pose Estimate.")
             return
 
@@ -2326,6 +2433,7 @@ class NavigationPage(QWidget):
         self.btn_initial_pose.setStyleSheet(
             "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
         )
+        self.append_patrol_log("[ESTIMATE][INFO] Đã bật chế độ 2D Pose Estimate (Chạm và kéo trên bản đồ).", "progress")
         self.set_command_status("progress", "[INFO] Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
 
     def _on_initial_pose_button_clicked(self) -> None:
@@ -2488,6 +2596,14 @@ class NavigationPage(QWidget):
         self.lbl_est_time.setText(f"Ước tính: {est_sec:.1f} s")
         self.lbl_recovery_count.setText(f"Tự cứu: {recov} lần")
 
+        now = time.monotonic()
+        if now - self._last_log_feedback_time >= 3.0:
+            self._last_log_feedback_time = now
+            self.append_patrol_log(
+                f"[NAV][DEBUG] Tiến độ: Còn lại {dist:.2f} m | Thời gian chạy: {nav_sec:.1f} s | Ước tính: {est_sec:.1f} s | Tự cứu: {recov}",
+                "progress"
+            )
+
     def load_map_yaml(self, yaml_path: Path | str | None) -> bool:
         """Load and render map from YAML file, and automatically load corresponding map waypoints."""
         map_data = parse_nav_map_yaml(yaml_path)
@@ -2557,6 +2673,7 @@ class NavigationPage(QWidget):
         color = color_map.get(tone, "#94a3b8")
         self.status_label.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 13px;")
         self.status_label.setText(message)
+        self.append_patrol_log(message, tone)
         if tone in {"success", "error", "warning"}:
             self.set_navigation_active(False)
             if tone == "success":
