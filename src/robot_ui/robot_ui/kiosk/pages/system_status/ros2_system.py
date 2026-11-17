@@ -10,12 +10,15 @@ from __future__ import annotations
 
 from collections import deque
 import glob
+import os
+from pathlib import Path
 import time
 from typing import Any, Callable, Optional
 
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -42,6 +45,10 @@ class ROS2SystemDetailScreen(QWidget):
     back_requested = pyqtSignal()
     start_layer_requested = pyqtSignal(str)
     stop_layer_requested = pyqtSignal(str)
+    start_all_requested = pyqtSignal(str, str, str)
+    stop_all_requested = pyqtSignal()
+    swap_ports_requested = pyqtSignal()
+    rescan_ports_requested = pyqtSignal()
     emergency_cleanup_requested = pyqtSignal()
     log_filter_changed = pyqtSignal(str)
 
@@ -96,7 +103,153 @@ class ROS2SystemDetailScreen(QWidget):
         c_layout.setContentsMargins(0, 0, 4, 0)
         c_layout.setSpacing(12)
 
-        # A. QUẢN LÝ TIẾN TRÌNH 5 LAYER ROS 2
+        # A. CỤM ĐIỀU KHIỂN HỆ THỐNG TỔNG THỂ (WORKFLOW GUI V3 - START ALL / STOP ALL)
+        card_master, m_layout = create_section_card(
+            "CỤM ĐIỀU KHIỂN VẬN HÀNH TỔNG THỂ (RUN ALL - WORKFLOW GUI V3)",
+            "#10b981",
+        )
+
+        # 1. Hàng chọn Chế độ vận hành Layer 2 & Backend định vị
+        mode_row = QHBoxLayout()
+        mode_row.setSpacing(10)
+
+        lbl_mode = QLabel("Chế độ Layer 2:")
+        lbl_mode.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-weight: 700; font-size: 12px;")
+        mode_row.addWidget(lbl_mode)
+
+        self.cmb_operation_mode = QComboBox()
+        self.cmb_operation_mode.addItems([
+            "Lập Bản Đồ Mới (SLAM Mapping)",
+            "Định Vị & Điều Hướng (Localization Nav2)",
+        ])
+        self.cmb_operation_mode.setFixedHeight(36)
+        self.cmb_operation_mode.setStyleSheet(f"""
+            QComboBox {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-weight: 700;
+                font-size: 12px;
+            }}
+            QComboBox::drop-down {{ border: none; }}
+            QComboBox QAbstractItemView {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                selection-background-color: {KioskTheme.COLOR_ACCENT};
+            }}
+        """)
+        self.cmb_operation_mode.currentIndexChanged.connect(self._on_mode_changed)
+        mode_row.addWidget(self.cmb_operation_mode, stretch=1)
+
+        lbl_backend = QLabel("Backend định vị:")
+        lbl_backend.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-weight: 700; font-size: 12px;")
+        mode_row.addWidget(lbl_backend)
+
+        self.cmb_backend = QComboBox()
+        self.cmb_backend.addItems(["AMCL", "SLAM Toolbox"])
+        self.cmb_backend.setFixedHeight(36)
+        self.cmb_backend.setStyleSheet(self.cmb_operation_mode.styleSheet())
+        self.cmb_backend.setEnabled(False)  # Mặc định tắt nếu đang là SLAM Mapping
+        mode_row.addWidget(self.cmb_backend)
+
+        m_layout.addLayout(mode_row)
+
+        # 2. Hàng chọn Bản đồ (Map selector) khi ở chế độ Localization
+        self.map_row_widget = QWidget()
+        map_row = QHBoxLayout(self.map_row_widget)
+        map_row.setContentsMargins(0, 0, 0, 0)
+        map_row.setSpacing(10)
+
+        lbl_map = QLabel("Bản đồ mục tiêu:")
+        lbl_map.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-weight: 700; font-size: 12px;")
+        map_row.addWidget(lbl_map)
+
+        self.cmb_maps = QComboBox()
+        self.cmb_maps.setFixedHeight(36)
+        self.cmb_maps.setStyleSheet(self.cmb_operation_mode.styleSheet())
+        map_row.addWidget(self.cmb_maps, stretch=1)
+
+        self.btn_refresh_maps = QPushButton("Làm mới Map")
+        self.btn_refresh_maps.setFixedHeight(36)
+        self.btn_refresh_maps.setCursor(Qt.PointingHandCursor)
+        self.btn_refresh_maps.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                color: {KioskTheme.COLOR_TEXT_MUTED};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 0 12px;
+                font-weight: 700;
+                font-size: 11px;
+            }}
+            QPushButton:hover {{ color: {KioskTheme.COLOR_TEXT_PRIMARY}; border-color: {KioskTheme.COLOR_ACCENT}; }}
+        """)
+        self.btn_refresh_maps.clicked.connect(self.refresh_map_list)
+        map_row.addWidget(self.btn_refresh_maps)
+
+        self.map_row_widget.setVisible(False)  # Mặc định ẩn nếu đang là SLAM Mapping
+        m_layout.addWidget(self.map_row_widget)
+
+        # 3. Hàng 2 Nút Tổng Quan: START ALL & STOP ALL
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(12)
+
+        self.btn_start_all = QPushButton("▶ CHẠY TOÀN BỘ (START ALL)")
+        self.btn_start_all.setFixedHeight(44)
+        self.btn_start_all.setCursor(Qt.PointingHandCursor)
+        self.btn_start_all.setToolTip(
+            "Khởi động Layer 1 (Hardware/Odom), sau 1.2s tự động khởi động tiếp Layer 2 (theo Mode đã chọn) giống gui_v3"
+        )
+        self.btn_start_all.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 900;
+                letter-spacing: 0.5px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:pressed {
+                background-color: #047857;
+            }
+        """)
+        self.btn_start_all.clicked.connect(self._on_start_all_clicked)
+        actions_row.addWidget(self.btn_start_all, stretch=1)
+
+        self.btn_stop_all = QPushButton("⏹ DỪNG TOÀN BỘ (STOP ALL)")
+        self.btn_stop_all.setFixedHeight(44)
+        self.btn_stop_all.setCursor(Qt.PointingHandCursor)
+        self.btn_stop_all.setToolTip("Dừng tất cả các tiến trình Layer 1..5 và SLAM/Nav2 đang chạy")
+        self.btn_stop_all.setStyleSheet("""
+            QPushButton {
+                background-color: #ef4444;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: 900;
+                letter-spacing: 0.5px;
+            }
+            QPushButton:hover {
+                background-color: #dc2626;
+            }
+            QPushButton:pressed {
+                background-color: #b91c1c;
+            }
+        """)
+        self.btn_stop_all.clicked.connect(self._on_stop_all_clicked)
+        actions_row.addWidget(self.btn_stop_all, stretch=1)
+
+        m_layout.addLayout(actions_row)
+        c_layout.addWidget(card_master)
+
+        # B. QUẢN LÝ TIẾN TRÌNH 5 LAYER ROS 2
         card_layers, l_layout = create_section_card("QUẢN LÝ 5 LAYER KIẾN TRÚC PHẦN MỀM ROBOT", KioskTheme.COLOR_ACCENT)
 
         layers_info = [
@@ -344,6 +497,40 @@ class ROS2SystemDetailScreen(QWidget):
         "layer5": "layer_voice_interaction",
     }
 
+    def _on_mode_changed(self, index: int) -> None:
+        """Bật/tắt các widget phụ thuộc theo chế độ SLAM hoặc Localization."""
+        is_loc = index == 1
+        self.cmb_backend.setEnabled(is_loc)
+        self.map_row_widget.setVisible(is_loc)
+
+    def refresh_map_list(self) -> None:
+        """Quét và làm mới danh sách các file bản đồ YAML có sẵn."""
+        self.cmb_maps.blockSignals(True)
+        self.cmb_maps.clear()
+        found_maps: list[str] = []
+        search_dirs = [
+            Path.home() / "ros2_ws" / "my_map",
+            Path.home() / "ros2_ws" / "src" / "mo_hinh" / "maps",
+            Path.home() / "ros2_ws" / "install" / "mo_hinh" / "share" / "mo_hinh" / "maps",
+        ]
+        for sdir in search_dirs:
+            if sdir.is_dir():
+                for p in sorted(sdir.glob("*.yaml")):
+                    if p.stem in ("cam_truoc", "cam_sau", "nav2_params", "mapper_params_online_async"):
+                        continue
+                    sp = str(p.resolve())
+                    if sp not in found_maps:
+                        found_maps.append(sp)
+                        self.cmb_maps.addItem(f"{p.name} ({p.parent.name})", sp)
+
+        self.cmb_maps.blockSignals(False)
+
+    def set_detected_ports(self, esp_port: str, lidar_port: str, detect_src: str) -> None:
+        """Cập nhật thông tin cổng Serial hiển thị lên giao diện."""
+        self.lbl_esp_port.setText(f"ESP32 / Hoverboard: {esp_port}")
+        self.lbl_lidar_port.setText(f"LiDAR SLAMTEC: {lidar_port}")
+        self.lbl_ports_info.setText(f"Cơ chế nhận diện: {detect_src}")
+
     def update_layer_status(self, layers_state: dict[str, Any]) -> None:
         """Cập nhật trạng thái hiển thị cho từng Layer và Header counter."""
         for raw_k, is_on in layers_state.items():
@@ -542,6 +729,28 @@ class ROS2SystemDetailScreen(QWidget):
             if self._current_filter in self._logs_by_layer:
                 self._logs_by_layer[self._current_filter].clear()
         self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
+
+    def _on_start_all_clicked(self) -> None:
+        """Bắt đầu chạy toàn bộ hệ thống theo chuẩn gui_v3."""
+        mode_idx = self.cmb_operation_mode.currentIndex()
+        mode = "slam_mapping" if mode_idx == 0 else "localization"
+        backend = self.cmb_backend.currentText().strip().lower()
+        if "slam" in backend:
+            backend = "slam_toolbox"
+        else:
+            backend = "amcl"
+        selected_map = self.cmb_maps.currentData() or ""
+        self.append_process_log(
+            "SYSTEM",
+            f"Bắt đầu quy trình CHẠY TOÀN BỘ (Start All)... Mode: {self.cmb_operation_mode.currentText()}",
+            flush_now=True,
+        )
+        self.start_all_requested.emit(mode, selected_map, backend)
+
+    def _on_stop_all_clicked(self) -> None:
+        """Dừng toàn bộ hệ thống."""
+        self.append_process_log("SYSTEM", "Gửi lệnh DỪNG TOÀN BỘ (Stop All)...", flush_now=True)
+        self.stop_all_requested.emit()
 
     def _on_rescan_ports(self) -> None:
         try:
