@@ -54,7 +54,7 @@ GUI đã có nút **Xuất ZIP dataset**, hoặc chạy:
 .\.venv\Scripts\python.exe export_zip.py --collector c01
 ```
 
-Thay `c01` bằng mã người thu được cấp. ZIP được lưu trong `exports`. Không gửi `data\recorder_registry.json`.
+**`c01` là tên viết tắt hoặc mã định danh của người trực tiếp thu thập data**, không phải tên người đang được ghi âm. Ví dụ người thu Hoàng Anh có thể dùng `hoanganh` (không dấu, không khoảng trắng) thay cho `c01`. Tên/mã người thu cần duy nhất và giữ nguyên qua các lần gửi; dùng 2–12 ký tự `a-z`, `0-9`, bắt đầu bằng chữ. ZIP được lưu trong `exports`. Không gửi `data\recorder_registry.json`.
 
 Nếu Windows không nhận microphone, kiểm tra **Settings → Privacy & security → Microphone** và cho phép ứng dụng desktop sử dụng mic.
 
@@ -96,9 +96,9 @@ Nếu tải ZIP thay vì clone, giải nén và mở Terminal trong thư mục c
 
 ## Xuất ZIP và gửi người phụ trách
 
-1. Xin mã cộng tác viên duy nhất từ người phụ trách (ví dụ c01).
-2. Điền mã vào GUI, chọn **Xuất ZIP dataset**, rồi chọn chỗ lưu.
-3. Gửi file ZIP qua kênh riêng tư cho người phụ trách, không upload WAV lên GitHub.
+1. Điền **tên viết tắt hoặc mã của người thu thập dữ liệu** ở ô `Tên/mã người thu data` (ví dụ `c01` hoặc `hoanganh`). `c01` chỉ đại diện cho người **thực hiện thu data**, không phải người **đọc từ khóa trong bản ghi**. Mỗi người thu dùng một tên/mã duy nhất và nhất quán; chỉ dùng chữ thường không dấu và số, từ 2–12 ký tự, bắt đầu bằng chữ.
+2. Điền tên/mã người thu vào GUI, chọn **Xuất ZIP dataset**, rồi chọn chỗ lưu.
+3. Gửi file ZIP qua kênh riêng tư cho người phụ trách, không upload WAV lên GitHub. File ZIP sẽ mang tên/mã người thu để dễ tổng hợp dữ liệu nhiều người.
 4. Không gửi data/recorder_registry.json vì file này chứa tên/biệt danh nội bộ.
 
 ZIP giữ nguyên các nhãn như sau:
