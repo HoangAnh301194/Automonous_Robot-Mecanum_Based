@@ -224,7 +224,7 @@ class DetectionDebugPage(QWidget):
         self.btn_launch_rqt_pose.setStyleSheet("""
             QPushButton {{
                 background-color: #6b21a8;
-                color: #1d2938;
+                color: #ffffff;
                 font-weight: 800;
                 font-size: 13px;
                 border: none;
