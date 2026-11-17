@@ -20,38 +20,51 @@ def package_share() -> Path:
         return Path(__file__).resolve().parents[2]
 
 
-# White-on-transparent glyphs designed for the old dark theme. Keep brand,
-# service and emergency graphics in their original semantic colours.
-_LIGHT_GLYPH_COLORS = {
-    "back.png": "#243447",
-    "homeIcon.png": "#243447",
-    "chatIcon.png": "#243447",
-    "setting_icon.png": "#243447",
-    "wifi.png": "#16804a",
-    "wifidisconected.png": "#be3446",
-    "mic.png": "#243447",
-    "mic_listening.png": "#b32632",
-    "mic_off.png": "#243447",
-    "microphone.png": "#243447",
-    "speaker_on.png": "#243447",
-    "speaker_off.png": "#243447",
-    "stop_speaking.png": "#b32632",
-    "status.png": "#243447",
-    "detection.png": "#243447",
-    "locolization.png": "#243447",
-    "manual_control.png": "#243447",
-    "service_wait.png": "#24558a",
-    "service_continue.png": "#16804a",
-    **{f"battery_{pct}.png": "#243447" for pct in (0, 25, 50, 75, 100)},
-}
+# Unified PTIT light-theme icon palette. Only actionable UI icons are tinted;
+# the school/faculty logos, static Mochi artwork and emergency icon retain
+# their native colors. The originals in souta_robot/ are never overwritten.
+ICON_GOLD = "#C58A00"
+ICON_GOLD_ACTIVE = "#D97706"
+
+_LIGHT_GLYPH_NAMES = (
+    "back.png",
+    "homeIcon.png",
+    "chatIcon.png",
+    "setting_icon.png",
+    "wifi.png",
+    "wifidisconected.png",
+    "mic.png",
+    "mic_listening.png",
+    "mic_off.png",
+    "microphone.png",
+    "speaker_on.png",
+    "speaker_off.png",
+    "stop_speaking.png",
+    "status.png",
+    "detection.png",
+    "locolization.png",
+    "manual_control.png",
+    "service_wait.png",
+    "service_continue.png",
+    "service.png",
+    "welcome.png",
+    "SLAMicon.png",
+    "navigationIcon.png",
+    "startNavigation.png",
+    "stopNavigation.png",
+    "clickGoal.png",
+    "location.png",
+    *(f"battery_{pct}.png" for pct in (0, 25, 50, 75, 100)),
+)
+_LIGHT_GLYPH_COLORS = {name: ICON_GOLD for name in _LIGHT_GLYPH_NAMES}
 
 
 @lru_cache(maxsize=64)
 def icon_path(filename: str) -> Path:
     """Return a colour-corrected monochrome icon, preserving its alpha channel.
 
-    Tint only the known white glyph files. Source images are not overwritten;
-    the display variants are cached in a writable temporary directory.
+    Recolor actionable PNG glyphs to the unified ochre accent. Source images
+    are not overwritten; generated variants live in a writable temp cache.
     """
     source_path = package_share() / "souta_robot" / filename
     color = _LIGHT_GLYPH_COLORS.get(filename)
@@ -61,7 +74,7 @@ def icon_path(filename: str) -> Path:
         stamp = source_path.stat().st_mtime_ns
         cache_dir = Path(tempfile.gettempdir()) / "souta_light_icons"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        cached = cache_dir / f"{source_path.stem}_{stamp}.png"
+        cached = cache_dir / f"{source_path.stem}_{color.lstrip('#')}_{stamp}.png"
         if cached.is_file():
             return cached
         source = QImage(str(source_path))
