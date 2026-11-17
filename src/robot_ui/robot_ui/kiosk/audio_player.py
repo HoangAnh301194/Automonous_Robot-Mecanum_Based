@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import shutil
 import subprocess
 import threading
 from typing import Callable
@@ -25,7 +26,16 @@ class AudioPlayer:
         self.on_playback_finished = on_playback_finished  # (request_id)
         self.on_playback_error = on_playback_error        # (request_id, error_msg)
 
-        self.player_cmd = player_cmd or os.getenv("KIOSK_AUDIO_PLAYER", "mpv")
+        requested = player_cmd or os.getenv("KIOSK_AUDIO_PLAYER", "").strip()
+        if requested and shutil.which(requested):
+            self.player_cmd = requested
+        else:
+            self.player_cmd = next(
+                (candidate for candidate in ("mpv", "ffplay", "aplay") if shutil.which(candidate)),
+                "",
+            )
+            if requested:
+                LOG.warning("Audio player %s not found; falling back to %s", requested, self.player_cmd or "none")
         self.playback_speed = os.getenv("AUDIO_PLAYBACK_SPEED", "1.15").strip()
         try:
             default_vol = int(os.getenv("AUDIO_PLAYBACK_VOLUME", "80"))
@@ -121,7 +131,28 @@ class AudioPlayer:
         self.stop()
 
         vol = self._volume
-        cmd = [self.player_cmd, "--no-terminal", "--idle=no", f"--speed={self.playback_speed}", f"--volume={vol}", "-"]
+        executable = os.path.basename(self.player_cmd).lower()
+        if executable == "mpv":
+            cmd = [self.player_cmd, "--no-terminal", "--idle=no",
+                   f"--speed={self.playback_speed}", f"--volume={vol}", "-"]
+        elif executable == "ffplay":
+            cmd = [self.player_cmd, "-nodisp", "-autoexit", "-loglevel", "quiet",
+                   "-volume", str(vol), "-i", "-"]
+        elif executable == "aplay":
+            # aplay cannot decode the MP3/Opus data typical of neural TTS.
+            if not audio_data.startswith(b"RIFF"):
+                message = "aplay fallback supports WAV audio only; install mpv or ffplay."
+                LOG.error(message)
+                if self.on_playback_error:
+                    self.on_playback_error(request_id, message)
+                return False
+            cmd = [self.player_cmd, "-q", "-"]
+        else:
+            message = "No supported player (mpv, ffplay, aplay) found."
+            LOG.error(message)
+            if self.on_playback_error:
+                self.on_playback_error(request_id, message)
+            return False
         try:
             proc = subprocess.Popen(
                 cmd,
