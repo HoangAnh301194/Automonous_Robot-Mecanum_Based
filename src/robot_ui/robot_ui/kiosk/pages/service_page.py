@@ -1,4 +1,4 @@
-"""PTIT Mochi dark-theme Service page with native, accessible Qt touch controls."""
+"""White-backed PTIT Mochi Service page inside the dark-mode Kiosk."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -68,7 +68,8 @@ class ServiceMascotCanvas(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#080808"))
+        # The image is white-backed: match it exactly to remove dark margins.
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
         if self._image.isNull():
             return
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -192,27 +193,29 @@ class ServicePage(QWidget):
         footer.setAlignment(Qt.AlignCenter)
         root.addWidget(footer)
 
+        # Service is a deliberate light-mode exception to the dark Kiosk.
+        # All surrounding surfaces match the white-backed mascot image.
         self.setStyleSheet("""
-            QWidget#servicePage { background-color: #080808; }
+            QWidget#servicePage { background-color: #FFFFFF; }
             QFrame#serviceHeader {
-                background-color: #111111; border: 1px solid #2d2d2d;
+                background-color: #FFFFFF; border: 1px solid #e1e6ee;
                 border-radius: 12px;
             }
             QLabel#serviceHeaderTitle {
-                color: #f4f4f4; font-size: 19px; font-weight: 800;
+                color: #b32632; font-size: 19px; font-weight: 800;
             }
             QPushButton#serviceHomeButton, QPushButton#serviceBackButton {
-                color: #ffb32c; background: #171717;
-                border: 1px solid #383838; border-radius: 10px;
+                color: #1d2938; background: #f2f5fa;
+                border: 1px solid #dbe4ef; border-radius: 10px;
             }
             QPushButton#serviceHomeButton:hover, QPushButton#serviceBackButton:hover {
-                background: #242424; border-color: #f6c16a;
+                background: #e9eff7; border-color: #b32632;
             }
             QPushButton#serviceEmergencyButton {
-                background: #261115; border: 1px solid #5a1d28;
+                background: #fff0f2; border: 1px solid #f4c9d0;
                 border-radius: 10px;
             }
-            QLabel#serviceFooter { color: #a0a0a0; font-size: 13px; }
+            QLabel#serviceFooter { color: #627185; font-size: 13px; }
         """)
 
     def _select_mode(self, mode: str, emit_signal: bool = True) -> None:
