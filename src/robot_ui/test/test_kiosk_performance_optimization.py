@@ -586,3 +586,74 @@ def test_scenario_16_service_page_select_mode_decoupling(app):
     assert page.btn_continue.property("selected") is True
     assert len(emitted_modes) == 1
     assert emitted_modes[0] == "continue"
+
+
+def test_scenario_17_start_all_hardware_readiness(app):
+    """Start All starts SLAM only after fresh /odom and /scan data are present."""
+    import threading
+    from robot_ui.kiosk.ros_node import KioskRosNode
+
+    class MockProcess:
+        def poll(self):
+            return None
+
+    class DummyNode:
+        start_all_layers = KioskRosNode.start_all_layers
+
+        def __init__(self):
+            self._start_all_thread = None
+            self._start_all_cancel = threading.Event()
+            self._selected_backend = "amcl"
+            self._selected_map_yaml = ""
+            self._layer_procs = {"layer1": MockProcess()}
+            self._starting_layers = set()
+            self._stopping_layers = set()
+            self._error_layers = set()
+            self._dbg_lock = threading.Lock()
+            now = time.monotonic()
+            self._topic_stats = {
+                "odom": {"last_ts": now},
+                "lidar": {"last_ts": now},
+            }
+            self.signals = MagicMock()
+            self._record_layer_log = MagicMock()
+            self.calls = []
+
+        def start_layer(self, key):
+            self.calls.append(key)
+
+        def get_logger(self):
+            return MagicMock()
+
+    node = DummyNode()
+    node.start_all_layers("slam_mapping")
+    node._start_all_thread.join(timeout=2.0)
+    assert not node._start_all_thread.is_alive()
+    assert node.calls == ["layer1", "layer3"]
+    assert node._selected_backend == "amcl"
+
+
+def test_scenario_18_stop_all_cancels_start_sequence(app):
+    """Stop All cancels pending launches while using the original layer stop handler."""
+    import threading
+    from robot_ui.kiosk.ros_node import KioskRosNode
+
+    class DummyNode:
+        stop_all_layers = KioskRosNode.stop_all_layers
+
+        def __init__(self):
+            self._start_all_cancel = threading.Event()
+            self._layer_procs = {"layer1": object(), "layer3": object()}
+            self._starting_layers = set()
+            self._stopping_layers = set()
+            self._error_layers = set()
+            self.stopped = []
+            self._record_layer_log = MagicMock()
+
+        def stop_layer(self, key):
+            self.stopped.append(key)
+
+    node = DummyNode()
+    node.stop_all_layers()
+    assert node._start_all_cancel.is_set()
+    assert node.stopped == ["layer3", "layer1"]
