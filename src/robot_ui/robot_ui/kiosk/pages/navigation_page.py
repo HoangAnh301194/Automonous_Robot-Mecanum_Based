@@ -2117,11 +2117,12 @@ class NavigationPage(QWidget):
         self.status_label.setText(f"Cảnh báo: {message}")
 
     def _start_single_navigation(self) -> None:
-        if self._localization_state not in ("LOCALIZED", "TF_AVAILABLE"):
+        if self._localization_state != "LOCALIZED":
             QMessageBox.warning(
                 self,
                 "Chưa Định Vị Robot",
-                "Robot chưa hoàn tất định vị ban đầu (chưa có liên kết TF map -> odom).\n"
+                "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
+                f"Trạng thái hiện tại: {self._localization_state}.\n"
                 "Vui lòng bấm 'ĐỊNH VỊ ROBOT' để xác nhận vị trí xuất phát trước khi bắt đầu điều hướng!",
             )
             return
@@ -2138,11 +2139,12 @@ class NavigationPage(QWidget):
         self.lbl_dist_remain.setText("Cự ly còn lại: -- m")
 
     def _start_patrol(self) -> None:
-        if self._localization_state not in ("LOCALIZED", "TF_AVAILABLE"):
+        if self._localization_state != "LOCALIZED":
             QMessageBox.warning(
                 self,
                 "Chưa Định Vị Robot",
-                "Robot chưa hoàn tất định vị ban đầu (chưa có liên kết TF map -> odom).\n"
+                "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
+                f"Trạng thái hiện tại: {self._localization_state}.\n"
                 "Vui lòng bấm 'ĐỊNH VỊ ROBOT' để xác nhận vị trí xuất phát trước khi bắt đầu tuần tra!",
             )
             return
@@ -2218,8 +2220,15 @@ class NavigationPage(QWidget):
                 "border: 1px solid #10b981; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
             )
             self.status_label.setText(f"Đã định vị thành công: {message}")
-        elif self._localization_state in ("TF_AVAILABLE", "WAITING_FOR_LOCALIZATION"):
-            self.lbl_localization_badge.setText("● ĐANG ĐỊNH VỊ...")
+        elif self._localization_state == "TF_AVAILABLE":
+            self.lbl_localization_badge.setText("● ĐANG HỘI TỤ...")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(245, 158, 11, 0.2); color: #f59e0b; "
+                "border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+            self.status_label.setText(f"Có TF map->odom, chờ AMCL hội tụ vị trí: {message}")
+        elif self._localization_state == "WAITING_FOR_LOCALIZATION":
+            self.lbl_localization_badge.setText("● CHỜ AMCL...")
             self.lbl_localization_badge.setStyleSheet(
                 "background: rgba(245, 158, 11, 0.2); color: #f59e0b; "
                 "border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
