@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 import rclpy
 from geometry_msgs.msg import PoseWithCovarianceStamped, Quaternion
+from nav_msgs.msg import Odometry
+from sensor_msgs.msg import LaserScan
 from PyQt5.QtCore import QPointF, QRectF
 from PyQt5.QtWidgets import QApplication
 
@@ -471,3 +473,52 @@ def test_ip23_ui_navigation_gate_blocks_tf_available(qapp, monkeypatch):
     assert len(signals_emitted) == 0
     assert len(warning_dialogs) == 2
     page.close()
+
+
+def test_scan_telemetry_does_not_require_robot_pose(ros_node):
+    """LiDAR data must update telemetry even before AMCL/Odom pose is received."""
+    assert ros_node._pose == {}
+
+    scan = LaserScan()
+    scan.range_min = 0.1
+    scan.range_max = 5.0
+    scan.angle_min = 0.0
+    scan.angle_increment = 0.1
+    scan.ranges = [0.8, 1.2, float("inf")]
+
+    ros_node._on_scan(scan)
+    assert ros_node._topic_stats["lidar"]["count"] == 1
+    assert ros_node._topic_stats["lidar"]["extra"]["min_dist"] == pytest.approx(0.8)
+
+    snapshots = []
+    ros_node.signals.system_telemetry_changed.connect(snapshots.append)
+    ros_node._publish_system_telemetry()
+    assert snapshots[-1]["lidar_min_dist"] == pytest.approx(0.8)
+
+
+def test_scan_overlay_after_pose_and_rviz_launch_configuration(ros_node):
+    """Port simulator pose cache and reuse RViz SetInitialPose with Layer 2."""
+    odom = Odometry()
+    odom.header.frame_id = "odom"
+    odom.pose.pose.position.x = 1.0
+    odom.pose.pose.position.y = 2.0
+    odom.pose.pose.orientation.w = 1.0
+    ros_node._on_odom(odom)
+    assert ros_node._pose["x"] == pytest.approx(1.0)
+
+    scan = LaserScan()
+    scan.range_min = 0.1
+    scan.range_max = 5.0
+    scan.angle_min = 0.0
+    scan.angle_increment = 0.1
+    scan.ranges = [0.8, 1.2]
+
+    overlays = []
+    ros_node.signals.scan_points_changed.connect(overlays.append)
+    ros_node._last_scan_ui_pub = 0.0
+    ros_node._on_scan(scan)
+    assert overlays and len(overlays[-1]) == 2
+
+    layer2_command = ros_node._build_layer_cmd("layer2")
+    assert "real_localization_nav2.launch.py" in layer2_command
+    assert "use_rviz:=true" in layer2_command
