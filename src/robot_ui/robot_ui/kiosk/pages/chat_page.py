@@ -359,7 +359,7 @@ class ChatPage(QWidget):
         icon_label = QLabel()
         icon_label.setObjectName("chatHeaderIcon")
         icon_label.setPixmap(
-            monochrome_icon(chat_icon, QColor("#ffb32c")).pixmap(QSize(26, 26))
+            monochrome_icon(chat_icon, QColor("#C58A00")).pixmap(QSize(26, 26))
         )
         icon_label.setFixedSize(36, 36)
         icon_label.setAlignment(Qt.AlignCenter)
