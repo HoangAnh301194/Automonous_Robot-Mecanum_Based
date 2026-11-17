@@ -71,8 +71,8 @@ class WelcomePage(QWidget):
         self.setStyleSheet("""
             QLabel#welcomeSchoolPtit { color: #ff4545; font-size: 15px; font-weight: 800; }
             QLabel#welcomeSchoolFee1 { color: #48a9ff; font-size: 14px; font-weight: 800; }
-            QLabel#welcomeHeading { color: #2563EB; background: transparent; padding: 0px; border: none; font-size: 29px; font-weight: 800; }
-            QLabel#welcomeSubtitle { color: #1D4ED8; background: transparent; padding: 0px; border: none; font-size: 19px; font-weight: 700; }
+            QLabel#welcomeHeading { color: #FFFFFF; background: transparent; padding: 0px; border: none; font-size: 29px; font-weight: 800; }
+            QLabel#welcomeSubtitle { color: #FFFFFF; background: transparent; padding: 0px; border: none; font-size: 19px; font-weight: 700; }
         """)
 
     def _read_background(self):
