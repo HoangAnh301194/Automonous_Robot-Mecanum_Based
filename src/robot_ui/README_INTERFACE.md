@@ -9,7 +9,7 @@ Implementation: `robot_ui/kiosk/window.py`, `widgets.py`, `pages.py`.
 START
   |
   v
-IDLE (default: animated dark MP4 emotions; no dock or telemetry)
+IDLE (default: static PTIT Mochi image; no dock or telemetry)
   | tap anywhere
   v
 HOME (background.jpg, PTIT top-left + FEE1 top-right logos)
@@ -52,7 +52,7 @@ KIOSK_ADMIN_PIN=1 ros2 launch robot_ui kiosk.launch.py \
   windowed:=false hide_cursor:=true use_sim_time:=false
 ```
 
-Optional static artwork: `souta_robot/mochi_idle_light.jpg` and
+Default mascot artwork: `souta_robot/mochi_idle_light.jpg` and
 `souta_robot/mochi_service_light.jpg`. Service retains a dark header and
 background around its original white-backed Mochi illustration.
 Service has two real Qt touch
@@ -69,13 +69,13 @@ The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 | Setting | Default | Purpose |
 |---|---|---|
 | `KIOSK_ADMIN_PIN` | `1` | **Prototype only.** PIN for opening Admin |
-| `KIOSK_MOCHI_STATIC` | `0` | Animated dark-theme MP4 idle by default; set `1` for the PTIT Mochi static preview |
+| `KIOSK_MOCHI_STATIC` | `1` | New static PTIT Mochi idle by default; set `0` only to opt into the legacy MP4 expressions |
 | `KIOSK_IDLE_TIMEOUT_SECONDS` | `120` | Inactivity on Home / Chat before returning to Idle |
 | `KIOSK_ADMIN_IDLE_SECONDS` | `90` | Inactivity on Admin / Navigation before locking to Idle |
 
 * Opening Admin requires a PIN every time after logout/timeout.
 * Visitor timeout clears the current chat/LLM session for privacy and
-  returns to the animated dark Souta Robot face.
+  returns to the new static PTIT Mochi idle screen.
 * Screen transitions and timeouts **never cancel an ongoing Nav2 goal**.
 * Existing `/map`, robot status, LLM and navigation ROS interfaces are reused.
 * `background.jpg`, `logoPtit.png`, `fee1.png`, `setting_icon.png`,
@@ -90,7 +90,7 @@ use a strong PIN / secret storage and consider local OS access control.
 
 ## Manual smoke checks
 
-1. Launch Kiosk. It should show the animated dark idle screen, no Home/Map/Chat dock.
+1. Launch Kiosk. It should show the new static PTIT Mochi image, no Home/Map/Chat dock. UI chrome remains dark.
 2. Tap anywhere. The Home screen should show the institution background,
    PTIT/FEE1 logos and Home + Chat + Settings in the bottom dock.
 3. Tap Chat. Confirm 9router conversation works; return via header button.
