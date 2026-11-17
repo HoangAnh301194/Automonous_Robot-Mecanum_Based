@@ -80,9 +80,9 @@ QPushButton#kioskNavButton {
     padding: 3px 10px;
 }
 QPushButton#kioskNavButton:checked {
-    color: #D97706;
+    color: #1E3A8A;
     background: transparent;
-    border-bottom: 3px solid #D97706;
+    border-bottom: 3px solid #1E3A8A;
 }
 
 QPushButton#kioskNavButton:pressed {

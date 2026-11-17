@@ -20,13 +20,13 @@ def package_share() -> Path:
         return Path(__file__).resolve().parents[2]
 
 
-# Tint the requested simple navigation/control glyphs white, preserving alpha.
+# Tint the requested simple navigation/control glyphs dark blue, preserving alpha.
 # Large function illustrations (Navigation, SLAM, Start/Stop Navigation,
 # Detection, Status, localization and map actions), school/faculty logos,
 # Mochi artwork and Emergency retain their original multi-colour images.
 # The source files in souta_robot/ are never overwritten.
-ICON_WHITE = "#FFFFFF"
-ICON_WHITE_ACTIVE = "#FFFFFF"
+ICON_DARK_BLUE = "#1E3A8A"
+ICON_DARK_BLUE_ACTIVE = "#1E3A8A"
 
 _LIGHT_GLYPH_NAMES = (
     "back.png",
@@ -48,14 +48,14 @@ _LIGHT_GLYPH_NAMES = (
     "welcome.png",
     *(f"battery_{pct}.png" for pct in (0, 25, 50, 75, 100)),
 )
-_LIGHT_GLYPH_COLORS = {name: ICON_WHITE for name in _LIGHT_GLYPH_NAMES}
+_LIGHT_GLYPH_COLORS = {name: ICON_DARK_BLUE for name in _LIGHT_GLYPH_NAMES}
 
 
 @lru_cache(maxsize=64)
 def icon_path(filename: str) -> Path:
     """Return a colour-corrected monochrome icon, preserving its alpha channel.
 
-    Tint only simple controls white. All full-colour module/mission illustrations
+    Tint only simple controls dark blue. All full-colour module/mission illustrations
     return their original asset paths unchanged. Variants are cached in temp.
     """
     source_path = package_share() / "souta_robot" / filename
