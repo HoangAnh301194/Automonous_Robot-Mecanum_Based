@@ -94,6 +94,115 @@ Nếu tải ZIP thay vì clone, giải nén và mở Terminal trong thư mục c
 4. Bấm Bắt đầu ghi → Nghe lại → Lưu vào dataset hoặc Bỏ bản thu. Chỉ lưu mẫu rõ tiếng, đúng nhãn.
 5. File WAV là PCM 16-bit, mono 16 kHz; lưu ở data/raw/<label>/<speaker_or_session_id>/<NNN>.wav.
 
+## Danh sách câu gợi ý có sẵn trong GUI
+
+Người thu **không cần tự nghĩ câu**. Chỉ cần chọn nhãn, đọc đúng câu hiển thị ở mục **“Câu gợi ý để đọc”**, rồi ghi âm và nghe lại. Bấm **“Câu tiếp theo”** để đổi câu; sau khi **lưu** một bản thu, GUI tự chuyển sang câu tiếp theo. Nếu bỏ bản thu, giữ nguyên câu để thu lại. Mỗi nhãn có danh sách riêng, không bị đặt lại khi đổi nhãn.
+
+**Nguyên tắc phân nhãn:** `positive` phải nói đúng tên **“Sô ta”**; `hard_negative` là từ/câu nghe gần giống nhưng **không được đọc thành “Sô ta”**; `negative` là hội thoại bình thường không có từ khóa. `ambient` **không đọc câu trên màn hình** mà chỉ ghi âm thanh môi trường. Nói tự nhiên, đa dạng giọng, khoảng cách và nhịp độ; không cố đọc mọi mẫu giống nhau. Nếu câu dài, chọn 5 giây để tránh cắt âm.
+
+### Positive — gọi robot (26 gợi ý)
+
+1. Sô ta
+2. Sô ta ơi
+3. Này Sô ta
+4. Chào Sô ta
+5. Sô ta, nghe không?
+6. Sô ta, lại đây
+7. Sô ta, giúp mình với
+8. Sô ta, bắt đầu nhé
+9. Sô ta, dừng lại
+10. Sô ta, tiếp tục đi
+11. Sô ta, mở bản đồ
+12. Sô ta, dẫn đường nhé
+13. Sô ta, quay lại
+14. Sô ta, đứng yên
+15. Sô ta, chào thầy đi
+16. Sô ta, tới đây nào
+17. Sô ta, cho mình hỏi
+18. Sô ta, nghe này
+19. Sô ta, trả lời mình
+20. Sô ta, nhìn bên này
+21. Sô ta, cảm ơn nhé
+22. Sô ta, cho tôi hỏi
+23. Bạn Sô ta ơi
+24. À, Sô ta đây rồi
+25. Sô ta, có nghe rõ không?
+26. Sô ta ơi, đi thôi
+
+### Hard negative — các câu gây nhầm lẫn (30 gợi ý)
+
+1. Sổ tay
+2. Cái sổ tay ở đâu?
+3. Tôi để quên sổ tay
+4. Cho mình mượn cuốn sổ tay
+5. Quyển sổ tay màu đỏ
+6. Đừng quên mang sổ tay
+7. Cô ta
+8. Cô ta đang đứng đó
+9. Tôi vừa gặp cô ta
+10. Cô ta có tới không?
+11. Bạn bảo cô ta đi
+12. Cô ta đi qua cửa rồi
+13. Sô pha
+14. Ghế sô pha màu xanh
+15. Ngồi xuống ghế sô pha đi
+16. Đổi chiếc sô pha này nhé
+17. Soda
+18. Cho tôi một lon soda
+19. Bạn thích nước soda không?
+20. Số tám
+21. Đọc số tám nhé
+22. Viết số tám lên bảng
+23. Số tám ở góc phải
+24. Thôi ta đi
+25. Thôi ta về nào
+26. Chỗ ta đứng rất rộng
+27. Cái tô to ở đây
+28. Cho tôi cái tô to
+29. Còn sót à?
+30. Có gì bị sót à?
+
+### Negative — câu thoại không gọi robot (26 gợi ý)
+
+1. Xin chào mọi người
+2. Tôi đang ở trong phòng
+3. Cho tôi hỏi một chút
+4. Bạn có rảnh không?
+5. Cửa phòng đã mở chưa?
+6. Vui lòng bật đèn lên
+7. Chúng ta bắt đầu nhé
+8. Robot đang ở đâu?
+9. Tôi cần tìm phòng họp
+10. Thầy có ở trong phòng không?
+11. Hôm nay trời nóng quá
+12. Bạn có thể giúp tôi không?
+13. Cho tôi xin một cốc nước
+14. Mình muốn về phòng thí nghiệm
+15. Chờ tôi một chút nhé
+16. Bạn đang làm gì đấy?
+17. Xin phép đi qua
+18. Quay sang bên trái
+19. Dừng lại ở đây
+20. Đi thẳng tới cuối hành lang
+21. Hệ thống đã sẵn sàng
+22. Tôi sẽ quay lại sau
+23. Chúng mình đi thôi
+24. Tôi muốn kiểm tra micro
+25. Cảm ơn bạn nhiều
+26. Chúc một ngày tốt lành
+
+### Ambient — loại âm môi trường cần ghi (8 gợi ý)
+
+1. Không đọc lời: ghi tiếng quạt đang chạy trong phòng.
+2. Không đọc lời: ghi tiếng điều hòa, máy lọc không khí hoặc máy tính.
+3. Không đọc lời: ghi tiếng gõ bàn phím hoặc chuột.
+4. Không đọc lời: ghi tiếng bước chân ngoài hành lang.
+5. Không đọc lời: ghi tiếng cửa mở và đóng tự nhiên.
+6. Không đọc lời: ghi tiếng phòng học hoặc phòng họp lúc có người nói chuyện xa.
+7. Không đọc lời: ghi tiếng động cơ hoặc bánh xe robot đang chạy.
+8. Không đọc lời: ghi tiếng môi trường yên tĩnh, có âm nền tự nhiên.
+
+**Chất lượng thu:** Nên ghi cả tình huống yên tĩnh và có tiếng ồn nhẹ; mỗi người đọc nhiều biến thể, nhưng vẫn cần nhiều người nói khác nhau. Không dùng mẫu âm thanh phát qua loa hoặc biến giọng nhân tạo để thay thế dữ liệu người nói thật.
 ## Xuất ZIP và gửi người phụ trách
 
 1. Điền **tên viết tắt hoặc mã của người thu thập dữ liệu** ở ô `Tên/mã người thu data` (ví dụ `c01` hoặc `hoanganh`). `c01` chỉ đại diện cho người **thực hiện thu data**, không phải người **đọc từ khóa trong bản ghi**. Mỗi người thu dùng một tên/mã duy nhất và nhất quán; chỉ dùng chữ thường không dấu và số, từ 2–12 ký tự, bắt đầu bằng chữ.

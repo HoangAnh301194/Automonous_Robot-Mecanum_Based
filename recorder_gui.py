@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox, ttk
 import numpy as np
 import sounddevice as sd
 from export_zip import make_dataset_zip
+from prompt_bank import PROMPTS, PROMPT_GUIDANCE, PromptCycler
 
 SAMPLE_RATE = 16000
 DATA = Path(__file__).resolve().parent / "data"
@@ -76,6 +77,10 @@ class RecorderApp:
         self.collector = tk.StringVar(value="c01")
         self.status = tk.StringVar(value="Sẵn sàng. Chọn nhãn và người nói.")
         self.counter = tk.StringVar(value="")
+        self.prompts = PromptCycler()
+        self.prompt_text = tk.StringVar()
+        self.prompt_progress = tk.StringVar()
+        self.prompt_hint = tk.StringVar()
         self.state = "idle"
         self.preview = None
         self.cancel = None
@@ -87,14 +92,15 @@ class RecorderApp:
         self.closed = False
         self.setup_ui()
         self.refresh_members()
+        self.refresh_prompt()
         self.set_buttons()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.root.after(100, self.poll)
 
     def setup_ui(self):
         self.root.title("SOUTA · Thu thập dữ liệu giọng nói")
-        self.root.geometry("760x690")
-        self.root.minsize(650, 600)
+        self.root.geometry("820x805")
+        self.root.minsize(720, 740)
         body = ttk.Frame(self.root, padding=16)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="SOUTA DATA RECORDER", font=("Arial", 16, "bold")).pack(anchor="w")
@@ -108,7 +114,7 @@ class RecorderApp:
         self.label_combo = ttk.Combobox(line, textvariable=self.label, values=LABELS,
                                          state="readonly", width=18)
         self.label_combo.pack(side="left", padx=8)
-        self.label_combo.bind("<<ComboboxSelected>>", lambda _: self.refresh_members())
+        self.label_combo.bind("<<ComboboxSelected>>", lambda _: self.on_label_changed())
         ttk.Label(group, textvariable=self.counter).pack(anchor="w", pady=4)
         line = ttk.Frame(group)
         line.pack(fill="x", pady=4)
@@ -125,7 +131,19 @@ class RecorderApp:
         self.member_combo.bind("<<ComboboxSelected>>", lambda _: self.refresh_count())
         ttk.Label(group, text="Tên nội bộ không nằm trong file ZIP gửi người phụ trách.").pack(anchor="w")
 
-        group = ttk.LabelFrame(body, text="2 · Microphone và ghi âm", padding=10)
+        prompts_box = ttk.LabelFrame(body, text="2 · Câu gợi ý để đọc (có sẵn trong ứng dụng)", padding=10)
+        prompts_box.pack(fill="x", pady=5)
+        row_prompt = ttk.Frame(prompts_box)
+        row_prompt.pack(fill="x")
+        ttk.Label(row_prompt, textvariable=self.prompt_progress).pack(side="left")
+        self.next_prompt_btn = ttk.Button(row_prompt, text="Câu tiếp theo", command=self.next_prompt)
+        self.next_prompt_btn.pack(side="right")
+        ttk.Label(prompts_box, textvariable=self.prompt_text, font=("Arial", 14, "bold"),
+                  wraplength=745, justify="left").pack(anchor="w", fill="x", pady=(5, 4))
+        ttk.Label(prompts_box, textvariable=self.prompt_hint, wraplength=745,
+                  justify="left").pack(anchor="w")
+
+        group = ttk.LabelFrame(body, text="3 · Microphone và ghi âm", padding=10)
         group.pack(fill="x", pady=5)
         line = ttk.Frame(group)
         line.pack(fill="x")
@@ -161,7 +179,7 @@ class RecorderApp:
         self.discard_btn = ttk.Button(line, text="Bỏ bản thu", command=self.discard)
         self.discard_btn.pack(side="left", padx=3)
 
-        group = ttk.LabelFrame(body, text="3 · Xuất dữ liệu", padding=10)
+        group = ttk.LabelFrame(body, text="4 · Xuất dữ liệu", padding=10)
         group.pack(fill="x", pady=5)
         line = ttk.Frame(group)
         line.pack(fill="x")
@@ -171,9 +189,27 @@ class RecorderApp:
         self.export_btn.pack(side="left")
         ttk.Label(group, text="Ví dụ c01 hoặc hoanganh (không dấu/không cách). Đây là người thu data, không phải người nói.").pack(anchor="w", pady=5)
 
-        group = ttk.LabelFrame(body, text="4 · Trạng thái", padding=10)
+        group = ttk.LabelFrame(body, text="5 · Trạng thái", padding=10)
         group.pack(fill="x", pady=5)
         ttk.Label(group, textvariable=self.status, wraplength=690).pack(anchor="w")
+
+    def on_label_changed(self):
+        self.refresh_members()
+        self.refresh_prompt()
+
+    def refresh_prompt(self):
+        label = self.label.get()
+        phrase = self.prompts.current(label)
+        number, total = self.prompts.position(label)
+        self.prompt_progress.set(f"Nhãn {label} · gợi ý {number}/{total}")
+        self.prompt_text.set(("GHI: " if label == "ambient" else "ĐỌC: ") + phrase)
+        self.prompt_hint.set(PROMPT_GUIDANCE[label])
+
+    def next_prompt(self):
+        if self.state != "idle":
+            return
+        self.prompts.advance(self.label.get())
+        self.refresh_prompt()
 
     def current_kind(self):
         return "sessions" if self.label.get() == "ambient" else "speakers"
@@ -214,10 +250,11 @@ class RecorderApp:
         self.save_btn["state"] = "normal" if reviewing else "disabled"
         self.discard_btn["state"] = "normal" if reviewing else "disabled"
         self.export_btn["state"] = "disabled" if recording else "normal"
+        self.next_prompt_btn["state"] = "normal" if self.state == "idle" else "disabled"
         for widget in (self.label_combo, self.member_combo, self.device_combo, self.duration_combo):
-            widget["state"] = "disabled" if recording else "readonly"
-        self.name_entry["state"] = "disabled" if recording else "normal"
-        self.register_btn["state"] = "disabled" if recording else "normal"
+            widget["state"] = "disabled" if self.state != "idle" else "readonly"
+        self.name_entry["state"] = "disabled" if self.state != "idle" else "normal"
+        self.register_btn["state"] = "disabled" if self.state != "idle" else "normal"
 
     def start(self):
         if self.state != "idle":
@@ -324,6 +361,8 @@ class RecorderApp:
         self.state = "idle"
         self.progress["value"] = 0
         self.status.set("Đã lưu: " + str(path.relative_to(self.store.data_dir)))
+        self.prompts.advance(self.label.get())
+        self.refresh_prompt()
         self.refresh_count()
         self.set_buttons()
 
