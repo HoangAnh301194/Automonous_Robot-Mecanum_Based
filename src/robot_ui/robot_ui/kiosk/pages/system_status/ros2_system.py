@@ -109,7 +109,7 @@ class ROS2SystemDetailScreen(QWidget):
             ("layer_navigation", "Layer 2: Điều Hướng Tự Hành Nav2", "nav2_bringup, amcl, costmap_2d, controller_server"),
             ("layer_slam", "Layer 3: Lập Bản Đồ SLAM Toolbox", "slam_toolbox, map_saver_server"),
             ("layer_perception", "Layer 4: Thị Giác Máy Tính AI Astra", "astra_camera, yolo_detector, hand_wave_pose"),
-            ("layer_voice_interaction", "Layer 5: Giọng Nói & Tương Tác", "wake_word_kws, llm_worker, audio_player"),
+            ("layer_voice_interaction", "Layer 5: Backend & Quản Lý Nhiệm Vụ (Mission Control)", "mission_controller, navigation_manager, config_manager, audio_player"),
         ]
 
         for key, name, desc in layers_info:
@@ -196,7 +196,7 @@ class ROS2SystemDetailScreen(QWidget):
             ("layer2", "L2: Điều Hướng"),
             ("layer3", "L3: SLAM"),
             ("layer4", "L4: AI Vision"),
-            ("layer5", "L5: Giọng Nói"),
+            ("layer5", "L5: Backend Mission"),
         ]
 
         for f_key, f_label in filters:
@@ -369,6 +369,8 @@ class ROS2SystemDetailScreen(QWidget):
         "layer3": "layer_slam",
         "layer4": "layer_perception",
         "layer5": "layer_voice_interaction",
+        "layer_backend": "layer_voice_interaction",
+        "layer_mission": "layer_voice_interaction",
     }
 
     def update_layer_status(self, layers_state: dict[str, Any]) -> None:

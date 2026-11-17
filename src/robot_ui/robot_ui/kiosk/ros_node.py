@@ -1675,6 +1675,8 @@ class KioskRosNode(Node):
         "layer_slam": "layer3",
         "layer_perception": "layer4",
         "layer_voice_interaction": "layer5",
+        "layer_backend": "layer5",
+        "layer_mission": "layer5",
     }
 
     LAYER_ALIAS_MAP = {
@@ -1683,6 +1685,8 @@ class KioskRosNode(Node):
         "layer_slam": "layer3",
         "layer_perception": "layer4",
         "layer_voice_interaction": "layer5",
+        "layer_backend": "layer5",
+        "layer_mission": "layer5",
         "layer1": "layer_hardware",
         "layer2": "layer_navigation",
         "layer3": "layer_slam",
