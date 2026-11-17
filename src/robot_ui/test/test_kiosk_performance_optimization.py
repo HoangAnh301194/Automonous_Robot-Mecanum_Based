@@ -606,6 +606,7 @@ def test_scenario_17_start_all_hardware_readiness(app):
         def __init__(self):
             self._start_all_thread = None
             self._start_all_cancel = threading.Event()
+            self._start_all_gate = threading.Lock()
             self._selected_backend = "amcl"
             self._selected_map_yaml = ""
             self._layer_procs = {"layer1": MockProcess()}
@@ -652,6 +653,7 @@ def test_scenario_18_stop_all_cancels_start_sequence(app):
 
         def __init__(self):
             self._start_all_cancel = threading.Event()
+            self._start_all_gate = threading.Lock()
             self._layer_procs = {"layer1": object(), "layer3": object()}
             self._starting_layers = set()
             self._stopping_layers = set()
