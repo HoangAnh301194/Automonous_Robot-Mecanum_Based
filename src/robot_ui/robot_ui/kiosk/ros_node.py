@@ -13,6 +13,9 @@ from functools import partial
 from pathlib import Path as FilePath
 from typing import Any
 
+# Khắc phục xung đột môi trường Qt do opencv-python tự động inject cv2/qt/plugins gây crash RViz2
+os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+
 import yaml
 
 from action_msgs.msg import GoalStatus
@@ -116,6 +119,7 @@ class KioskRosNode(Node):
         super().__init__("robot_ui_kiosk")
         self.signals = signals
         self._pose: dict[str, Any] = {}
+        self._last_pose_emit_time: float = 0.0
         self._direct_go_client = ActionClient(
             self,
             DirectGo,
@@ -447,7 +451,10 @@ class KioskRosNode(Node):
             ),
         }
         self._pose = pose_data
-        self.signals.pose_changed.emit(pose_data)
+        now = time.monotonic()
+        if now - self._last_pose_emit_time >= 0.05:  # Throttling tối đa 20 Hz lên Qt UI
+            self._last_pose_emit_time = now
+            self.signals.pose_changed.emit(pose_data)
 
     def _on_amcl_pose(self, msg: PoseWithCovarianceStamped) -> None:
         self._have_localized_pose = True
@@ -456,9 +463,20 @@ class KioskRosNode(Node):
         cov = msg.pose.covariance
         cov_norm = math.sqrt(float(cov[0]) + float(cov[7]))
         self._amcl_covariance_norm = cov_norm
-        # Không tự ý chuyển thẳng sang LOCALIZED tại callback!
-        # Việc chuyển sang LOCALIZED được thực hiện nguyên tử qua _verify_localization_worker
-        # nhằm đảm bảo đồng thời session token, TF map->odom và sai số cov_norm đạt chuẩn.
+        # Khi Kiosk chủ động phát initial pose, việc chuyển sang LOCALIZED được thực hiện nguyên tử qua _verify_localization_worker.
+        # Nếu người dùng dùng RViz2 (2D Pose Estimate) độc lập, tự động đồng bộ khi đạt chuẩn hội tụ và TF:
+        if not self._loc_session_token and self._localization_state != LocalizationState.LOCALIZED:
+            if cov_norm <= 0.60:
+                tf_ok = False
+                try:
+                    tf_ok = self._tf_buffer.can_transform("map", "odom", rclpy.time.Time())
+                except Exception:
+                    pass
+                if tf_ok:
+                    self._set_localization_state(
+                        LocalizationState.LOCALIZED,
+                        f"Đã định vị thành công từ RViz (sai số: {cov_norm:.2f}m)"
+                    )
         self._emit_pose(msg.pose.pose, str(msg.header.frame_id), "amcl")
 
     def _on_odom(self, msg: Odometry) -> None:
@@ -940,6 +958,13 @@ class KioskRosNode(Node):
         with self._lifecycle_lock:
             return self._layer_states.get(canonical) == LayerState.RUNNING
 
+    @staticmethod
+    def _get_clean_env() -> dict[str, str]:
+        """Tạo môi trường thực thi sạch cho tiến trình con ROS 2/RViz, loại bỏ các biến xung đột từ OpenCV."""
+        env = os.environ.copy()
+        env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+        return env
+
     def _get_ws_prefix(self) -> str:
         ws_root = self._get_ws_root()
         ros_setup = os.environ.get("ROS_SETUP", "/opt/ros/humble/setup.bash")
@@ -983,8 +1008,11 @@ class KioskRosNode(Node):
                     f_init.flush()
 
                 log_out = open(log_path, "a", encoding="utf-8")
+                clean_env = self._get_clean_env() if hasattr(self, "_get_clean_env") else os.environ.copy()
+                clean_env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
                 self._slam_proc = subprocess.Popen(
                     ["bash", "-c", cmd],
+                    env=clean_env,
                     stdout=log_out,
                     stderr=subprocess.STDOUT,
                     text=True,
@@ -1000,8 +1028,9 @@ class KioskRosNode(Node):
         threading.Thread(target=_slam_startup_worker, daemon=True).start()
 
     def stop_slam(self) -> None:
-        """Dừng tiến trình SLAM một cách an toàn."""
-        if not self._slam_proc or self._slam_proc.poll() is not None:
+        """Dừng tiến trình SLAM an toàn trên luồng nền, không chặn UI thread."""
+        proc = self._slam_proc
+        if not proc or proc.poll() is not None:
             self.get_logger().info("[KIOSK SLAM] SLAM chưa chạy hoặc đã dừng.")
             self._slam_proc = None
             self._layer_procs.pop("layer3", None)
@@ -1009,24 +1038,28 @@ class KioskRosNode(Node):
             self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
             return
 
-        self.get_logger().info("[KIOSK SLAM] STOP SLAM process group")
-        try:
-            pgid = os.getpgid(self._slam_proc.pid)
-            os.killpg(pgid, signal.SIGINT)
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                if self._slam_proc.poll() is not None:
-                    break
-                time.sleep(0.1)
-            if self._slam_proc.poll() is None:
-                os.killpg(pgid, signal.SIGTERM)
-        except Exception as exc:
-            self.get_logger().warning(f"[KIOSK SLAM] Dừng SLAM gặp lỗi: {exc}")
-        finally:
-            self._slam_proc = None
-            self._layer_procs.pop("layer3", None)
-            self._layer_procs.pop("layer_slam", None)
-            self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
+        self.get_logger().info("[KIOSK SLAM] STOP SLAM process group (background)")
+        self._slam_proc = None
+        self._layer_procs.pop("layer3", None)
+        self._layer_procs.pop("layer_slam", None)
+
+        def _stop_slam_worker(target_proc: subprocess.Popen) -> None:
+            try:
+                pgid = os.getpgid(target_proc.pid)
+                os.killpg(pgid, signal.SIGINT)
+                deadline = time.monotonic() + 2.0
+                while time.monotonic() < deadline:
+                    if target_proc.poll() is not None:
+                        break
+                    time.sleep(0.05)
+                if target_proc.poll() is None:
+                    os.killpg(pgid, signal.SIGTERM)
+            except Exception as exc:
+                self.get_logger().warning(f"[KIOSK SLAM] Dừng SLAM gặp lỗi: {exc}")
+            finally:
+                self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
+
+        threading.Thread(target=_stop_slam_worker, args=(proc,), daemon=True).start()
 
     def save_map(self, map_stem: str) -> None:
         """Thực hiện lưu bản đồ kép (AMCL YAML + PoseGraph serialize) trên background thread."""
@@ -1070,7 +1103,7 @@ class KioskRosNode(Node):
         threading.Thread(target=_save_worker, daemon=True).start()
 
     def apply_localization_map(self, map_yaml_path: str, backend: str = "amcl") -> None:
-        """Lưu cấu hình và khởi chạy chế độ định vị với bản đồ được chọn."""
+        """Lưu cấu hình và khởi chạy chế độ định vị với bản đồ được chọn qua layer2 duy nhất."""
         self._selected_map_yaml = map_yaml_path
         self._selected_backend = backend
         if hasattr(self, "cancel_pending_initial_pose"):
@@ -1086,39 +1119,66 @@ class KioskRosNode(Node):
         self.stop_slam()
 
         def _loc_worker():
-            if self._localization_proc and self._localization_proc.poll() is None:
+            # 1. Dừng Layer 2 cũ nếu đang chạy để tránh duplicate localization stack
+            if hasattr(self, "stop_layer") and hasattr(self, "is_layer_running"):
+                if self.is_layer_running("layer2") or (
+                    self._layer_procs.get("layer2") and self._layer_procs["layer2"].poll() is None
+                ):
+                    self.get_logger().info("[KIOSK LOCALIZATION] Dừng phiên Layer 2 cũ trước khi nạp map...")
+                    self.stop_layer("layer2")
+                    deadline = time.monotonic() + 3.0
+                    while time.monotonic() < deadline and self.is_layer_running("layer2"):
+                        time.sleep(0.05)
+
+            if hasattr(self, "_localization_proc") and self._localization_proc and self._localization_proc.poll() is None:
                 try:
                     os.killpg(os.getpgid(self._localization_proc.pid), signal.SIGINT)
-                    time.sleep(1.0)
+                    deadline = time.monotonic() + 1.5
+                    while time.monotonic() < deadline and self._localization_proc.poll() is None:
+                        time.sleep(0.05)
+                    if self._localization_proc.poll() is None:
+                        os.killpg(os.getpgid(self._localization_proc.pid), signal.SIGTERM)
                 except Exception:
                     pass
+                self._localization_proc = None
 
-            graph_path = os.path.splitext(map_yaml_path)[0]
-            if backend == "slam_toolbox":
-                posegraph_file = graph_path + ".posegraph"
-                if not os.path.exists(posegraph_file):
-                    self.get_logger().warn(
-                        f"[KIOSK LOCALIZATION] File posegraph '{posegraph_file}' không tồn tại trên đĩa. "
-                        "SLAM Toolbox có thể cần file posegraph hợp lệ để định vị!"
-                    )
-            cmd = (
-                self._get_ws_prefix()
-                + "ros2 launch mo_hinh real_localization_nav2.launch.py "
-                + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
-                + f"map_yaml:={shlex.quote(map_yaml_path)} "
-                + f"map_graph:={shlex.quote(graph_path)} use_rviz:=true"
-            )
-            self.get_logger().info(f"[KIOSK LOCALIZATION] START: {cmd}")
-            try:
-                self._localization_proc = subprocess.Popen(
-                    ["bash", "-c", cmd],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    preexec_fn=os.setsid,
+            # 2. Khởi chạy Layer 2 đồng bộ qua start_layer nếu có
+            if hasattr(self, "start_layer") and hasattr(self, "_lifecycle_lock"):
+                self.get_logger().info("[KIOSK LOCALIZATION] Khởi động Layer 2 đồng nhất qua start_layer...")
+                self.start_layer("layer2")
+            else:
+                # Fallback cho unit test mock độc lập (DummyRosNode)
+                graph_path = os.path.splitext(map_yaml_path)[0]
+                if backend == "slam_toolbox":
+                    posegraph_file = graph_path + ".posegraph"
+                    if not os.path.exists(posegraph_file):
+                        self.get_logger().warn(
+                            f"[KIOSK LOCALIZATION] File posegraph '{posegraph_file}' không tồn tại trên đĩa. "
+                            "SLAM Toolbox có thể cần file posegraph hợp lệ để định vị!"
+                        )
+                cmd = (
+                    self._get_ws_prefix()
+                    + "ros2 launch mo_hinh real_localization_nav2.launch.py "
+                    + f"localization_mode:={shlex.quote(backend)} use_sim_time:=false "
+                    + f"map_yaml:={shlex.quote(map_yaml_path)} "
+                    + f"map_graph:={shlex.quote(graph_path)} use_rviz:=true"
                 )
-            except Exception as exc:
-                self.get_logger().error(f"[KIOSK LOCALIZATION] Lỗi: {exc}")
+                self.get_logger().info(f"[KIOSK LOCALIZATION] START fallback: {cmd}")
+                clean_env = self._get_clean_env() if hasattr(self, "_get_clean_env") else os.environ.copy()
+                clean_env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+                try:
+                    log_path = "/tmp/ros_layer_layer2.log"
+                    log_out = open(log_path, "a", encoding="utf-8")
+                    self._localization_proc = subprocess.Popen(
+                        ["bash", "-c", cmd],
+                        env=clean_env,
+                        stdout=log_out,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        preexec_fn=os.setsid,
+                    )
+                except Exception as exc:
+                    self.get_logger().error(f"[KIOSK LOCALIZATION] Lỗi: {exc}")
 
             if getattr(self, "_auto_initial_pose_enabled", False) and backend != "slam_toolbox":
                 def _auto_pose_worker():
@@ -1166,6 +1226,12 @@ class KioskRosNode(Node):
         """Kiểm tra lifecycle state thực tế của node /amcl qua GetState service."""
         if self._selected_backend == "slam_toolbox":
             return True, "Chế độ SLAM Toolbox không yêu cầu AMCL"
+
+        # Tối ưu hóa phản hồi: Nếu gần đây (< 5s) đã nhận /amcl_pose thì AMCL chắc chắn đang active
+        now = time.monotonic()
+        if self._last_amcl_pose_at > 0 and (now - self._last_amcl_pose_at) < 5.0:
+            return True, "AMCL đang ở trạng thái active (đang phát /amcl_pose)"
+
         if not hasattr(self, "_amcl_get_state_client") or self._amcl_get_state_client is None:
             return True, "Không có client lifecycle_msgs, bỏ qua kiểm tra lifecycle"
 
@@ -1175,8 +1241,10 @@ class KioskRosNode(Node):
         req = GetState.Request()
         future = self._amcl_get_state_client.call_async(req)
         start_t = time.monotonic()
-        while not future.done() and (time.monotonic() - start_t) < timeout_sec:
-            time.sleep(0.02)
+        # Nếu đang ở Main Thread, dùng timeout ngắn (80ms) để không block Qt event loop
+        actual_timeout = 0.08 if threading.current_thread() is threading.main_thread() else timeout_sec
+        while not future.done() and (time.monotonic() - start_t) < actual_timeout:
+            time.sleep(0.01)
 
         if not future.done():
             return False, "Hết thời gian chờ phản hồi từ /amcl/get_state (timeout)"
@@ -1197,7 +1265,12 @@ class KioskRosNode(Node):
             return True, "Chế độ SLAM Toolbox không yêu cầu AMCL Initial Pose"
 
         # 1. Kiểm tra Layer 2 (Nav2 & AMCL)
-        if not self.is_layer_running("layer2") and not self.is_layer_running("layer_navigation"):
+        layer2_running = (
+            self.is_layer_running("layer2")
+            or self.is_layer_running("layer_navigation")
+            or (self._localization_proc is not None and self._localization_proc.poll() is None)
+        )
+        if not layer2_running:
             return False, "Layer 2 (Nav2 & AMCL) chưa khởi chạy hoặc chưa ở trạng thái RUNNING"
 
         # 2. Kiểm tra AMCL lifecycle state thực tế
@@ -1816,7 +1889,19 @@ class KioskRosNode(Node):
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
-            return prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=true"
+            backend = getattr(self, "_selected_backend", "amcl") or "amcl"
+            cmd_parts = [
+                prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py",
+                f"localization_mode:={shlex.quote(backend)}",
+                "use_sim_time:=false",
+                "use_rviz:=true",
+            ]
+            map_yaml = getattr(self, "_selected_map_yaml", None)
+            if map_yaml and os.path.exists(map_yaml):
+                graph_path = os.path.splitext(map_yaml)[0]
+                cmd_parts.append(f"map_yaml:={shlex.quote(map_yaml)}")
+                cmd_parts.append(f"map_graph:={shlex.quote(graph_path)}")
+            return " ".join(cmd_parts)
         elif launch_key == "layer3":
             return prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
@@ -1951,9 +2036,12 @@ class KioskRosNode(Node):
         self._record_layer_log(canonical, f"--- BẮT ĐẦU KHỞI ĐỘNG [{canonical.upper()}] ---")
         self._record_layer_log(canonical, f"Lệnh thực thi: {cmd}")
 
+        clean_env = self._get_clean_env() if hasattr(self, "_get_clean_env") else os.environ.copy()
+        clean_env.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
         try:
             proc = subprocess.Popen(
                 ["bash", "-c", cmd],
+                env=clean_env,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

@@ -13,7 +13,7 @@ import glob
 import time
 from typing import Any, Callable, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
     QFrame,
@@ -71,6 +71,11 @@ class ROS2SystemDetailScreen(QWidget):
         self._auto_scroll: bool = True
         self._filter_buttons: dict[str, QPushButton] = {}
         self._is_console_visible: bool = True
+        self._pending_render_lines: list[str] = []
+        self._batch_render_timer = QTimer(self)
+        self._batch_render_timer.setInterval(100)  # Gom log flush định kỳ 100ms
+        self._batch_render_timer.setSingleShot(True)
+        self._batch_render_timer.timeout.connect(self._flush_pending_logs)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -258,6 +263,12 @@ class ROS2SystemDetailScreen(QWidget):
             }}
         """)
         self.txt_layer_log.setText("[CONSOLE] Hệ thống sẵn sàng. Bấm BẬT ở một Layer để xem luồng khởi động tiến trình...")
+        orig_toPlainText = self.txt_layer_log.toPlainText
+        def _flushing_toPlainText() -> str:
+            if getattr(self, "_pending_render_lines", None):
+                self._flush_pending_logs()
+            return orig_toPlainText()
+        self.txt_layer_log.toPlainText = _flushing_toPlainText
         log_layout.addWidget(self.txt_layer_log)
 
         c_layout.addWidget(card_log)
@@ -452,14 +463,19 @@ class ROS2SystemDetailScreen(QWidget):
         was_visible = self._is_console_visible
         self._is_console_visible = visible
         if visible and not was_visible:
+            self._pending_render_lines.clear()
             self._refresh_log_view()
+        elif not visible:
+            self._pending_render_lines.clear()
+            if self._batch_render_timer.isActive():
+                self._batch_render_timer.stop()
 
     def refresh_display(self) -> None:
         """Cập nhật lại giao diện và snapshot log khi mở lại màn hình ROS 2."""
         self._refresh_log_view()
 
     def append_layer_log(self, layer_key: str, text: str) -> None:
-        """Thêm dòng log mới từ tiến trình Layer và chỉ render lên console nếu đang hiển thị."""
+        """Thêm dòng log mới từ tiến trình Layer và chỉ render lên console theo batch nếu đang hiển thị."""
         norm_key = self._normalize_layer_key(layer_key)
         now_str = time.strftime("%H:%M:%S")
         prefix = norm_key.upper() if norm_key != "all" else "SYSTEM"
@@ -471,14 +487,36 @@ class ROS2SystemDetailScreen(QWidget):
             self._logs_by_layer[target_key].append(formatted_line)
 
         if self._is_console_visible and self._current_filter in ("all", norm_key):
-            self.txt_layer_log.append(formatted_line)
-            if self._auto_scroll:
-                cursor = self.txt_layer_log.textCursor()
-                cursor.movePosition(QTextCursor.End)
-                self.txt_layer_log.setTextCursor(cursor)
+            self._pending_render_lines.append(formatted_line)
+            if not self._batch_render_timer.isActive():
+                self._batch_render_timer.start()
+
+    def _flush_pending_logs(self) -> None:
+        """Render các dòng log đang gom theo đợt để tránh làm đơ main Qt event loop."""
+        if not self._pending_render_lines:
+            return
+        pending = self._pending_render_lines
+        self._pending_render_lines = []
+        if not self._is_console_visible:
+            return
+
+        cursor = self.txt_layer_log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        current_text = self.txt_layer_log.toPlainText()
+        if not current_text or current_text.startswith("[CONSOLE] Chưa có log") or current_text.startswith("[CONSOLE] Hệ thống sẵn sàng"):
+            self.txt_layer_log.setPlainText("\n".join(pending))
+        else:
+            cursor.insertText("\n" + "\n".join(pending))
+
+        if self._auto_scroll:
+            cursor.movePosition(QTextCursor.End)
+            self.txt_layer_log.setTextCursor(cursor)
 
     def _refresh_log_view(self) -> None:
         """Render lại toàn bộ snapshot log theo bộ lọc hiện tại."""
+        self._pending_render_lines.clear()
+        if self._batch_render_timer.isActive():
+            self._batch_render_timer.stop()
         if self._log_snapshot_provider is not None:
             try:
                 backend_logs = self._log_snapshot_provider(self._current_filter)
@@ -566,6 +604,9 @@ class ROS2SystemDetailScreen(QWidget):
             """)
 
     def _clear_current_log(self) -> None:
+        self._pending_render_lines.clear()
+        if self._batch_render_timer.isActive():
+            self._batch_render_timer.stop()
         if self._current_filter == "all":
             for k in self._logs_by_layer:
                 self._logs_by_layer[k].clear()

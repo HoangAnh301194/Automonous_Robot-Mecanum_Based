@@ -22,6 +22,7 @@ Features:
 from __future__ import annotations
 
 import math
+import time
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -248,6 +249,9 @@ class InteractiveNavMapWidget(QWidget):
         self._selection_enabled = True
         self._is_active = True
         self._map_dirty = False
+        self._last_pose_paint_time: float = 0.0
+        self._last_scan_paint_time: float = 0.0
+        self._last_obs_paint_time: float = 0.0
 
         self._goal_icon = QPixmap(str(goal_icon)) if goal_icon is not None else QPixmap()
         if not self._goal_icon.isNull():
@@ -385,7 +389,10 @@ class InteractiveNavMapWidget(QWidget):
     def set_pose(self, pose: dict[str, Any]) -> None:
         self._pose = pose
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_pose_paint_time >= 0.066:  # Giới hạn tối đa 15 Hz repaint
+                self._last_pose_paint_time = now
+                self.update()
 
     def set_path(self, path: list[list[float]]) -> None:
         self._path = path
@@ -448,7 +455,10 @@ class InteractiveNavMapWidget(QWidget):
     def set_scan_points(self, points: list[tuple[float, float]]) -> None:
         self._scan_points = points
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_scan_paint_time >= 0.10:  # Giới hạn tối đa 10 Hz repaint
+                self._last_scan_paint_time = now
+                self.update()
 
     def set_obstacle_points(self, side: str, points: list[tuple[float, float]]) -> None:
         if side == "front":
@@ -456,7 +466,10 @@ class InteractiveNavMapWidget(QWidget):
         elif side == "rear":
             self._rear_obs_points = points
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_obs_paint_time >= 0.125:  # Giới hạn tối đa 8 Hz repaint
+                self._last_obs_paint_time = now
+                self.update()
 
     # -------------------------------------------------------------------------
     # Coordinate Transforms with Zoom & Pan
@@ -1489,6 +1502,11 @@ class NavigationPage(QWidget):
         self.btn_tab_patrol.style().unpolish(self.btn_tab_patrol)
         self.btn_tab_patrol.style().polish(self.btn_tab_patrol)
 
+        # Kích hoạt chỉ widget bản đồ của tab hiển thị để tối ưu hóa render
+        page_active = getattr(self, "_is_active", True)
+        self.map_widget.set_active(page_active and index == 0)
+        self.patrol_map_widget.set_active(page_active and index == 1)
+
         # Sync batch waypoints to map
         if index == 0:
             self.map_widget.set_pick_mode(False)
@@ -2352,8 +2370,9 @@ class NavigationPage(QWidget):
     def set_active(self, active: bool) -> None:
         """Thông báo trạng thái hiển thị của trang Navigation để tối ưu hóa render map."""
         self._is_active = active
-        self.map_widget.set_active(active)
-        self.patrol_map_widget.set_active(active)
+        current_tab = self.stack.currentIndex() if hasattr(self, "stack") else 0
+        self.map_widget.set_active(active and current_tab == 0)
+        self.patrol_map_widget.set_active(active and current_tab == 1)
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         self.map_widget.set_map(map_data)
