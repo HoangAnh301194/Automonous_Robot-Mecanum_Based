@@ -353,25 +353,27 @@ class ROS2SystemDetailScreen(QWidget):
                 btn_start = self.layer_rows[k].get("start_btn")
                 btn_stop = self.layer_rows[k].get("stop_btn")
 
-                if is_on == "STARTING":
+                state_str = str(is_on.value) if hasattr(is_on, "value") else str(is_on)
+
+                if state_str == "STARTING":
                     lbl.set_status("STARTING", HealthStatus.UNKNOWN)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(False)
-                elif is_on == "STOPPING":
+                elif state_str == "STOPPING":
                     lbl.set_status("STOPPING", HealthStatus.WARNING)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(False)
-                elif is_on == "ERROR":
+                elif state_str == "ERROR":
                     lbl.set_status("ERROR", HealthStatus.CRITICAL)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(True)
-                elif is_on is True or is_on == "RUNNING":
+                elif is_on is True or state_str == "RUNNING":
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
                     if btn_start:
                         btn_start.setEnabled(False)
@@ -474,8 +476,8 @@ class ROS2SystemDetailScreen(QWidget):
     def _update_filter_button_styles(self) -> None:
         for k, btn in self._filter_buttons.items():
             if k == self._current_filter:
-                btn.setStyleSheet(f"""
-                    QPushButton {{
+                btn.setStyleSheet("""
+                    QPushButton {
                         background-color: #064e3b;
                         border: 1px solid #10b981;
                         color: #10b981;
@@ -483,7 +485,7 @@ class ROS2SystemDetailScreen(QWidget):
                         font-weight: 700;
                         font-size: 11px;
                         padding: 0 8px;
-                    }}
+                    }
                 """)
             else:
                 btn.setStyleSheet(f"""
@@ -509,8 +511,8 @@ class ROS2SystemDetailScreen(QWidget):
     def _update_autoscroll_style(self) -> None:
         if self._auto_scroll:
             self.btn_autoscroll.setText("Cuộn: BẬT")
-            self.btn_autoscroll.setStyleSheet(f"""
-                QPushButton {{
+            self.btn_autoscroll.setStyleSheet("""
+                QPushButton {
                     background-color: #064e3b;
                     border: 1px solid #10b981;
                     color: #10b981;
@@ -518,7 +520,7 @@ class ROS2SystemDetailScreen(QWidget):
                     padding: 0 8px;
                     font-size: 11px;
                     font-weight: 700;
-                }}
+                }
             """)
         else:
             self.btn_autoscroll.setText("Cuộn: TẮT")

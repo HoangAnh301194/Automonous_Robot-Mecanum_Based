@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from enum import Enum
 import math
 import os
 import shlex
@@ -26,7 +27,6 @@ from rclpy.qos import (
     HistoryPolicy,
     QoSProfile,
     ReliabilityPolicy,
-    qos_profile_sensor_data,
 )
 from sensor_msgs.msg import BatteryState, Image, LaserScan
 from std_msgs.msg import Bool, Float32, Float64, String
@@ -75,6 +75,15 @@ def quaternion_to_yaw(x: float, y: float, z: float, w: float) -> float:
     sin_yaw = 2.0 * (w * z + x * y)
     cos_yaw = 1.0 - 2.0 * (y * y + z * z)
     return math.atan2(sin_yaw, cos_yaw)
+
+
+class LayerState(str, Enum):
+    """Máy trạng thái chuẩn cho các tầng tiến trình ROS 2 (Single Source of Truth)."""
+    STOPPED = "STOPPED"
+    STARTING = "STARTING"
+    RUNNING = "RUNNING"
+    STOPPING = "STOPPING"
+    ERROR = "ERROR"
 
 
 class KioskRosNode(Node):
@@ -160,6 +169,15 @@ class KioskRosNode(Node):
         self._people_count = 0
         self._closest_person_dist: float | None = None
         self._last_ai_rx = 0.0
+        # Thread-safe Process Lifecycle State Machine
+        self._lifecycle_lock = threading.RLock()
+        self._layer_states: dict[str, LayerState] = {
+            "layer1": LayerState.STOPPED,
+            "layer2": LayerState.STOPPED,
+            "layer3": LayerState.STOPPED,
+            "layer4": LayerState.STOPPED,
+            "layer5": LayerState.STOPPED,
+        }
         self._layer_procs: dict[str, subprocess.Popen] = {}
         self._starting_layers: set[str] = set()
         self._cancel_starting_layers: set[str] = set()
@@ -1172,35 +1190,31 @@ class KioskRosNode(Node):
         }
         self.signals.system_telemetry_changed.emit(snap)
 
-        # Layer states - Hỗ trợ cả 2 định dạng key ngữ nghĩa và số thứ tự, tôn trọng trạng thái STARTING, STOPPING & ERROR
-        def _resolve_layer_state(canonical_key: str, alt_key: str, extra_proc=None):
-            if canonical_key in self._starting_layers or alt_key in self._starting_layers:
-                return "STARTING"
-            if canonical_key in self._stopping_layers or alt_key in self._stopping_layers:
-                return "STOPPING"
-            if canonical_key in self._error_layers or alt_key in self._error_layers:
-                return "ERROR"
-            proc = self._layer_procs.get(canonical_key) or self._layer_procs.get(alt_key) or extra_proc
-            return bool(proc and proc.poll() is None)
+        # Single Source of Truth: đọc trực tiếp từ self._layer_states dưới lock, bảo đảm không bao giờ xung đột
+        with self._lifecycle_lock:
+            # Phát hiện các tiến trình chết ngoài ý muốn (T12)
+            for c_k in ("layer1", "layer2", "layer3", "layer4", "layer5"):
+                st = self._layer_states.get(c_k, LayerState.STOPPED)
+                if st == LayerState.RUNNING:
+                    pr = self._layer_procs.get(c_k)
+                    if pr is not None and pr.poll() is not None:
+                        exit_code = pr.poll()
+                        new_st = LayerState.STOPPED if exit_code == 0 else LayerState.ERROR
+                        self._set_layer_state(c_k, new_st)
+                        self._layer_procs.pop(c_k, None)
+                        alt = self.LAYER_ALIAS_MAP.get(c_k, "")
+                        if alt:
+                            self._layer_procs.pop(alt, None)
 
-        is_l1 = _resolve_layer_state("layer1", "layer_hardware")
-        is_l2 = _resolve_layer_state("layer2", "layer_navigation", self._localization_proc)
-        is_l3 = _resolve_layer_state("layer3", "layer_slam", self._slam_proc)
-        is_l4 = _resolve_layer_state("layer4", "layer_perception")
-        is_l5 = _resolve_layer_state("layer5", "layer_voice_interaction")
+            # Lấy snapshot trạng thái tầng đồng nhất
+            layer_states = {}
+            for c_k in ("layer1", "layer2", "layer3", "layer4", "layer5"):
+                s_val = self._layer_states.get(c_k, LayerState.STOPPED).value
+                alt_k = self.LAYER_ALIAS_MAP.get(c_k, "")
+                layer_states[c_k] = s_val
+                if alt_k:
+                    layer_states[alt_k] = s_val
 
-        layer_states = {
-            "layer_hardware": is_l1,
-            "layer_navigation": is_l2,
-            "layer_slam": is_l3,
-            "layer_perception": is_l4,
-            "layer_voice_interaction": is_l5,
-            "layer1": is_l1,
-            "layer2": is_l2,
-            "layer3": is_l3,
-            "layer4": is_l4,
-            "layer5": is_l5,
-        }
         self.signals.layer_status_changed.emit(layer_states)
 
     def test_actuator(self, test_name: str) -> None:
@@ -1291,81 +1305,84 @@ class KioskRosNode(Node):
         buf = self._layer_log_buffers.get(norm_key)
         return list(buf) if buf else []
 
-    def start_layer(self, layer_key: str) -> None:
-        """Khởi động tầng tiến trình tương ứng (hỗ trợ cả alias ngữ nghĩa và số thứ tự)."""
-        launch_key = self._canonical_layer_key(layer_key)
-        if not (launch_key.startswith("layer") and launch_key[5:].isdigit()):
-            launch_key = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
-        alt_key = self.LAYER_ALIAS_MAP.get(launch_key, "")
+    def _set_layer_state(self, canonical_key: str, state: LayerState) -> None:
+        """Cập nhật trạng thái duy nhất cho layer và đồng bộ các tập phụ trợ (phải gọi dưới _lifecycle_lock)."""
+        self._layer_states[canonical_key] = state
+        alt_key = self.LAYER_ALIAS_MAP.get(canonical_key, "")
 
-        if (
-            launch_key in self._stopping_layers
-            or layer_key in self._stopping_layers
-            or (bool(alt_key) and alt_key in self._stopping_layers)
-        ):
-            self.get_logger().warn(
-                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang trong trạng thái STOPPING. "
-                "Không thể khởi động lại cho đến khi tiến trình dừng hoàn toàn!"
-            )
-            return
+        if state == LayerState.STARTING:
+            self._starting_layers.add(canonical_key)
+            if alt_key:
+                self._starting_layers.add(alt_key)
+        else:
+            self._starting_layers.discard(canonical_key)
+            if alt_key:
+                self._starting_layers.discard(alt_key)
 
-        if (
-            launch_key in self._starting_layers
-            or layer_key in self._starting_layers
-            or (bool(alt_key) and alt_key in self._starting_layers)
-        ):
-            self.get_logger().warn(
-                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang trong quá trình STARTING, bỏ qua."
-            )
-            return
+        if state == LayerState.STOPPING:
+            self._stopping_layers.add(canonical_key)
+            if alt_key:
+                self._stopping_layers.add(alt_key)
+        else:
+            self._stopping_layers.discard(canonical_key)
+            if alt_key:
+                self._stopping_layers.discard(alt_key)
 
-        if (
-            launch_key in self._error_layers
-            or layer_key in self._error_layers
-            or (bool(alt_key) and alt_key in self._error_layers)
-        ):
-            self.get_logger().error(
-                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang ở trạng thái ERROR (tiến trình cũ chưa dừng sạch). "
-                "Vui lòng bấm STOP hoặc Emergency Cleanup trước khi khởi động lại!"
-            )
-            return
+        if state == LayerState.ERROR:
+            self._error_layers.add(canonical_key)
+            if alt_key:
+                self._error_layers.add(alt_key)
+        else:
+            self._error_layers.discard(canonical_key)
+            if alt_key:
+                self._error_layers.discard(alt_key)
 
-        existing_proc = (
-            self._layer_procs.get(launch_key)
-            or self._layer_procs.get(layer_key)
-            or (self._layer_procs.get(alt_key) if alt_key else None)
-        )
-        if existing_proc and existing_proc.poll() is None:
-            self.get_logger().warn(
-                f"[LAYER START] Tầng {layer_key} ({launch_key}) đang có tiến trình PID {existing_proc.pid} còn chạy! "
-                "Từ chối khởi động trùng."
-            )
-            return
+    def get_layer_state(self, layer_key: str) -> LayerState:
+        """Lấy trạng thái chuẩn hiện tại của layer bảo đảm thread-safe."""
+        canonical = self._canonical_layer_key(layer_key)
+        with self._lifecycle_lock:
+            return self._layer_states.get(canonical, LayerState.STOPPED)
 
-        # Gán token định danh duy nhất cho phiên khởi động này
-        launch_token = str(time.time_ns())
-        self._active_launch_tokens[launch_key] = launch_token
-        self._active_launch_tokens[layer_key] = launch_token
-        if alt_key:
-            self._active_launch_tokens[alt_key] = launch_token
+    @staticmethod
+    def _terminate_process_group(proc: subprocess.Popen | None, timeout: float = 1.5) -> bool:
+        """Dừng an toàn process group: SIGINT -> chờ timeout -> SIGKILL -> chờ xác nhận đã chết hoàn toàn."""
+        if proc is None or proc.poll() is not None:
+            return True
+        try:
+            pgid = os.getpgid(proc.pid)
+        except (ProcessLookupError, OSError):
+            return proc.poll() is not None
 
-        # Đánh dấu đang STARTING và xóa cờ hủy cũ (nếu có)
-        self._starting_layers.add(launch_key)
-        self._starting_layers.add(layer_key)
-        if alt_key:
-            self._starting_layers.add(alt_key)
-        self._cancel_starting_layers.discard(launch_key)
-        self._cancel_starting_layers.discard(layer_key)
-        if alt_key:
-            self._cancel_starting_layers.discard(alt_key)
+        # 1. Gửi SIGINT
+        try:
+            os.killpg(pgid, signal.SIGINT)
+        except (ProcessLookupError, OSError):
+            pass
 
-        starting_dict = {launch_key: "STARTING", layer_key: "STARTING"}
-        if alt_key:
-            starting_dict[alt_key] = "STARTING"
-        self.signals.layer_status_changed.emit(starting_dict)
+        # Chờ có timeout cho SIGINT
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if proc.poll() is not None:
+                return True
+            time.sleep(0.05)
 
-        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (launch_key={launch_key}, token={launch_token})")
-        cmd = ""
+        # 2. Nếu vẫn chưa thoát, gửi SIGKILL
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, OSError):
+            pass
+
+        # Chờ có timeout cho SIGKILL
+        kill_deadline = time.monotonic() + 1.0
+        while time.monotonic() < kill_deadline:
+            if proc.poll() is not None:
+                return True
+            time.sleep(0.05)
+
+        return proc.poll() is not None
+
+    def _build_layer_cmd(self, launch_key: str) -> str:
+        """Sinh chuỗi lệnh khởi chạy cho tầng tiến trình."""
         prefix = self._get_ws_prefix()
         if launch_key == "layer1":
             from robot_ui.kiosk.serial_resolver import detect_serial_ports
@@ -1374,328 +1391,376 @@ class KioskRosNode(Node):
             self.get_logger().info(
                 f"[LAYER 1] Auto-detected serial ports ({detect_method}): Hoverboard={hb_port}, LiDAR={lidar_port}"
             )
-            cmd = (
+            return (
                 prefix
                 + "ros2 launch mo_hinh real_odom.launch.py odom_source:=hoverboard use_sim_time:=false "
                 + f"hoverboard_port:={shlex.quote(hb_port)} esp_port:={shlex.quote(hb_port)} lidar_port:={shlex.quote(lidar_port)}"
             )
         elif launch_key == "layer2":
-            cmd = prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=false"
+            return prefix + "ros2 launch mo_hinh real_localization_nav2.launch.py localization_mode:=amcl use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer3":
-            cmd = prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
+            return prefix + "ros2 launch mo_hinh real_slam.launch.py use_sim_time:=false use_rviz:=false"
         elif launch_key == "layer4":
-            cmd = prefix + "ros2 launch robot_bringup ai_perception.launch.py use_sim_time:=false"
+            return prefix + "ros2 launch robot_bringup ai_perception.launch.py use_sim_time:=false"
         elif launch_key == "layer5":
-            cmd = prefix + "ros2 launch robot_bringup backend.launch.py"
+            return prefix + "ros2 launch robot_bringup backend.launch.py"
+        return ""
 
-        if cmd:
-            def _launch(token=launch_token):
-                try:
-                    # Kiểm tra xem có lệnh hủy hoặc token bị thu hồi trước khi Popen không
-                    if (
-                        self._active_launch_tokens.get(launch_key) != token
-                        or launch_key in self._cancel_starting_layers
-                    ):
-                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} trước khi tạo tiến trình (token mismatch).")
-                        self._starting_layers.discard(launch_key)
-                        self._starting_layers.discard(layer_key)
-                        if alt_key:
-                            self._starting_layers.discard(alt_key)
-                        self._stopping_layers.discard(launch_key)
-                        self._stopping_layers.discard(layer_key)
-                        if alt_key:
-                            self._stopping_layers.discard(alt_key)
-                        self._cancel_starting_layers.discard(launch_key)
-                        self._cancel_starting_layers.discard(layer_key)
-                        if alt_key:
-                            self._cancel_starting_layers.discard(alt_key)
-                        stopped_dict = {launch_key: False, layer_key: False}
-                        if alt_key:
-                            stopped_dict[alt_key] = False
-                        self.signals.layer_status_changed.emit(stopped_dict)
-                        return
-
-                    log_path = f"/tmp/ros_layer_{launch_key}.log"
-                    self._record_layer_log(
-                        launch_key, f"--- BẮT ĐẦU KHỞI ĐỘNG [{launch_key.upper()}] ---"
-                    )
-                    self._record_layer_log(
-                        launch_key, f"Lệnh thực thi: {cmd}"
-                    )
-                    proc = subprocess.Popen(
-                        ["bash", "-c", cmd],
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        bufsize=1,
-                        preexec_fn=os.setsid,
-                    )
-
-                    # Kiểm tra xem có lệnh hủy hoặc token bị thu hồi trong khi Popen đang spawn không
-                    if (
-                        self._active_launch_tokens.get(launch_key) != token
-                        or launch_key in self._cancel_starting_layers
-                    ):
-                        self.get_logger().info(f"[LAYER START] Hủy khởi động {launch_key} ngay sau Popen (token mismatch).")
-                        try:
-                            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-                        except Exception:
-                            pass
-                        self._starting_layers.discard(launch_key)
-                        self._starting_layers.discard(layer_key)
-                        if alt_key:
-                            self._starting_layers.discard(alt_key)
-                        self._stopping_layers.discard(launch_key)
-                        self._stopping_layers.discard(layer_key)
-                        if alt_key:
-                            self._stopping_layers.discard(alt_key)
-                        self._cancel_starting_layers.discard(launch_key)
-                        self._cancel_starting_layers.discard(layer_key)
-                        if alt_key:
-                            self._cancel_starting_layers.discard(alt_key)
-                        stopped_dict = {launch_key: False, layer_key: False}
-                        if alt_key:
-                            stopped_dict[alt_key] = False
-                        self.signals.layer_status_changed.emit(stopped_dict)
-                        return
-
-                    self._layer_procs[launch_key] = proc
-                    self._layer_procs[layer_key] = proc
-                    if alt_key:
-                        self._layer_procs[alt_key] = proc
-                    if launch_key == "layer3":
-                        self._slam_proc = proc
-                        self.signals.slam_status_changed.emit(True, "SLAM đang chạy")
-                    elif launch_key == "layer2":
-                        self._localization_proc = proc
-
-                    # Hoàn tất STARTING, chuyển sang RUNNING
-                    self._starting_layers.discard(launch_key)
-                    self._starting_layers.discard(layer_key)
-                    if alt_key:
-                        self._starting_layers.discard(alt_key)
-                    running_dict = {launch_key: True, layer_key: True}
-                    if alt_key:
-                        running_dict[alt_key] = True
-                    self.signals.layer_status_changed.emit(running_dict)
-
-                    def _read_layer_stream(p=proc, key=launch_key, path=log_path):
-                        last_flush = time.monotonic()
-                        try:
-                            with open(path, "a", encoding="utf-8") as f_out:
-                                if p.stdout:
-                                    for line in iter(p.stdout.readline, ""):
-                                        if not line:
-                                            break
-                                        clean_line = line.rstrip()
-                                        f_out.write(clean_line + "\n")
-                                        now = time.monotonic()
-                                        if now - last_flush > 1.0:
-                                            f_out.flush()
-                                            last_flush = now
-                                        self._record_layer_log(key, clean_line)
-                                f_out.flush()
-                        except Exception:
-                            pass
-                        finally:
-                            try:
-                                if p.stdout:
-                                    p.stdout.close()
-                                p.wait(timeout=2.0)
-                            except Exception:
-                                pass
-                            exit_code = p.poll()
-                            self._record_layer_log(
-                                key, f"--- TIẾN TRÌNH [{key.upper()}] ĐÃ DỪNG (Mã thoát: {exit_code}) ---"
-                            )
-
-                    threading.Thread(target=_read_layer_stream, daemon=True).start()
-                except Exception as exc:
-                    self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
-                    self._starting_layers.discard(launch_key)
-                    self._starting_layers.discard(layer_key)
-                    if alt_key:
-                        self._starting_layers.discard(alt_key)
-                    self._stopping_layers.discard(launch_key)
-                    self._stopping_layers.discard(layer_key)
-                    if alt_key:
-                        self._stopping_layers.discard(alt_key)
-                    self._active_launch_tokens.pop(launch_key, None)
-                    self._active_launch_tokens.pop(layer_key, None)
-                    if alt_key:
-                        self._active_launch_tokens.pop(alt_key, None)
-                    self._error_layers.add(launch_key)
-                    self._error_layers.add(layer_key)
-                    if alt_key:
-                        self._error_layers.add(alt_key)
-                    err_dict = {launch_key: "ERROR", layer_key: "ERROR"}
-                    if alt_key:
-                        err_dict[alt_key] = "ERROR"
-                    self.signals.layer_status_changed.emit(err_dict)
-                    self._record_layer_log(
-                        launch_key, f"[LỖI KHỞI ĐỘNG]: {exc}"
-                    )
-
-            threading.Thread(target=_launch, daemon=True).start()
-
-    def stop_layer(self, layer_key: str) -> None:
-        """Dừng tầng tiến trình tương ứng (kiểm tra cả alias) không block Qt main thread."""
+    def start_layer(self, layer_key: str) -> None:
+        """Khởi động tầng tiến trình tương ứng bảo đảm thread-safe và nguyên tử."""
         canonical = self._canonical_layer_key(layer_key)
+        if not (canonical.startswith("layer") and canonical[5:].isdigit()):
+            canonical = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
         alt_key = self.LAYER_ALIAS_MAP.get(canonical, "")
-        launch_key = canonical if canonical.startswith("layer") and canonical[5:].isdigit() else layer_key
 
-        if canonical in self._stopping_layers or layer_key in self._stopping_layers:
-            self.get_logger().warn(f"[LAYER STOP] Tầng {layer_key} đang ở trạng thái STOPPING, bỏ qua yêu cầu trùng lặp.")
-            return
+        with self._lifecycle_lock:
+            curr_state = self._layer_states.get(canonical, LayerState.STOPPED)
 
-        # Thu hồi ngay lập tức token khởi chạy để vô hiệu hóa background launch thread
-        self._active_launch_tokens.pop(canonical, None)
-        self._active_launch_tokens.pop(layer_key, None)
-        self._active_launch_tokens.pop(launch_key, None)
-        if alt_key:
-            self._active_launch_tokens.pop(alt_key, None)
-
-        # Xử lý nếu tầng đang trong giai đoạn STARTING:
-        is_starting = (
-            canonical in self._starting_layers
-            or layer_key in self._starting_layers
-            or (bool(alt_key) and alt_key in self._starting_layers)
-        )
-        if is_starting:
-            self.get_logger().info(f"[LAYER STOP] Yêu cầu dừng khi tầng {layer_key} đang STARTING. Đánh dấu cờ hủy.")
-            self._cancel_starting_layers.add(canonical)
-            self._cancel_starting_layers.add(layer_key)
-            self._cancel_starting_layers.add(launch_key)
-            if alt_key:
-                self._cancel_starting_layers.add(alt_key)
-
-        proc = (
-            self._layer_procs.get(canonical)
-            or self._layer_procs.get(layer_key)
-            or self._layer_procs.get(launch_key)
-            or (self._layer_procs.get(alt_key) if alt_key else None)
-        )
-
-        if not proc or proc.poll() is not None:
-            # Nếu đang trong quá trình STARTING nhưng chưa có process handle trong _layer_procs:
-            # CHUYỂN SANG STOPPING và để background launch thread tự dọn dẹp khi phát hiện token bị hủy,
-            # tránh việc báo STOPPED quá sớm khiến người dùng bấm START trùng lặp!
-            if is_starting:
-                self._stopping_layers.add(canonical)
-                self._stopping_layers.add(layer_key)
-                if alt_key:
-                    self._stopping_layers.add(alt_key)
-                stopping_dict = {canonical: "STOPPING", layer_key: "STOPPING"}
-                if alt_key:
-                    stopping_dict[alt_key] = "STOPPING"
-                self.signals.layer_status_changed.emit(stopping_dict)
-                self.get_logger().info(f"[LAYER STOP] Tầng {layer_key} đang STARTING -> chuyển STOPPING chờ thread hủy an toàn.")
+            if curr_state == LayerState.RUNNING:
+                self.get_logger().warn(
+                    f"[LAYER START] Tầng {layer_key} ({canonical}) đang RUNNING, từ chối khởi động trùng."
+                )
                 return
 
-            # Không có tiến trình hoặc tiến trình đã kết thúc
-            self._layer_procs.pop(canonical, None)
-            self._layer_procs.pop(layer_key, None)
-            self._layer_procs.pop(launch_key, None)
+            if curr_state == LayerState.STARTING:
+                self.get_logger().warn(
+                    f"[LAYER START] Tầng {layer_key} ({canonical}) đang trong quá trình STARTING, bỏ qua."
+                )
+                return
+
+            if curr_state == LayerState.STOPPING:
+                self.get_logger().warn(
+                    f"[LAYER START] Tầng {layer_key} ({canonical}) đang trong trạng thái STOPPING. "
+                    "Không thể khởi động lại cho đến khi tiến trình dừng hoàn toàn!"
+                )
+                return
+
+            if curr_state == LayerState.ERROR:
+                self.get_logger().error(
+                    f"[LAYER START] Tầng {layer_key} ({canonical}) đang ở trạng thái ERROR (tiến trình cũ chưa dừng sạch). "
+                    "Vui lòng bấm STOP hoặc Emergency Cleanup trước khi khởi động lại!"
+                )
+                return
+
+            existing_proc = (
+                self._layer_procs.get(canonical)
+                or (self._layer_procs.get(alt_key) if alt_key else None)
+            )
+            if existing_proc and existing_proc.poll() is None:
+                self.get_logger().warn(
+                    f"[LAYER START] Tầng {layer_key} ({canonical}) đang có tiến trình PID {existing_proc.pid} còn chạy! "
+                    "Từ chối khởi động trùng."
+                )
+                return
+
+            # Gán token định danh duy nhất cho launch generation này
+            launch_token = str(time.time_ns())
+            self._active_launch_tokens[canonical] = launch_token
             if alt_key:
-                self._layer_procs.pop(alt_key, None)
-            self._starting_layers.discard(canonical)
-            self._starting_layers.discard(layer_key)
+                self._active_launch_tokens[alt_key] = launch_token
+            self._cancel_starting_layers.discard(canonical)
+
+            # Chuyển trạng thái sang STARTING
+            self._set_layer_state(canonical, LayerState.STARTING)
+
+            starting_dict = {canonical: LayerState.STARTING.value, layer_key: LayerState.STARTING.value}
             if alt_key:
-                self._starting_layers.discard(alt_key)
-            self._stopping_layers.discard(canonical)
-            self._stopping_layers.discard(layer_key)
-            if alt_key:
-                self._stopping_layers.discard(alt_key)
-            self._error_layers.discard(canonical)
-            self._error_layers.discard(layer_key)
-            if alt_key:
-                self._error_layers.discard(alt_key)
-            stopped_dict = {canonical: False, layer_key: False}
-            if alt_key:
-                stopped_dict[alt_key] = False
-            self.signals.layer_status_changed.emit(stopped_dict)
+                starting_dict[alt_key] = LayerState.STARTING.value
+
+        # Phát signal trạng thái STARTING ngoài lock
+        self.signals.layer_status_changed.emit(starting_dict)
+        self.get_logger().info(f"[LAYER START] Khởi động tầng: {layer_key} (canonical={canonical}, token={launch_token})")
+
+        cmd = self._build_layer_cmd(canonical)
+        if not cmd:
+            with self._lifecycle_lock:
+                self._set_layer_state(canonical, LayerState.ERROR)
+                self._active_launch_tokens.pop(canonical, None)
+            self.signals.layer_status_changed.emit({canonical: LayerState.ERROR.value})
             return
 
-        # Đánh dấu đang stopping để chặn race condition
-        self._stopping_layers.add(canonical)
-        self._stopping_layers.add(layer_key)
-        if alt_key:
-            self._stopping_layers.add(alt_key)
+        threading.Thread(
+            target=self._launch_worker,
+            args=(canonical, layer_key, alt_key, cmd, launch_token),
+            daemon=True,
+        ).start()
 
-        # Báo ngay trạng thái STOPPING lên giao diện để vô hiệu hóa nút bấm
-        stopping_dict = {canonical: "STOPPING", layer_key: "STOPPING"}
-        if alt_key:
-            stopping_dict[alt_key] = "STOPPING"
+    def _launch_worker(self, canonical: str, orig_key: str, alt_key: str, cmd: str, token: str) -> None:
+        """Worker thread khởi tạo tiến trình và bảo vệ tính nguyên tử của token & process registration."""
+        # Bước 1: Kiểm tra trước Popen dưới lock
+        with self._lifecycle_lock:
+            if (
+                self._active_launch_tokens.get(canonical) != token
+                or self._layer_states.get(canonical) != LayerState.STARTING
+                or canonical in self._cancel_starting_layers
+            ):
+                self.get_logger().info(f"[LAYER LAUNCH] Hủy khởi động {canonical} trước khi Popen (token mismatch hoặc cờ hủy).")
+                if self._layer_states.get(canonical) in (LayerState.STARTING, LayerState.STOPPING):
+                    self._set_layer_state(canonical, LayerState.STOPPED)
+                    self._active_launch_tokens.pop(canonical, None)
+                    self._cancel_starting_layers.discard(canonical)
+                    emit_stopped = True
+                else:
+                    emit_stopped = False
+            else:
+                emit_stopped = False
+
+        if emit_stopped:
+            self.signals.layer_status_changed.emit({canonical: LayerState.STOPPED.value})
+            return
+
+        # Bước 2: Thực hiện Popen ngoài lock
+        proc = None
+        spawn_exc = None
+        log_path = f"/tmp/ros_layer_{canonical}.log"
+        self._record_layer_log(canonical, f"--- BẮT ĐẦU KHỞI ĐỘNG [{canonical.upper()}] ---")
+        self._record_layer_log(canonical, f"Lệnh thực thi: {cmd}")
+
+        try:
+            proc = subprocess.Popen(
+                ["bash", "-c", cmd],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                preexec_fn=os.setsid,
+            )
+        except Exception as exc:
+            spawn_exc = exc
+
+        # Bước 3: Kiểm tra token & đăng ký tiến trình NGUYÊN TỬ DƯỚI LOCK (P0-1)
+        abort_proc = False
+        emit_dict = None
+        with self._lifecycle_lock:
+            if spawn_exc is not None:
+                self.get_logger().error(f"[LAYER LAUNCH] Lỗi khi tạo tiến trình {canonical}: {spawn_exc}")
+                self._set_layer_state(canonical, LayerState.ERROR)
+                self._active_launch_tokens.pop(canonical, None)
+                emit_dict = {canonical: LayerState.ERROR.value}
+            elif (
+                self._active_launch_tokens.get(canonical) != token
+                or self._layer_states.get(canonical) != LayerState.STARTING
+                or canonical in self._cancel_starting_layers
+            ):
+                self.get_logger().info(f"[LAYER LAUNCH] Token bị thu hồi hoặc layer đã STOPPING trong lúc Popen {canonical}.")
+                abort_proc = True
+                self._set_layer_state(canonical, LayerState.STOPPING)
+                emit_dict = {canonical: LayerState.STOPPING.value}
+            else:
+                self._layer_procs[canonical] = proc
+                if orig_key:
+                    self._layer_procs[orig_key] = proc
+                if alt_key:
+                    self._layer_procs[alt_key] = proc
+                if canonical == "layer3":
+                    self._slam_proc = proc
+                elif canonical == "layer2":
+                    self._localization_proc = proc
+
+                self._set_layer_state(canonical, LayerState.RUNNING)
+                emit_dict = {canonical: LayerState.RUNNING.value, orig_key: LayerState.RUNNING.value}
+                if alt_key:
+                    emit_dict[alt_key] = LayerState.RUNNING.value
+
+        if emit_dict:
+            self.signals.layer_status_changed.emit(emit_dict)
+            if canonical == "layer3" and not abort_proc and spawn_exc is None:
+                self.signals.slam_status_changed.emit(True, "SLAM đang chạy")
+
+        if spawn_exc is not None:
+            self._record_layer_log(canonical, f"[LỖI KHỞI ĐỘNG]: {spawn_exc}")
+            return
+
+        # Bước 4: Xử lý hủy tiến trình nếu token bị thu hồi (P0-2)
+        if abort_proc and proc is not None:
+            self.get_logger().info(f"[LAYER LAUNCH] Đang dừng tiến trình {canonical} (PID: {proc.pid}) do yêu cầu hủy...")
+            is_dead = self._terminate_process_group(proc, timeout=1.5)
+            with self._lifecycle_lock:
+                if self._active_launch_tokens.get(canonical) in (token, None):
+                    if is_dead:
+                        self._set_layer_state(canonical, LayerState.STOPPED)
+                        self._active_launch_tokens.pop(canonical, None)
+                        self._cancel_starting_layers.discard(canonical)
+                        post_emit = {canonical: LayerState.STOPPED.value}
+                        self.get_logger().info(f"[LAYER LAUNCH] Tiến trình hủy {canonical} đã dừng hoàn toàn -> STOPPED.")
+                    else:
+                        self.get_logger().error(f"[LAYER LAUNCH] Không thể dừng tiến trình {canonical} PID {proc.pid} -> ERROR.")
+                        self._set_layer_state(canonical, LayerState.ERROR)
+                        self._layer_procs[canonical] = proc
+                        post_emit = {canonical: LayerState.ERROR.value}
+                else:
+                    post_emit = None
+
+            if post_emit:
+                self.signals.layer_status_changed.emit(post_emit)
+            return
+
+        # Bước 5: Đọc log stream và phát hiện tiến trình kết thúc
+        def _read_layer_stream(p=proc, key=canonical, path=log_path, tok=token):
+            last_flush = time.monotonic()
+            try:
+                with open(path, "a", encoding="utf-8") as f_out:
+                    if p.stdout:
+                        for line in iter(p.stdout.readline, ""):
+                            if not line:
+                                break
+                            clean_line = line.rstrip()
+                            f_out.write(clean_line + "\n")
+                            now = time.monotonic()
+                            if now - last_flush > 1.0:
+                                f_out.flush()
+                                last_flush = now
+                            self._record_layer_log(key, clean_line)
+                    f_out.flush()
+            except Exception:
+                pass
+            finally:
+                try:
+                    if p.stdout:
+                        p.stdout.close()
+                    p.wait(timeout=2.0)
+                except Exception:
+                    pass
+                exit_code = p.poll()
+                if exit_code is None:
+                    return
+                self._record_layer_log(
+                    key, f"--- TIẾN TRÌNH [{key.upper()}] ĐÃ DỪNG (Mã thoát: {exit_code}) ---"
+                )
+
+                with self._lifecycle_lock:
+                    if self._layer_procs.get(key) is p and self._layer_states.get(key) == LayerState.RUNNING:
+                        self._layer_procs.pop(key, None)
+                        a_k = self.LAYER_ALIAS_MAP.get(key, "")
+                        if a_k:
+                            self._layer_procs.pop(a_k, None)
+                        if key == "layer3":
+                            self._slam_proc = None
+                        elif key == "layer2":
+                            self._localization_proc = None
+
+                        new_st = LayerState.STOPPED if exit_code == 0 else LayerState.ERROR
+                        self._set_layer_state(key, new_st)
+                        self._active_launch_tokens.pop(key, None)
+                        stream_emit = {key: new_st.value}
+                        if a_k:
+                            stream_emit[a_k] = new_st.value
+                    else:
+                        stream_emit = None
+
+                if stream_emit:
+                    self.signals.layer_status_changed.emit(stream_emit)
+                    if key == "layer3":
+                        self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
+
+        threading.Thread(target=_read_layer_stream, daemon=True).start()
+
+    def stop_layer(self, layer_key: str) -> None:
+        """Dừng tầng tiến trình tương ứng bảo đảm thread-safe và xác nhận dừng trước khi chuyển STOPPED."""
+        canonical = self._canonical_layer_key(layer_key)
+        if not (canonical.startswith("layer") and canonical[5:].isdigit()):
+            canonical = self.LAYER_ALIAS_MAP.get(layer_key, "layer1")
+        alt_key = self.LAYER_ALIAS_MAP.get(canonical, "")
+
+        proc_to_kill = None
+        target_token = None
+
+        with self._lifecycle_lock:
+            curr_state = self._layer_states.get(canonical, LayerState.STOPPED)
+
+            if curr_state == LayerState.STOPPING:
+                self.get_logger().warn(
+                    f"[LAYER STOP] Tầng {layer_key} ({canonical}) đang ở trạng thái STOPPING, bỏ qua yêu cầu trùng lặp."
+                )
+                return
+
+            if curr_state == LayerState.STOPPED:
+                proc = self._layer_procs.get(canonical)
+                if not proc or proc.poll() is not None:
+                    self.get_logger().info(f"[LAYER STOP] Tầng {layer_key} ({canonical}) đã STOPPED.")
+                    self.signals.layer_status_changed.emit({canonical: LayerState.STOPPED.value})
+                    return
+
+            # Thu hồi launch token của generation hiện tại ngay lập tức
+            target_token = self._active_launch_tokens.pop(canonical, None)
+            if alt_key:
+                self._active_launch_tokens.pop(alt_key, None)
+            self._cancel_starting_layers.add(canonical)
+
+            # Chuyển trạng thái sang STOPPING
+            self._set_layer_state(canonical, LayerState.STOPPING)
+
+            # Lấy handle tiến trình nếu có
+            proc_to_kill = self._layer_procs.get(canonical) or (self._layer_procs.get(alt_key) if alt_key else None)
+
+            stopping_dict = {canonical: LayerState.STOPPING.value, layer_key: LayerState.STOPPING.value}
+            if alt_key:
+                stopping_dict[alt_key] = LayerState.STOPPING.value
+
+        # Báo ngay trạng thái STOPPING lên UI ngoài lock để khóa cả hai nút Start/Stop
         self.signals.layer_status_changed.emit(stopping_dict)
-
-        self.get_logger().info(f"[LAYER STOP] Bắt đầu dừng tầng: {layer_key} (STOPPING)")
+        self.get_logger().info(f"[LAYER STOP] Bắt đầu dừng tầng: {layer_key} (canonical={canonical}, STOPPING)")
         self._record_layer_log(canonical, f"Đang gửi tín hiệu dừng tới {layer_key} (STOPPING)...")
 
-        def _async_terminate(target_proc=proc, c_key=canonical, orig_key=layer_key, a_key=alt_key, l_key=launch_key):
-            try:
-                if target_proc and target_proc.poll() is None:
-                    pgid = os.getpgid(target_proc.pid)
-                    os.killpg(pgid, signal.SIGINT)
-                    for _ in range(15):
-                        if target_proc.poll() is not None:
-                            break
-                        time.sleep(0.1)
-                    if target_proc.poll() is None:
-                        os.killpg(pgid, signal.SIGKILL)
-                        try:
-                            target_proc.wait(timeout=1.0)
-                        except Exception:
-                            pass
-            except Exception as exc:
-                self.get_logger().warning(f"[LAYER STOP] Ngoại lệ khi dừng {c_key}: {exc}")
-            finally:
-                # KIỂM TRA CHÍNH XÁC XEM TIẾN TRÌNH ĐÃ KẾT THÚC THẬT SỰ CHƯA:
-                is_dead = (target_proc is None) or (target_proc.poll() is not None)
-                if is_dead:
-                    self._layer_procs.pop(c_key, None)
+        # Nếu đang STARTING nhưng chưa có process handle trong _layer_procs:
+        # Launch worker sẽ phát hiện token bị thu hồi và tự hủy an toàn ở Bước 4 của nó.
+        if proc_to_kill is None:
+            self.get_logger().info(f"[LAYER STOP] Tầng {layer_key} chưa có process handle, đã thu hồi token và chờ launch worker xử lý.")
+            return
+
+        threading.Thread(
+            target=self._stop_worker,
+            args=(canonical, layer_key, alt_key, proc_to_kill, target_token),
+            daemon=True,
+        ).start()
+
+    def _stop_worker(self, canonical: str, orig_key: str, alt_key: str, proc: subprocess.Popen, token: str | None) -> None:
+        """Worker thread thực thi terminate process group và xác nhận kết thúc trước khi cập nhật state."""
+        is_dead = self._terminate_process_group(proc, timeout=1.5)
+
+        with self._lifecycle_lock:
+            # Kiểm tra xem có launch generation mới nào đã thay thế chưa (T14)
+            current_token = self._active_launch_tokens.get(canonical)
+            if token is not None and current_token is not None and current_token != token:
+                self.get_logger().warn(f"[LAYER STOP] Generation cũ ({token}) kết thúc sau khi generation mới ({current_token}) đã bắt đầu. Bỏ qua cập nhật.")
+                return
+
+            if is_dead:
+                # ĐÃ DỪNG HOÀN TOÀN: Xóa process handle và chuyển sang STOPPED
+                self._layer_procs.pop(canonical, None)
+                if orig_key:
                     self._layer_procs.pop(orig_key, None)
-                    self._layer_procs.pop(l_key, None)
-                    if a_key:
-                        self._layer_procs.pop(a_key, None)
-                    if l_key == "layer3" or c_key in ("layer3", "layer_slam"):
-                        self._slam_proc = None
-                        self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
-                    elif l_key == "layer2" or c_key in ("layer2", "layer_navigation"):
-                        self._localization_proc = None
+                if alt_key:
+                    self._layer_procs.pop(alt_key, None)
+                if canonical == "layer3":
+                    self._slam_proc = None
+                elif canonical == "layer2":
+                    self._localization_proc = None
 
-                    self._stopping_layers.discard(c_key)
-                    self._stopping_layers.discard(orig_key)
-                    if a_key:
-                        self._stopping_layers.discard(a_key)
-                    self._error_layers.discard(c_key)
-                    self._error_layers.discard(orig_key)
-                    if a_key:
-                        self._error_layers.discard(a_key)
+                self._set_layer_state(canonical, LayerState.STOPPED)
+                self._cancel_starting_layers.discard(canonical)
 
-                    stopped_dict = {c_key: False, orig_key: False}
-                    if a_key:
-                        stopped_dict[a_key] = False
-                    self.signals.layer_status_changed.emit(stopped_dict)
-                    self._record_layer_log(c_key, f"--- TIẾN TRÌNH [{c_key.upper()}] ĐÃ DỪNG HOÀN TOÀN ---")
-                    self.get_logger().info(f"[LAYER STOP] Đã dừng hoàn toàn: {c_key}")
-                else:
-                    # TIẾN TRÌNH VẪN CHƯA THOÁT! Giữ handle trong _layer_procs và chuyển sang ERROR
-                    self.get_logger().error(f"[LAYER STOP] Tiến trình {c_key} (PID: {target_proc.pid}) không phản hồi! Giữ trạng thái ERROR.")
-                    self._stopping_layers.discard(c_key)
-                    self._stopping_layers.discard(orig_key)
-                    if a_key:
-                        self._stopping_layers.discard(a_key)
-                    self._error_layers.add(c_key)
-                    self._error_layers.add(orig_key)
-                    if a_key:
-                        self._error_layers.add(a_key)
-                    err_dict = {c_key: "ERROR", orig_key: "ERROR"}
-                    if a_key:
-                        err_dict[a_key] = "ERROR"
-                    self.signals.layer_status_changed.emit(err_dict)
-                    self._record_layer_log(c_key, f"[LỖI DỪNG]: Tiến trình PID {target_proc.pid} không phản hồi tín hiệu dừng.")
+                emit_payload = {canonical: LayerState.STOPPED.value, orig_key: LayerState.STOPPED.value}
+                if alt_key:
+                    emit_payload[alt_key] = LayerState.STOPPED.value
+                self._record_layer_log(canonical, f"--- TIẾN TRÌNH [{canonical.upper()}] ĐÃ DỪNG HOÀN TOÀN ---")
+                self.get_logger().info(f"[LAYER STOP] Đã dừng hoàn toàn: {canonical}")
+            else:
+                # KHÔNG THỂ DỪNG: Giữ process handle và chuyển sang ERROR
+                self.get_logger().error(f"[LAYER STOP] Tiến trình {canonical} (PID: {proc.pid}) không phản hồi! Giữ trạng thái ERROR.")
+                self._set_layer_state(canonical, LayerState.ERROR)
+                self._layer_procs[canonical] = proc
+                if alt_key:
+                    self._layer_procs[alt_key] = proc
 
-        threading.Thread(target=_async_terminate, daemon=True).start()
+                emit_payload = {canonical: LayerState.ERROR.value, orig_key: LayerState.ERROR.value}
+                if alt_key:
+                    emit_payload[alt_key] = LayerState.ERROR.value
+                self._record_layer_log(canonical, f"[LỖI DỪNG]: Tiến trình PID {proc.pid} không phản hồi tín hiệu dừng.")
+
+        self.signals.layer_status_changed.emit(emit_payload)
+        if canonical == "layer3" and is_dead:
+            self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
 
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
@@ -1754,18 +1819,19 @@ class KioskRosNode(Node):
             except Exception:
                 pass
 
-        # Reset bộ nhớ theo dõi tiến trình trong giao diện
-        self._starting_layers.clear()
-        self._cancel_starting_layers.clear()
-        self._stopping_layers.clear()
-        self._error_layers.clear()
-        self._active_launch_tokens.clear()
-        self._layer_procs.clear()
-        self._slam_proc = None
-        self._localization_proc = None
+        with self._lifecycle_lock:
+            self._active_launch_tokens.clear()
+            self._cancel_starting_layers.clear()
+            for c_k in ("layer1", "layer2", "layer3", "layer4", "layer5"):
+                self._set_layer_state(c_k, LayerState.STOPPED)
+            self._layer_procs.clear()
+            self._slam_proc = None
+            self._localization_proc = None
 
-        # Cập nhật trạng thái STOPPED lên giao diện
-        stopped_states = {k: False for k in self.LAYER_ALIAS_MAP}
+            stopped_states = {}
+            for k in self.LAYER_ALIAS_MAP:
+                stopped_states[k] = LayerState.STOPPED.value
+
         self.signals.layer_status_changed.emit(stopped_states)
         self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
         self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
