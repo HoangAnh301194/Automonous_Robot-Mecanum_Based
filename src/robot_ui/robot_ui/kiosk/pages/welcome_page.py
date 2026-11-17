@@ -71,8 +71,8 @@ class WelcomePage(QWidget):
         self.setStyleSheet("""
             QLabel#welcomeSchoolPtit { color: #ff4545; font-size: 15px; font-weight: 800; }
             QLabel#welcomeSchoolFee1 { color: #48a9ff; font-size: 14px; font-weight: 800; }
-            QLabel#welcomeHeading { color: #1d2938; font-size: 29px; font-weight: 800; }
-            QLabel#welcomeSubtitle { color: #506176; font-size: 19px; font-weight: 600; }
+            QLabel#welcomeHeading { color: #1d2938; background: rgba(255,255,255,195); padding: 8px 16px; border-radius: 12px; font-size: 29px; font-weight: 800; }
+            QLabel#welcomeSubtitle { color: #344456; background: rgba(255,255,255,180); padding: 6px 14px; border-radius: 10px; font-size: 19px; font-weight: 600; }
         """)
 
     def _read_background(self):
@@ -93,13 +93,14 @@ class WelcomePage(QWidget):
     def paintEvent(self, event: Any) -> None:
         self._read_background()
         p = QPainter(self)
+        p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.fillRect(self.rect(), QColor("#f8fafc"))
         if not self._background.isNull():
             p.drawPixmap((self.width() - self._background.width()) // 2,
                          (self.height() - self._background.height()) // 2,
                          self._background)
         gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0, QColor(255, 255, 255, 205))
-        gradient.setColorAt(0.6, QColor(255, 255, 255, 148))
-        gradient.setColorAt(1, QColor(248, 250, 252, 225))
+        gradient.setColorAt(0, QColor(255, 255, 255, 12))
+        gradient.setColorAt(0.6, QColor(255, 255, 255, 0))
+        gradient.setColorAt(1, QColor(248, 250, 252, 44))
         p.fillRect(self.rect(), QBrush(gradient))
