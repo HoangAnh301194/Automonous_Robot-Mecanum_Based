@@ -14,6 +14,7 @@
 | **Patrol & Approach Control** | `4386e324-f290-434d-a154-1c063a46edc8` | `bt_nodes.py`, `test_bt_preemption.py` | `ActionApproachWavingPerson` | HOÀN TẤT | Hoàn thành: Cập nhật cự ly tiếp cận người vẫy tay từ 1.2m xuống 0.70m (freeze_distance 1.0m), pass 100% 13 unit tests, build pass 0 errors. |
 | **UI Performance & Lazy Sleep** | `4386e324-f290-434d-a154-1c063a46edc8` | `ros_node.py`, `detection_debug_page.py`, `system_config_page.py`, `window.py` | `robot_status_changed`, `system_telemetry_changed` | HOÀN TẤT | Hoàn thành: Chặn bão pin 50Hz về 1Hz, chỉ render trang active, cho tab Debug & System Config ngủ 100% khi ẩn, pass 100% linter/build/125 unit tests |
 | **2D Pose Estimate in Navigation** | `4386e324-f290-434d-a154-1c063a46edc8` | `navigation_page.py`, `ros_node.py`, `window.py`, `test_kiosk_navigation_page.py` | `/initialpose`, `initial_pose_requested` | HOÀN TẤT | Hoàn thành: Thêm nút '📍 2D ESTIMATE', cho phép bấm và kéo chuột chỉ hướng robot trên bản đồ tương tự RViz, phát PoseWithCovarianceStamped tới /initialpose; pass 100% linter/build/unit tests |
+| **ESP32 Kettle IR Integration** | `4386e324-f290-434d-a154-1c063a46edc8` | `firmware/esp32_bridge/`, `hoverboard_driver` | `/water/kettle_command`, `/water/kettle_status` | HOÀN TẤT | Hoàn thành: Tích hợp phát IR ấm nước (Symphony 12-bit) trên Core 0 ESP32, stream framing 0xABCD vs 0xABCE; ROS 2 driver Single-Writer không khóa, interlock vận tốc thực; PlatformIO & colcon build pass 100%, 5 unit tests pass. |
 
 ---
 

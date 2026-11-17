@@ -12,6 +12,8 @@ set(THIS_PACKAGE_INCLUDE_DEPENDS
   rclcpp
   rclcpp_lifecycle
   control_toolbox
+  std_msgs
+  sensor_msgs
 )
 
 # find dependencies
