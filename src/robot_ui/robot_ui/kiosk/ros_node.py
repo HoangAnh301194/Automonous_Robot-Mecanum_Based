@@ -1742,7 +1742,95 @@ class KioskRosNode(Node):
 
         threading.Thread(target=_async_terminate, daemon=True).start()
 
+    def start_all_layers(
+        self, mode: str = "slam_mapping", map_path: str = "", backend: str = "amcl"
+    ) -> None:
+        """Start Hardware and wait for fresh ROS data before SLAM/Navigation."""
+        if self._start_all_thread is not None and self._start_all_thread.is_alive():
+            self._record_layer_log("all", "[START ALL] Đang khởi động; bỏ qua yêu cầu trùng.")
+            return
+        selected_mode = mode.strip().lower()
+        selected_backend = backend.strip().lower()
+        if selected_mode not in ("slam_mapping", "localization"):
+            self._record_layer_log("all", "[START ALL] Chế độ không hợp lệ.")
+            return
+        if selected_backend not in ("amcl", "slam_toolbox"):
+            self._record_layer_log("all", "[START ALL] Backend không hợp lệ.")
+            return
+        self._selected_backend = selected_backend
+        self._selected_map_yaml = map_path.strip()
+        self._start_all_cancel.clear()
+
+        def _sequence() -> None:
+            self._record_layer_log("all", f"[START ALL] Mode={selected_mode}, backend={selected_backend}")
+            try:
+                self.start_layer("layer1")
+                ready = False
+                deadline = time.monotonic() + 30.0
+                while time.monotonic() < deadline and not self._start_all_cancel.is_set():
+                    if "layer1" in self._error_layers or "layer1" in self._stopping_layers:
+                        break
+                    proc = self._layer_procs.get("layer1")
+                    if proc is not None and proc.poll() is not None:
+                        break
+                    if proc is not None and "layer1" not in self._starting_layers:
+                        # RUNNING means Popen succeeded; wait for actual ROS messages.
+                        with self._dbg_lock:
+                            now = time.monotonic()
+                            odom_ts = self._topic_stats.get("odom", {}).get("last_ts", 0.0)
+                            lidar_ts = self._topic_stats.get("lidar", {}).get("last_ts", 0.0)
+                        if now - odom_ts < 3.0 and now - lidar_ts < 3.0:
+                            ready = True
+                            break
+                    time.sleep(0.2)
+
+                if self._start_all_cancel.is_set():
+                    self._record_layer_log("all", "[START ALL] Đã hủy bởi Stop All.")
+                    return
+                if not ready:
+                    self._record_layer_log(
+                        "all", "[START ALL] Hardware thiếu /odom hoặc /scan sau 30 giây. "
+                        "Không tự động khởi chạy Navigation/SLAM."
+                    )
+                    self.signals.command_status_changed.emit(
+                        "warning", "Start All: chưa có cả /odom và /scan"
+                    )
+                    return
+
+                target = "layer3" if selected_mode == "slam_mapping" else "layer2"
+                opposite = "layer2" if target == "layer3" else "layer3"
+                running_opposite = self._layer_procs.get(opposite)
+                if running_opposite is not None and running_opposite.poll() is None:
+                    self._record_layer_log("all", f"[START ALL] {opposite} còn chạy; cần dừng trước.")
+                    return
+                if not self._start_all_cancel.is_set():
+                    self._record_layer_log("all", f"[START ALL] /odom + /scan ổn; khởi động {target}.")
+                    self.start_layer(target)
+            except Exception as exc:
+                self.get_logger().error(f"[START ALL] {exc}")
+                self._record_layer_log("all", f"[START ALL] Lỗi: {exc}")
+
+        self._start_all_thread = threading.Thread(
+            target=_sequence, name="kiosk-start-all", daemon=True
+        )
+        self._start_all_thread.start()
+
+    def stop_all_layers(self) -> None:
+        """Cancel pending Start All and stop all managed layers with lifecycle guards."""
+        self._start_all_cancel.set()
+        self._record_layer_log("all", "[STOP ALL] Đang dừng tất cả Layer.")
+        for key in ("layer5", "layer4", "layer3", "layer2", "layer1"):
+            proc = self._layer_procs.get(key)
+            if (
+                proc is not None
+                or key in self._starting_layers
+                or key in self._stopping_layers
+                or key in self._error_layers
+            ):
+                self.stop_layer(key)
+
     def cleanup_ros_processes(self) -> None:
+        self._start_all_cancel.set()
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         self._record_layer_log("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
