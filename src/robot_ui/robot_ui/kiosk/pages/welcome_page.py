@@ -6,7 +6,7 @@ from typing import Any
 
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QImageReader, QLinearGradient, QPainter, QPixmap
-from PyQt5.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from robot_ui.kiosk.pages.base import picture
 
@@ -66,6 +66,14 @@ class WelcomePage(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
+        # Improve white-text readability over bright photography without adding
+        # opaque or translucent background panels.
+        for heading in (title, subtitle):
+            shadow = QGraphicsDropShadowEffect(heading)
+            shadow.setBlurRadius(5)
+            shadow.setOffset(1, 2)
+            shadow.setColor(QColor(0, 0, 0, 190))
+            heading.setGraphicsEffect(shadow)
         layout.addStretch(3)
 
         self.setStyleSheet("""
