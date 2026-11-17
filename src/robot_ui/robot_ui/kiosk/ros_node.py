@@ -160,6 +160,15 @@ class KioskRosNode(Node):
         self._closest_person_dist: float | None = None
         self._last_ai_rx = 0.0
         self._layer_procs: dict[str, subprocess.Popen] = {}
+        self._layer_log_buffers: dict[str, deque[str]] = {
+            "all": deque(maxlen=400),
+            "layer1": deque(maxlen=400),
+            "layer2": deque(maxlen=400),
+            "layer3": deque(maxlen=400),
+            "layer4": deque(maxlen=400),
+            "layer5": deque(maxlen=400),
+        }
+        self._console_active: bool = False
 
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
@@ -1237,6 +1246,27 @@ class KioskRosNode(Node):
         "layer5": "layer_voice_interaction",
     }
 
+    def _record_layer_log(self, layer_key: str, text: str) -> None:
+        """Lưu log vào bounded buffer và chỉ phát Qt signal nếu console đang mở."""
+        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        if norm_key not in self._layer_log_buffers:
+            self._layer_log_buffers[norm_key] = deque(maxlen=400)
+        self._layer_log_buffers[norm_key].append(text)
+        if norm_key != "all":
+            self._layer_log_buffers["all"].append(f"[{norm_key.upper()}] {text}")
+        if self._console_active:
+            self.signals.layer_log_received.emit(norm_key, text)
+
+    def set_console_active(self, active: bool) -> None:
+        """Bật/tắt trạng thái hiển thị của Live Log Console."""
+        self._console_active = active
+
+    def get_layer_log_snapshot(self, layer_key: str = "all") -> list[str]:
+        """Lấy snapshot danh sách các dòng log gần nhất từ bounded buffer theo layer."""
+        norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
+        buf = self._layer_log_buffers.get(norm_key)
+        return list(buf) if buf else []
+
     def start_layer(self, layer_key: str) -> None:
         """Khởi động tầng tiến trình tương ứng (hỗ trợ cả alias ngữ nghĩa và số thứ tự)."""
         norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
@@ -1272,10 +1302,10 @@ class KioskRosNode(Node):
             def _launch():
                 try:
                     log_path = f"/tmp/ros_layer_{launch_key}.log"
-                    self.signals.layer_log_received.emit(
+                    self._record_layer_log(
                         launch_key, f"--- BẮT ĐẦU KHỞI ĐỘNG [{launch_key.upper()}] ---"
                     )
-                    self.signals.layer_log_received.emit(
+                    self._record_layer_log(
                         launch_key, f"Lệnh thực thi: {cmd}"
                     )
                     proc = subprocess.Popen(
@@ -1298,6 +1328,7 @@ class KioskRosNode(Node):
                         self._localization_proc = proc
 
                     def _read_layer_stream(p=proc, key=launch_key, path=log_path):
+                        last_flush = time.monotonic()
                         try:
                             with open(path, "a", encoding="utf-8") as f_out:
                                 if p.stdout:
@@ -1306,8 +1337,12 @@ class KioskRosNode(Node):
                                             break
                                         clean_line = line.rstrip()
                                         f_out.write(clean_line + "\n")
-                                        f_out.flush()
-                                        self.signals.layer_log_received.emit(key, clean_line)
+                                        now = time.monotonic()
+                                        if now - last_flush > 1.0:
+                                            f_out.flush()
+                                            last_flush = now
+                                        self._record_layer_log(key, clean_line)
+                                f_out.flush()
                         except Exception:
                             pass
                         finally:
@@ -1318,36 +1353,26 @@ class KioskRosNode(Node):
                             except Exception:
                                 pass
                             exit_code = p.poll()
-                            self.signals.layer_log_received.emit(
+                            self._record_layer_log(
                                 key, f"--- TIẾN TRÌNH [{key.upper()}] ĐÃ DỪNG (Mã thoát: {exit_code}) ---"
                             )
 
                     threading.Thread(target=_read_layer_stream, daemon=True).start()
                 except Exception as exc:
                     self.get_logger().error(f"[LAYER START] Lỗi: {exc}")
-                    self.signals.layer_log_received.emit(
+                    self._record_layer_log(
                         launch_key, f"[LỖI KHỞI ĐỘNG]: {exc}"
                     )
 
             threading.Thread(target=_launch, daemon=True).start()
 
     def stop_layer(self, layer_key: str) -> None:
-        """Dừng tầng tiến trình tương ứng (kiểm tra cả alias)."""
+        """Dừng tầng tiến trình tương ứng (kiểm tra cả alias) không block Qt main thread."""
         alt_key = self.LAYER_ALIAS_MAP.get(layer_key, "")
         proc = self._layer_procs.get(layer_key) or (self._layer_procs.get(alt_key) if alt_key else None)
         norm_key = self.LAYER_ALIAS_MAP.get(layer_key, layer_key)
         launch_key = norm_key if norm_key.startswith("layer") and norm_key[5:].isdigit() else layer_key
-        if proc and proc.poll() is None:
-            self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
-            self.signals.layer_log_received.emit(launch_key, f"Đang gửi tín hiệu dừng tới {layer_key}...")
-            try:
-                pgid = os.getpgid(proc.pid)
-                os.killpg(pgid, signal.SIGINT)
-                time.sleep(0.5)
-                if proc.poll() is None:
-                    os.killpg(pgid, signal.SIGKILL)
-            except Exception:
-                pass
+        
         self._layer_procs.pop(launch_key, None)
         self._layer_procs.pop(layer_key, None)
         if alt_key:
@@ -1358,10 +1383,29 @@ class KioskRosNode(Node):
         elif launch_key == "layer2" or layer_key in ("layer2", "layer_navigation"):
             self._localization_proc = None
 
+        if proc and proc.poll() is None:
+            self.get_logger().info(f"[LAYER STOP] Dừng tầng: {layer_key}")
+            self._record_layer_log(launch_key, f"Đang gửi tín hiệu dừng tới {layer_key}...")
+
+            def _async_terminate(target_proc=proc):
+                try:
+                    pgid = os.getpgid(target_proc.pid)
+                    os.killpg(pgid, signal.SIGINT)
+                    for _ in range(10):
+                        if target_proc.poll() is not None:
+                            break
+                        time.sleep(0.05)
+                    if target_proc.poll() is None:
+                        os.killpg(pgid, signal.SIGKILL)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_async_terminate, daemon=True).start()
+
     def cleanup_ros_processes(self) -> None:
         """Dọn dẹp triệt để tất cả các tiến trình ROS 2 nền và giải phóng tài nguyên cổng/bộ nhớ."""
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
-        self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
+        self._record_layer_log("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
             "robot_state_publisher",
             "scan_to_scan_filter_chain",
@@ -1424,5 +1468,5 @@ class KioskRosNode(Node):
         stopped_states = {k: False for k in self.LAYER_ALIAS_MAP}
         self.signals.layer_status_changed.emit(stopped_states)
         self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
-        self.signals.layer_log_received.emit("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
+        self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
 

@@ -236,6 +236,8 @@ class InteractiveNavMapWidget(QWidget):
         self._is_panning = False
         self._last_pan_pos: QPoint | None = None
         self._selection_enabled = True
+        self._is_active = True
+        self._map_dirty = False
 
         self._goal_icon = QPixmap(str(goal_icon)) if goal_icon is not None else QPixmap()
         if not self._goal_icon.isNull():
@@ -330,14 +332,27 @@ class InteractiveNavMapWidget(QWidget):
             return True
         return False
 
-    def set_map(self, map_data: dict[str, Any]) -> None:
-        self._map = map_data
+    def set_active(self, active: bool) -> None:
+        """Kích hoạt hoặc hủy kích hoạt chế độ hiển thị thực tế của MapWidget."""
+        was_active = self._is_active
+        self._is_active = active
+        if active and not was_active:
+            if self._map_dirty and self._map:
+                self._rebuild_map_image()
+            self.update()
+
+    def _rebuild_map_image(self) -> None:
+        """Tái tạo ảnh bản đồ QImage từ dữ liệu cells đã lưu trong cache."""
+        self._map_dirty = False
+        map_data = self._map
+        if not map_data:
+            self._map_image = QImage()
+            return
         width = int(map_data.get("preview_width", 0))
         height = int(map_data.get("preview_height", 0))
         cells = np.asarray(map_data.get("cells", []), dtype=np.int16)
         if width <= 0 or height <= 0 or cells.size < width * height:
             self._map_image = QImage()
-            self.update()
             return
         cells = cells[: width * height].reshape((height, width))
         rgb = np.empty((height, width, 3), dtype=np.uint8)
@@ -348,36 +363,48 @@ class InteractiveNavMapWidget(QWidget):
         self._map_image = QImage(
             rgb.data, width, height, width * 3, QImage.Format_RGB888
         ).copy()
-        self.update()
+
+    def set_map(self, map_data: dict[str, Any]) -> None:
+        self._map = map_data
+        self._rebuild_map_image()
+        if self._is_active:
+            self.update()
 
     def set_pose(self, pose: dict[str, Any]) -> None:
         self._pose = pose
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_path(self, path: list[list[float]]) -> None:
         self._path = path
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_locations(self, locations: list[dict[str, Any]]) -> None:
         self._locations = [item for item in locations if isinstance(item, dict)]
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_goal(self, x: float, y: float, yaw: float) -> None:
         self._goal = {"x": x, "y": y, "yaw": yaw}
-        self.update()
+        if self._is_active:
+            self.update()
 
     def clear_goal(self) -> None:
         self._goal = None
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_batch_waypoints(self, waypoints: list[dict[str, Any]]) -> None:
         self._batch_waypoints = list(waypoints)
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_pick_mode(self, enabled: bool) -> None:
         self._pick_mode = enabled
         self.setCursor(Qt.CrossCursor if enabled else Qt.PointingHandCursor)
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_selection_enabled(self, enabled: bool) -> None:
         self._selection_enabled = enabled
@@ -386,14 +413,16 @@ class InteractiveNavMapWidget(QWidget):
 
     def set_scan_points(self, points: list[tuple[float, float]]) -> None:
         self._scan_points = points
-        self.update()
+        if self._is_active:
+            self.update()
 
     def set_obstacle_points(self, side: str, points: list[tuple[float, float]]) -> None:
         if side == "front":
             self._front_obs_points = points
         elif side == "rear":
             self._rear_obs_points = points
-        self.update()
+        if self._is_active:
+            self.update()
 
     # -------------------------------------------------------------------------
     # Coordinate Transforms with Zoom & Pan
@@ -765,6 +794,7 @@ class NavigationPage(QWidget):
         self._navigation_active = False
         self._batch_waypoints: list[dict[str, Any]] = []
         self._current_map_path: Path | None = None
+        self._is_active = True
 
         self._init_ui()
         default_map = Path("my_map/a2_amcl.yaml")
@@ -1822,6 +1852,12 @@ class NavigationPage(QWidget):
                 self.status_label.setText(f"Đã nạp bản đồ: {stem} (Chưa có điểm, hãy chấm điểm mới)")
             return True
         return False
+
+    def set_active(self, active: bool) -> None:
+        """Thông báo trạng thái hiển thị của trang Navigation để tối ưu hóa render map."""
+        self._is_active = active
+        self.map_widget.set_active(active)
+        self.patrol_map_widget.set_active(active)
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         self.map_widget.set_map(map_data)

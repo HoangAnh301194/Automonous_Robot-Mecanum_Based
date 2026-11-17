@@ -277,6 +277,7 @@ class SystemConfigPage(QWidget):
         self.curr_sensors = SystemTelemetrySnapshot()
         self.curr_host = HostTelemetrySnapshot()
         self.curr_power = PowerWaterSnapshot()
+        self._is_active = True
 
         self._init_ui()
         self._start_host_telemetry()
@@ -448,6 +449,7 @@ class SystemConfigPage(QWidget):
         self.diagnostics_screen.back_requested.connect(lambda: self.stack.setCurrentIndex(0))
         self.diagnostics_screen.actuator_test_requested.connect(self.actuator_test_requested.emit)
         self.stack.addWidget(self.diagnostics_screen)
+        self.stack.currentChanged.connect(self._on_subpage_changed)
 
         root_layout.addWidget(self.stack, stretch=1)
 
@@ -508,6 +510,40 @@ class SystemConfigPage(QWidget):
         idx = mapping.get(module_key, 0)
         self.stack.setCurrentIndex(idx)
 
+    def set_active(self, active: bool) -> None:
+        """Kích hoạt hoặc ẩn hiển thị trang System Config."""
+        self._is_active = active
+        is_ros2 = (self.stack.currentWidget() == self.ros2_screen)
+        self.ros2_screen.set_console_visible(active and is_ros2)
+        if active:
+            self._render_current_subpage()
+
+    def _on_subpage_changed(self, index: int) -> None:
+        """Xử lý sự kiện khi chuyển subpage bên trong System Config."""
+        is_ros2 = (self.stack.currentWidget() == self.ros2_screen)
+        self.ros2_screen.set_console_visible(self._is_active and is_ros2)
+        if self._is_active:
+            self._render_current_subpage()
+
+    def _render_current_subpage(self) -> None:
+        """Render ngay snapshot dữ liệu mới nhất lên subpage đang hiển thị."""
+        curr = self.stack.currentWidget()
+        if curr == self.overview_screen:
+            self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+            active_count = sum(
+                1 for row in self.ros2_screen.layer_rows.values()
+                if row["status_lbl"].text() == "RUNNING"
+            )
+            total_layers = len(self.ros2_screen.layer_rows) or 5
+            self.overview_screen.update_ros2_status(active_count, total_layers)
+        elif curr == self.sensors_screen:
+            self.sensors_screen.update_telemetry(self.curr_sensors)
+        elif curr == self.hardware_screen:
+            self.hardware_screen.update_power_water(self.curr_power)
+            self.hardware_screen.update_host_telemetry(self.curr_host)
+        elif curr == self.ros2_screen:
+            self.ros2_screen.refresh_display()
+
     def _start_host_telemetry(self) -> None:
         self.host_worker = HostTelemetryWorker(self)
         self.host_worker.telemetry_ready.connect(self._on_host_telemetry_ready)
@@ -515,9 +551,7 @@ class SystemConfigPage(QWidget):
 
     def _on_host_telemetry_ready(self, snap_dict: dict[str, Any]) -> None:
         self.curr_host = HostTelemetrySnapshot.from_dict(snap_dict)
-        self.hardware_screen.update_host_telemetry(self.curr_host)
         self.diagnostics_screen.cache_telemetry(host=self.curr_host)
-        self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
 
         # Update top bar wifi & ip
         self.lbl_ip.setText(self.curr_host.local_ip)
@@ -527,19 +561,27 @@ class SystemConfigPage(QWidget):
         if w_pm:
             self.lbl_wifi_icon.setPixmap(w_pm)
 
+        if not self._is_active:
+            return
+        curr = self.stack.currentWidget()
+        if curr == self.overview_screen:
+            self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+        elif curr == self.hardware_screen:
+            self.hardware_screen.update_host_telemetry(self.curr_host)
+
     def update_sensor_telemetry(self, stats: dict[str, Any]) -> None:
         """Called by ROS signals when sensor stats update."""
         self.curr_sensors = SystemTelemetrySnapshot.from_dict(stats)
-        self.sensors_screen.update_telemetry(self.curr_sensors)
         self.diagnostics_screen.cache_telemetry(sensors=self.curr_sensors)
+        if not self._is_active:
+            return
         self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+        self.sensors_screen.update_telemetry(self.curr_sensors)
 
     def update_battery_water(self, data: dict[str, Any]) -> None:
         """Called when robot_status or battery voltage arrives."""
         self.curr_power = PowerWaterSnapshot.from_dict(data)
-        self.hardware_screen.update_power_water(self.curr_power)
         self.diagnostics_screen.cache_telemetry(power=self.curr_power)
-        self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
 
         # Update top bar battery
         pct = self.curr_power.battery_percent
@@ -550,6 +592,11 @@ class SystemConfigPage(QWidget):
         bat_pm = load_pixmap(self.icons.get("battery_icons", {}).get(bat_key), size=18)
         if bat_pm:
             self.lbl_bat_icon.setPixmap(bat_pm)
+
+        if not self._is_active:
+            return
+        self.overview_screen.update_telemetry(self.curr_sensors, self.curr_host, self.curr_power)
+        self.hardware_screen.update_power_water(self.curr_power)
 
     def update_layer_status(self, layers_state: dict[str, bool]) -> None:
         """Called when layer execution state changes."""

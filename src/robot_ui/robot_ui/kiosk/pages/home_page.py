@@ -80,25 +80,24 @@ class VideoBackground(QWidget):
             channels * width,
             QImage.Format_RGB888,
         ).copy()
-        self._pixmap = QPixmap.fromImage(image)
+        target_size = QSize(
+            max(1, round(self.width() * self._display_scale)),
+            max(1, round(self.height() * self._display_scale)),
+        )
+        if target_size.isValid() and not image.isNull():
+            scaled = image.scaled(target_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self._pixmap = QPixmap.fromImage(scaled)
+        else:
+            self._pixmap = QPixmap.fromImage(image)
         self.update()
 
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#000000"))
         if not self._pixmap.isNull():
-            target_size = QSize(
-                max(1, round(self.width() * self._display_scale)),
-                max(1, round(self.height() * self._display_scale)),
-            )
-            scaled = self._pixmap.scaled(
-                target_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            x = (self.width() - scaled.width()) // 2
-            y = (self.height() - scaled.height()) // 2 + self._vertical_offset_px
-            painter.drawPixmap(x, y, scaled)
+            x = (self.width() - self._pixmap.width()) // 2
+            y = (self.height() - self._pixmap.height()) // 2 + self._vertical_offset_px
+            painter.drawPixmap(x, y, self._pixmap)
         painter.fillRect(self.rect(), QColor(0, 0, 0, 22))
 
     def closeEvent(self, event: Any) -> None:

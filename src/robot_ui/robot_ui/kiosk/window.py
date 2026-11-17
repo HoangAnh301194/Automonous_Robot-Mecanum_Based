@@ -643,6 +643,7 @@ class KioskWindow(QMainWindow):
         self.detection_debug_page.back_requested.connect(self.go_back)
         self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.detection_debug_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
+        self.system_config_page.stack.currentChanged.connect(lambda _: self._sync_console_active_state())
 
         signals.connection_changed.connect(self._on_connection)
         signals.robot_status_changed.connect(self._on_robot_status)
@@ -800,6 +801,18 @@ class KioskWindow(QMainWindow):
 
         self._active_page = page_id
         self.stack.setCurrentWidget(page)
+
+        # Cập nhật trạng thái hiển thị của các trang để tối ưu hóa render và CPU
+        if hasattr(self, "navigation_page"):
+            self.navigation_page.set_active(page_id == "navigation")
+        if hasattr(self, "slam_page"):
+            self.slam_page.set_active(page_id == "slam")
+        if hasattr(self, "system_config_page"):
+            self.system_config_page.set_active(page_id == "system_config")
+        if hasattr(self, "detection_debug_page"):
+            self.detection_debug_page.set_active(page_id == "detection_debug")
+        self._sync_console_active_state()
+
         self.bottom_navigation.setVisible(page_id == "home")
         self.bottom_navigation.set_dark_background(True)
         self.bottom_navigation.set_active("home")
@@ -823,6 +836,15 @@ class KioskWindow(QMainWindow):
             self._update_fullscreen_ui()
         elif page_id == "slam":
             self.slam_page.set_wifi(check_wifi_connected())
+
+    def _sync_console_active_state(self) -> None:
+        """Đồng bộ cờ hiển thị của Live Log Console tới ROS node."""
+        if not hasattr(self, "system_config_page") or not hasattr(self, "ros_node"):
+            return
+        is_sys_config = (self._active_page == "system_config")
+        is_ros2 = (self.system_config_page.stack.currentWidget() == self.system_config_page.ros2_screen)
+        active = is_sys_config and is_ros2
+        self.ros_node.set_console_active(active)
 
     def go_back(self) -> None:
         """Navigate back to the previous screen."""

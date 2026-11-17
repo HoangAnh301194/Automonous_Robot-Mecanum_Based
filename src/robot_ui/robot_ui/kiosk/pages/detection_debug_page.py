@@ -60,6 +60,8 @@ class DetectionDebugPage(QWidget):
         self.setObjectName("detectionDebugPage")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.icons = icons or {}
+        self._is_active = True
+        self._cached_telemetry: Optional[dict[str, Any]] = None
 
         self._init_ui()
 
@@ -386,8 +388,20 @@ class DetectionDebugPage(QWidget):
         except Exception:
             pass
 
+    def set_active(self, active: bool) -> None:
+        """Kích hoạt hoặc tắt cập nhật UI khi trang hiển thị."""
+        self._is_active = active
+        if active and self._cached_telemetry is not None:
+            self._render_ai_telemetry(self._cached_telemetry)
+
     def update_ai_telemetry(self, stats: dict[str, Any]) -> None:
-        """Update live telemetry from AI pipeline."""
+        """Update live telemetry from AI pipeline (cache when hidden)."""
+        self._cached_telemetry = stats
+        if self._is_active:
+            self._render_ai_telemetry(stats)
+
+    def _render_ai_telemetry(self, stats: dict[str, Any]) -> None:
+        """Thực tế render telemetry lên các widget của Detection Debug."""
         cnt = int(stats.get("people_count", stats.get("yolo_people_count", 0)))
         self.lbl_people_count.setText(f"{cnt} người")
 

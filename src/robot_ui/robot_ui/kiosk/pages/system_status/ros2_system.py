@@ -8,6 +8,7 @@ Organizes:
 """
 from __future__ import annotations
 
+from collections import deque
 import glob
 import time
 from typing import Any, Optional
@@ -52,18 +53,19 @@ class ROS2SystemDetailScreen(QWidget):
         self.setObjectName("ros2SystemDetailScreen")
         self.icons = icons or {}
         self.layer_rows: dict[str, dict[str, Any]] = {}
-        self._logs_by_layer: dict[str, list[str]] = {
-            "all": [],
-            "layer1": [],
-            "layer2": [],
-            "layer3": [],
-            "layer4": [],
-            "layer5": [],
-            "system": [],
+        self._logs_by_layer: dict[str, deque[str]] = {
+            "all": deque(maxlen=400),
+            "layer1": deque(maxlen=400),
+            "layer2": deque(maxlen=400),
+            "layer3": deque(maxlen=400),
+            "layer4": deque(maxlen=400),
+            "layer5": deque(maxlen=400),
+            "system": deque(maxlen=400),
         }
         self._current_filter: str = "all"
         self._auto_scroll: bool = True
         self._filter_buttons: dict[str, QPushButton] = {}
+        self._is_console_visible: bool = True
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -233,6 +235,7 @@ class ROS2SystemDetailScreen(QWidget):
 
         self.txt_layer_log = QTextEdit()
         self.txt_layer_log.setReadOnly(True)
+        self.txt_layer_log.document().setMaximumBlockCount(500)
         self.txt_layer_log.setMinimumHeight(150)
         self.txt_layer_log.setMaximumHeight(230)
         self.txt_layer_log.setStyleSheet(f"""
@@ -373,8 +376,19 @@ class ROS2SystemDetailScreen(QWidget):
             return k
         return "all" if k in ("all", "system") else k
 
+    def set_console_visible(self, visible: bool) -> None:
+        """Kích hoạt hoặc tắt trạng thái render trực tiếp của Live Log Console."""
+        was_visible = self._is_console_visible
+        self._is_console_visible = visible
+        if visible and not was_visible:
+            self._refresh_log_view()
+
+    def refresh_display(self) -> None:
+        """Cập nhật lại giao diện và snapshot log khi mở lại màn hình ROS 2."""
+        self._refresh_log_view()
+
     def append_layer_log(self, layer_key: str, text: str) -> None:
-        """Thêm dòng log mới từ tiến trình Layer và hiển thị lên console."""
+        """Thêm dòng log mới từ tiến trình Layer và chỉ render lên console nếu đang hiển thị."""
         norm_key = self._normalize_layer_key(layer_key)
         now_str = time.strftime("%H:%M:%S")
         prefix = norm_key.upper() if norm_key != "all" else "SYSTEM"
@@ -382,14 +396,23 @@ class ROS2SystemDetailScreen(QWidget):
 
         for target_key in ("all", norm_key):
             if target_key not in self._logs_by_layer:
-                self._logs_by_layer[target_key] = []
-            buf = self._logs_by_layer[target_key]
-            buf.append(formatted_line)
-            if len(buf) > 300:
-                buf.pop(0)
+                self._logs_by_layer[target_key] = deque(maxlen=400)
+            self._logs_by_layer[target_key].append(formatted_line)
 
-        if self._current_filter in ("all", norm_key):
+        if self._is_console_visible and self._current_filter in ("all", norm_key):
             self.txt_layer_log.append(formatted_line)
+            if self._auto_scroll:
+                cursor = self.txt_layer_log.textCursor()
+                cursor.movePosition(QTextCursor.End)
+                self.txt_layer_log.setTextCursor(cursor)
+
+    def _refresh_log_view(self) -> None:
+        """Render lại toàn bộ snapshot log theo bộ lọc hiện tại."""
+        logs = list(self._logs_by_layer.get(self._current_filter, []))
+        if not logs:
+            self.txt_layer_log.setText(f"[CONSOLE] Chưa có log cho {self._current_filter.upper()}.")
+        else:
+            self.txt_layer_log.setPlainText("\n".join(logs))
             if self._auto_scroll:
                 cursor = self.txt_layer_log.textCursor()
                 cursor.movePosition(QTextCursor.End)
@@ -398,15 +421,7 @@ class ROS2SystemDetailScreen(QWidget):
     def _set_log_filter(self, filter_key: str) -> None:
         self._current_filter = filter_key
         self._update_filter_button_styles()
-        logs = self._logs_by_layer.get(filter_key, [])
-        if not logs:
-            self.txt_layer_log.setText(f"[CONSOLE] Chưa có log cho {filter_key.upper()}.")
-        else:
-            self.txt_layer_log.setPlainText("\n".join(logs))
-            if self._auto_scroll:
-                cursor = self.txt_layer_log.textCursor()
-                cursor.movePosition(QTextCursor.End)
-                self.txt_layer_log.setTextCursor(cursor)
+        self._refresh_log_view()
 
     def _update_filter_button_styles(self) -> None:
         for k, btn in self._filter_buttons.items():

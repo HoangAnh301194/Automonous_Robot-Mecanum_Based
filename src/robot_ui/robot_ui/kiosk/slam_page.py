@@ -613,6 +613,7 @@ class SlamMapPage(QWidget):
         self._current_map_dir: Path = default_dirs[0] if default_dirs else Path.cwd()
         self._selected_map_yaml: Path | None = None
         self._is_slam_running = False
+        self._is_active = True
 
         self._init_ui()
         self.refresh_map_files()
@@ -1296,6 +1297,12 @@ class SlamMapPage(QWidget):
         else:
             self.fullscreen_button.setText("🗖")
             self.fullscreen_button.setToolTip("Toàn màn hình (F11)")
+
+    def set_active(self, active: bool) -> None:
+        """Kích hoạt hoặc tắt render nền cho widget live map của SLAM."""
+        self._is_active = active
+        if hasattr(self, "live_map_widget") and self.live_map_widget is not None:
+            self.live_map_widget.set_active(active)
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         """Cập nhật dữ liệu bản đồ thời gian thực lên live map widget."""
