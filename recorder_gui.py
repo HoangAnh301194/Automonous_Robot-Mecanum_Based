@@ -136,6 +136,8 @@ class RecorderApp:
         row_prompt = ttk.Frame(prompts_box)
         row_prompt.pack(fill="x")
         ttk.Label(row_prompt, textvariable=self.prompt_progress).pack(side="left")
+        self.protocol_btn = ttk.Button(row_prompt, text="Hướng dẫn thu chuẩn", command=self.show_collection_protocol)
+        self.protocol_btn.pack(side="right", padx=(0, 8))
         self.next_prompt_btn = ttk.Button(row_prompt, text="Câu tiếp theo", command=self.next_prompt)
         self.next_prompt_btn.pack(side="right")
         ttk.Label(prompts_box, textvariable=self.prompt_text, font=("Arial", 14, "bold"),
@@ -211,6 +213,32 @@ class RecorderApp:
         self.prompts.advance(self.label.get())
         self.refresh_prompt()
 
+    def show_collection_protocol(self):
+        """Display the shared full collector protocol, without needing to leave the GUI."""
+        file_path = Path(__file__).resolve().parent / "DATA_COLLECTION_PROTOCOL_VI.md"
+        try:
+            guide = file_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            messagebox.showerror("Không mở được hướng dẫn", str(exc))
+            return
+        window = tk.Toplevel(self.root)
+        window.title("SOUTA · Quy trình thu data chuẩn")
+        window.geometry("900x650")
+        container = ttk.Frame(window, padding=12)
+        container.pack(fill="both", expand=True)
+        ttk.Label(container, text="ĐỊNH MỨC: 5 speaker × (25 positive + 20 negative + 20 hard negative) + 8 ambient = 333 file",
+                  font=("Arial", 11, "bold"), wraplength=850).pack(anchor="w", pady=(0, 8))
+        pane = ttk.Frame(container)
+        pane.pack(fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(pane, orient="vertical")
+        text_area = tk.Text(pane, wrap="word", yscrollcommand=scrollbar.set, font=("Arial", 10))
+        scrollbar.configure(command=text_area.yview)
+        scrollbar.pack(side="right", fill="y")
+        text_area.pack(side="left", fill="both", expand=True)
+        text_area.insert("1.0", guide)
+        text_area.configure(state="disabled")
+        ttk.Button(container, text="Đóng", command=window.destroy).pack(anchor="e", pady=(8, 0))
+
     def current_kind(self):
         return "sessions" if self.label.get() == "ambient" else "speakers"
 
@@ -229,7 +257,13 @@ class RecorderApp:
         label = self.label.get()
         current = self.member_map.get(self.member.get())
         number = self.store.count(label, current) if current else 0
-        self.counter.set(DESCRIPTIONS[label] + f" · Đã lưu {number} mẫu")
+        if label == "ambient":
+            ambient_dir = self.store.data_dir / "raw" / "ambient"
+            total = len(list(ambient_dir.glob("*/*.wav"))) if ambient_dir.is_dir() else 0
+            self.counter.set(DESCRIPTIONS[label] + f" · Toàn bộ collector: {total}/8 phiên ambient (mục tiêu)")
+        else:
+            target = {"positive": 25, "negative": 20, "hard_negative": 20}[label]
+            self.counter.set(DESCRIPTIONS[label] + f" · Speaker này: {number}/{target} mẫu (mục tiêu)")
 
     def register(self):
         try:

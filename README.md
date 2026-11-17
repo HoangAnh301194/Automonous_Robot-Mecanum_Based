@@ -86,6 +86,27 @@ Các lần sau chạy `./.venv/bin/python recorder_gui.py`. Hoặc dùng script 
 
 Nếu tải ZIP thay vì clone, giải nén và mở Terminal trong thư mục có `recorder_gui.py`. Cần dùng Ubuntu Desktop có microphone và màn hình, không hỗ trợ SSH headless.
 
+## Định mức và điều kiện thu — PHẢI ĐỌC TRƯỚC KHI GHI
+
+**Mỗi collector** cần ít nhất **3 speaker độc lập**, mục tiêu **5 speaker**. Chỉ tiêu **tối thiểu 154 file**, mục tiêu **333 file** (bao gồm 4 hoặc 8 bản ambient 30–60 giây). **Không tính nhiều lần thu của cùng một người thành nhiều speaker.**
+
+| Nhãn | Tối thiểu / speaker | Mục tiêu / speaker | Mục tiêu / 5 speaker |
+|---|---:|---:|---:|
+| `positive` | 20 | 25 | 125 |
+| `negative` | 15 | 20 | 100 |
+| `hard_negative` | 15 | 20 | 100 |
+| `ambient` | 4 phiên / collector | 8 phiên / collector | 8 phiên (30–60 giây) |
+
+- **Khoảng cách**: 0,4–0,6 m (20%), 0,8–1,2 m (50%), 1,5–2,0 m (30%) từ miệng tới microphone.
+- **Góc** so với hướng trước microphone: 0°, −30°, +30°, −60°, +60°. Thu cả hai bên, ưu tiên chính diện.
+- **Môi trường**: khoảng 50% yên tĩnh, 30% nhiễu nhẹ (quạt, điều hòa), 20% nhiễu vừa (hành lang, tiếng robot, người nói xa đã đồng ý). Mọi nhãn phải có nhiều điều kiện.
+- **Mỗi positive / speaker**: 10 lần “Sô ta”, 5 lần “Sô ta ơi”, 10 câu gọi ngắn. **Hard negative**: sổ tay, cô ta, sô pha, soda, số tám, thôi ta, chỗ ta... nhưng **không đọc thành từ gọi thật**.
+- **Khi ghi**: chờ 0,3–0,5 giây trước và sau lời nói, chọn 3 giây cho câu ngắn hoặc 5 giây cho câu dài; nghỉ 2–5 giây giữa lượt thu, nghe lại và loại mẫu lỗi.
+- **Ambient**: thu 30–60 giây/phiên các nguồn như quạt, điều hòa, động cơ robot, bước chân, bàn phím, cửa, mưa xa, phòng yên tĩnh. Không đọc lời hướng dẫn ambient.
+
+**Tài liệu bắt buộc để giao cho mọi người thu:** [DATA_COLLECTION_PROTOCOL_VI.md](DATA_COLLECTION_PROTOCOL_VI.md) — có bảng quota chi tiết cho từng khoảng cách, từng góc, danh sách tiếng nhiễu, cách đọc, tiêu chí loại mẫu và checklist ZIP.
+
+Trong GUI, bấm **“Hướng dẫn thu chuẩn”** để mở tài liệu này ngay trên phần mềm. Phân bổ trên là **đề xuất cho vòng dữ liệu đầu tiên**, có thể cập nhật sau đánh giá robot thực tế.
 ## Hướng dẫn thu
 
 1. Chọn nhãn: positive (1, nói “Sô ta” hoặc “Sô ta ơi”); negative (0, câu không có từ khóa); hard_negative (0, gần âm như “sổ tay”, “cô ta”); ambient (0, tiếng ồn không chứa từ khóa).
@@ -229,7 +250,8 @@ Có thể xuất ZIP trực tiếp từ Terminal mà không cần kích hoạt m
 
 ## Files
 
-- recorder_gui.py: GUI ghi âm, nghe lại, lưu/bỏ, xuất ZIP
+- recorder_gui.py: GUI ghi âm, nghe lại, lưu/bỏ, xuất ZIP và mở hướng dẫn thu chuẩn
+- DATA_COLLECTION_PROTOCOL_VI.md: quota/điều kiện khoảng cách, góc, tiếng nhiễu, checklist
 - recorder_store.py: lưu WAV và registry cục bộ không phụ thuộc microphone
 - export_dataset.py: chuẩn hóa ID theo mã cộng tác viên
 - export_zip.py: ZIP theo nhãn, không gồm registry
