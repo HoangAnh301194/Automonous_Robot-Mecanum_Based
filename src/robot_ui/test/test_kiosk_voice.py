@@ -407,3 +407,20 @@ def test_speaker_double_click_toggles_volume_slider(app):
     assert page._speaker_enabled is True
 
 
+
+
+def test_audio_player_fallback_decoder_selection():
+    """Select ffplay if mpv is absent and reject non-WAV data on aplay."""
+    with patch("robot_ui.kiosk.audio_player.shutil.which",
+               side_effect=lambda name: "/usr/bin/ffplay" if name == "ffplay" else None):
+        player = AudioPlayer()
+        assert player.player_cmd == "ffplay"
+
+    failures = []
+    with patch("robot_ui.kiosk.audio_player.shutil.which",
+               side_effect=lambda name: "/usr/bin/aplay" if name == "aplay" else None):
+        player = AudioPlayer(on_playback_error=lambda req, msg: failures.append((req, msg)))
+        assert player.player_cmd == "aplay"
+        assert not player.play(b"compressed_mp3_data", request_id=77)
+        assert failures and failures[0][0] == 77
+        assert "WAV" in failures[0][1]
