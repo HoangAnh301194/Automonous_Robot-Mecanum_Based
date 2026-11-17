@@ -5,7 +5,7 @@ import wave
 from pathlib import Path
 from zipfile import ZipFile
 from export_zip import make_dataset_zip
-from recorder_gui import RecorderStore
+from recorder_store import RecorderStore
 
 
 class DatasetTests(unittest.TestCase):

@@ -56,6 +56,7 @@ Có thể dùng lệnh python export_zip.py --collector c01 (sau khi kích hoạ
 ## Files
 
 - recorder_gui.py: GUI ghi âm, nghe lại, lưu/bỏ, xuất ZIP
+- recorder_store.py: lưu WAV và registry cục bộ không phụ thuộc microphone
 - export_dataset.py: chuẩn hóa ID theo mã cộng tác viên
 - export_zip.py: ZIP theo nhãn, không gồm registry
 - start_windows.bat / start_ubuntu.sh: chạy nhanh
