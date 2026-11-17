@@ -1,6 +1,6 @@
 """theme.py - Design Tokens & Stylesheet for Minimal Robotics Control Interface.
 
-Standardizes light theme styling matching Souta Robot Kiosk:
+Standardizes dark theme styling matching Souta Robot Kiosk:
 - Background: #0B111A
 - Card Surface: #152130
 - Accent Amber: #F6C16A
@@ -17,28 +17,28 @@ class KioskTheme:
     """Core design tokens for Souta Kiosk System Status."""
 
     # Background & Surfaces (OLED Pure Black & Dark Charcoal Theme)
-    COLOR_BG = "#f7f9fc"
-    COLOR_SURFACE = "#ffffff"         # Dark Charcoal Surface (matching Admin & Service cards)
-    COLOR_SURFACE_ALT = "#f1f5f9"     # Slightly lighter dark surface
-    COLOR_SURFACE_ACTIVE = "#e6edf6"
-    COLOR_CARD_BORDER = "#dce4ec"
-    COLOR_BORDER_LIGHT = "#cbd5e1"
+    COLOR_BG = "#000000"
+    COLOR_SURFACE = "#111418"         # Dark Charcoal Surface (matching Admin & Service cards)
+    COLOR_SURFACE_ALT = "#171c22"     # Slightly lighter dark surface
+    COLOR_SURFACE_ACTIVE = "#202730"
+    COLOR_CARD_BORDER = "#242c36"
+    COLOR_BORDER_LIGHT = "#323b47"
 
     # Accent & Typography
-    COLOR_ACCENT = "#b32632"          # Souta Amber Accent
-    COLOR_TEXT_PRIMARY = "#1d2938"
-    COLOR_TEXT_SECONDARY = "#506176"
-    COLOR_TEXT_MUTED = "#657589"
+    COLOR_ACCENT = "#F6C16A"          # Souta Amber Accent
+    COLOR_TEXT_PRIMARY = "#FFFFFF"
+    COLOR_TEXT_SECONDARY = "#94A3B8"
+    COLOR_TEXT_MUTED = "#64748B"
 
     # Semantic Status Colors
-    COLOR_HEALTHY = "#16804a"
-    COLOR_HEALTHY_BG = "#eaf8f0"
-    COLOR_WARNING = "#a86600"
-    COLOR_WARNING_BG = "#fff4df"
-    COLOR_CRITICAL = "#c42c44"
-    COLOR_CRITICAL_BG = "#fff0f2"
-    COLOR_UNKNOWN = "#66778b"
-    COLOR_UNKNOWN_BG = "#eef2f6"
+    COLOR_HEALTHY = "#22C55E"
+    COLOR_HEALTHY_BG = "#0C2818"
+    COLOR_WARNING = "#F59E0B"
+    COLOR_WARNING_BG = "#2E1C0A"
+    COLOR_CRITICAL = "#EF4444"
+    COLOR_CRITICAL_BG = "#300D0F"
+    COLOR_UNKNOWN = "#71717A"
+    COLOR_UNKNOWN_BG = "#18181B"
 
     # Typography & Touch Targets
     FONT_FAMILY = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "DejaVu Sans", sans-serif'

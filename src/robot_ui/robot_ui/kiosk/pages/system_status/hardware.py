@@ -172,7 +172,7 @@ class HardwareDetailScreen(QWidget):
         self.table_proc.setSelectionBehavior(QTableWidget.SelectRows)
         self.table_proc.setStyleSheet(f"""
             QTableWidget {{
-                background-color: #ffffff;
+                background-color: #0b0f15;
                 color: {KioskTheme.COLOR_TEXT_PRIMARY};
                 border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
                 border-radius: 6px;

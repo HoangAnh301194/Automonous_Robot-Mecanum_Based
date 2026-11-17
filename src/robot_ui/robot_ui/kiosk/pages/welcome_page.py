@@ -6,7 +6,7 @@ from typing import Any
 
 from PyQt5.QtCore import Qt, QSize, pyqtSignal
 from PyQt5.QtGui import QBrush, QColor, QImageReader, QLinearGradient, QPainter, QPixmap
-from PyQt5.QtWidgets import QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from robot_ui.kiosk.pages.base import picture
 
@@ -66,21 +66,13 @@ class WelcomePage(QWidget):
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setWordWrap(True)
         layout.addWidget(subtitle)
-        # Improve white-text readability over bright photography without adding
-        # opaque or translucent background panels.
-        for heading in (title, subtitle):
-            shadow = QGraphicsDropShadowEffect(heading)
-            shadow.setBlurRadius(5)
-            shadow.setOffset(1, 2)
-            shadow.setColor(QColor(0, 0, 0, 190))
-            heading.setGraphicsEffect(shadow)
         layout.addStretch(3)
 
         self.setStyleSheet("""
             QLabel#welcomeSchoolPtit { color: #ff4545; font-size: 15px; font-weight: 800; }
             QLabel#welcomeSchoolFee1 { color: #48a9ff; font-size: 14px; font-weight: 800; }
-            QLabel#welcomeHeading { color: #FFFFFF; background: transparent; padding: 0px; border: none; font-size: 29px; font-weight: 800; }
-            QLabel#welcomeSubtitle { color: #FFFFFF; background: transparent; padding: 0px; border: none; font-size: 19px; font-weight: 700; }
+            QLabel#welcomeHeading { color: white; font-size: 29px; font-weight: 800; }
+            QLabel#welcomeSubtitle { color: #eef2f4; font-size: 19px; font-weight: 600; }
         """)
 
     def _read_background(self):
@@ -101,14 +93,13 @@ class WelcomePage(QWidget):
     def paintEvent(self, event: Any) -> None:
         self._read_background()
         p = QPainter(self)
-        p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.fillRect(self.rect(), QColor("#f8fafc"))
+        p.fillRect(self.rect(), QColor("#142130"))
         if not self._background.isNull():
             p.drawPixmap((self.width() - self._background.width()) // 2,
                          (self.height() - self._background.height()) // 2,
                          self._background)
         gradient = QLinearGradient(0, 0, 0, self.height())
-        gradient.setColorAt(0, QColor(255, 255, 255, 12))
-        gradient.setColorAt(0.6, QColor(255, 255, 255, 0))
-        gradient.setColorAt(1, QColor(248, 250, 252, 44))
+        gradient.setColorAt(0, QColor(3, 10, 17, 190))
+        gradient.setColorAt(0.6, QColor(3, 10, 17, 100))
+        gradient.setColorAt(1, QColor(3, 10, 17, 200))
         p.fillRect(self.rect(), QBrush(gradient))

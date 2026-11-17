@@ -147,7 +147,7 @@ class ROS2SystemDetailScreen(QWidget):
                     font-weight: 800;
                     font-size: 12px;
                 }}
-                QPushButton:hover {{ background-color: {KioskTheme.COLOR_HEALTHY}; color: #1d2938; }}
+                QPushButton:hover {{ background-color: {KioskTheme.COLOR_HEALTHY}; color: #ffffff; }}
             """)
             btn_start.clicked.connect(lambda _, k=key: self.start_layer_requested.emit(k))
             rl.addWidget(btn_start)
@@ -164,7 +164,7 @@ class ROS2SystemDetailScreen(QWidget):
                     font-weight: 800;
                     font-size: 12px;
                 }}
-                QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #1d2938; }}
+                QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; }}
             """)
             btn_stop.clicked.connect(lambda _, k=key: self.stop_layer_requested.emit(k))
             rl.addWidget(btn_stop)
@@ -225,7 +225,7 @@ class ROS2SystemDetailScreen(QWidget):
                 font-weight: 600;
             }}
             QPushButton:hover {{
-                color: #1d2938;
+                color: #ffffff;
                 background-color: {KioskTheme.COLOR_CRITICAL_BG};
                 border-color: {KioskTheme.COLOR_CRITICAL};
             }}
@@ -242,7 +242,7 @@ class ROS2SystemDetailScreen(QWidget):
         self.txt_layer_log.setMaximumHeight(230)
         self.txt_layer_log.setStyleSheet(f"""
             QTextEdit {{
-                background-color: #f8fafc;
+                background-color: #06090e;
                 color: #10b981;
                 font-family: 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
                 font-size: 11px;
@@ -323,7 +323,7 @@ class ROS2SystemDetailScreen(QWidget):
                 font-weight: 800;
                 font-size: 12px;
             }}
-            QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #1d2938; }}
+            QPushButton:hover {{ background-color: {KioskTheme.COLOR_CRITICAL}; color: #ffffff; }}
         """)
         self.btn_emergency_cleanup.clicked.connect(self._on_emergency_cleanup_clicked)
         danger_layout.addWidget(self.btn_emergency_cleanup)
@@ -476,7 +476,7 @@ class ROS2SystemDetailScreen(QWidget):
             if k == self._current_filter:
                 btn.setStyleSheet(f"""
                     QPushButton {{
-                        background-color: #eaf8f0;
+                        background-color: #064e3b;
                         border: 1px solid #10b981;
                         color: #10b981;
                         border-radius: 4px;
@@ -511,7 +511,7 @@ class ROS2SystemDetailScreen(QWidget):
             self.btn_autoscroll.setText("Cuộn: BẬT")
             self.btn_autoscroll.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: #eaf8f0;
+                    background-color: #064e3b;
                     border: 1px solid #10b981;
                     color: #10b981;
                     border-radius: 4px;
