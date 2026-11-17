@@ -516,6 +516,9 @@ def test_scenario_15_token_based_race_prevention_start_stop_start(app, monkeypat
         def _get_ws_prefix(self):
             return ""
 
+        def get_detected_ports(self, refresh=False):
+            return "/dev/ttyUSB0", "/dev/ttyUSB1", "test_stub"
+
         _layer_procs = {}
         _starting_layers = set()
         _cancel_starting_layers = set()
