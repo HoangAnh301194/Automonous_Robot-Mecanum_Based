@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt5.QtCore import Qt, QRect, QSize, pyqtSignal
+from PyQt5.QtCore import Qt, QRect, QRectF, QSize, QEasingCurve, QVariantAnimation, pyqtSignal
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
@@ -18,6 +18,12 @@ class ServiceMascotCanvas(QWidget):
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.wait_button = self._make_button("Phục vụ", "wait")
         self.continue_button = self._make_button("Hoàn tất", "continue")
+        self._selected_mode: str | None = None
+        self._press_scale = 1.0
+        self._zoom_animation = QVariantAnimation(self)
+        self._zoom_animation.setDuration(120)
+        self._zoom_animation.setEasingCurve(QEasingCurve.OutCubic)
+        self._zoom_animation.valueChanged.connect(self._on_zoom_value)
         self.set_selected(None)
 
     def _make_button(self, label: str, mode: str) -> QPushButton:
@@ -48,33 +54,77 @@ class ServiceMascotCanvas(QWidget):
             button.raise_()
         super().resizeEvent(event)
 
+    def _button_rect(self, mode: str) -> QRectF:
+        art = self._art_rect()
+        x = .184 if mode == "wait" else .535
+        return QRectF(
+            art.x() + art.width() * x, art.y() + art.height() * .360,
+            art.width() * .290, art.height() * .260,
+        )
+
+    def _on_zoom_value(self, value) -> None:
+        self._press_scale = float(value)
+        self.update()
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#ffffff"))
-        if not self._image.isNull():
-            painter.setRenderHint(QPainter.SmoothPixmapTransform)
-            painter.drawPixmap(self._art_rect(), self._image)
+        if self._image.isNull():
+            return
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        painter.drawPixmap(self._art_rect(), self._image)
+        # The buttons are part of the source JPG. Zoom the selected image crop,
+        # not merely the transparent hitbox on top of it.
+        if self._selected_mode and self._press_scale > 1.001:
+            target = self._button_rect(self._selected_mode)
+            art = self._art_rect()
+            source = QRectF(
+                (target.x() - art.x()) / art.width() * self._image.width(),
+                (target.y() - art.y()) / art.height() * self._image.height(),
+                target.width() / art.width() * self._image.width(),
+                target.height() / art.height() * self._image.height(),
+            )
+            scale = self._press_scale
+            destination = QRectF(
+                target.center().x() - target.width() * scale / 2,
+                target.center().y() - target.height() * scale / 2,
+                target.width() * scale, target.height() * scale,
+            )
+            painter.drawPixmap(destination, self._image, source)
 
     def set_selected(self, mode: str | None) -> None:
-        for btn, ident, base in (
-            (self.wait_button, "wait", "#0764b2"),
-            (self.continue_button, "continue", "#198b40"),
+        if mode not in {"wait", "continue", None}:
+            return
+        changed = mode != self._selected_mode
+        self._selected_mode = mode
+        self._zoom_animation.stop()
+        if mode is None:
+            self._press_scale = 1.0
+        elif changed:
+            self._press_scale = 1.0
+            self._zoom_animation.setStartValue(1.0)
+            self._zoom_animation.setEndValue(1.055)
+            self._zoom_animation.start()
+        else:
+            self._press_scale = 1.055
+        for button, button_mode, fill in (
+            (self.wait_button, "wait", "#0865b3"),
+            (self.continue_button, "continue", "#168a40"),
         ):
-            selected = mode == ident
-            btn.setProperty("selected", selected)
+            button.setProperty("selected", mode == button_mode)
             if self._image.isNull():
-                btn.setStyleSheet(
-                    "QPushButton { background: " + base + "; color: white;"
-                    " border: 3px solid " + ("#b32632" if selected else base) +
-                    "; border-radius: 16px; font-size: 19px; font-weight: 700; }"
+                button.setStyleSheet(
+                    "QPushButton { background: " + fill +
+                    "; color: white; border: none; border-radius: 14px;"
+                    " font-size: " + ("20px" if mode == button_mode else "18px") +
+                    "; font-weight: 700; }"
                 )
             else:
-                btn.setStyleSheet(
-                    "QPushButton { background: transparent; border: " +
-                    ("3px solid #b32632" if selected else "0px solid transparent") +
-                    "; border-radius: 18px; }"
-                    "QPushButton:focus { border: 3px solid #b32632; }"
+                button.setStyleSheet(
+                    "QPushButton { background: transparent; border: none; }"
+                    "QPushButton:focus { background: transparent; border: none; }"
                 )
+        self.update()
 
 
 class ServicePage(QWidget):
