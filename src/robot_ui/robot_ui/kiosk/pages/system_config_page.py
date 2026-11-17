@@ -249,6 +249,10 @@ class SystemConfigPage(QWidget):
     # Layer & Process Signals
     start_layer_requested = pyqtSignal(str)
     stop_layer_requested = pyqtSignal(str)
+    start_all_requested = pyqtSignal(str, str, str)
+    stop_all_requested = pyqtSignal()
+    swap_ports_requested = pyqtSignal()
+    rescan_ports_requested = pyqtSignal()
     emergency_cleanup_requested = pyqtSignal()
 
     # Actuator Quick-Test Signals
@@ -442,6 +446,10 @@ class SystemConfigPage(QWidget):
         self.ros2_screen.back_requested.connect(lambda: self.stack.setCurrentIndex(0))
         self.ros2_screen.start_layer_requested.connect(self.start_layer_requested.emit)
         self.ros2_screen.stop_layer_requested.connect(self.stop_layer_requested.emit)
+        self.ros2_screen.start_all_requested.connect(self.start_all_requested.emit)
+        self.ros2_screen.stop_all_requested.connect(self.stop_all_requested.emit)
+        self.ros2_screen.swap_ports_requested.connect(self.swap_ports_requested.emit)
+        self.ros2_screen.rescan_ports_requested.connect(self.rescan_ports_requested.emit)
         self.ros2_screen.emergency_cleanup_requested.connect(self.emergency_cleanup_requested.emit)
         self.stack.addWidget(self.ros2_screen)
 
@@ -651,6 +659,10 @@ class SystemConfigPage(QWidget):
     def append_console_log(self, text: str) -> None:
         """Append log to diagnostics console output."""
         self.diagnostics_screen.append_console_log(text)
+
+    def set_detected_ports(self, esp_port: str, lidar_port: str, source: str) -> None:
+        """Forward serial discovery results to the ROS 2 settings panel."""
+        self.ros2_screen.set_detected_ports(esp_port, lidar_port, source)
 
     def append_layer_log(self, layer_key: str, text: str) -> None:
         """Forward real-time layer output to ROS2SystemDetailScreen."""
