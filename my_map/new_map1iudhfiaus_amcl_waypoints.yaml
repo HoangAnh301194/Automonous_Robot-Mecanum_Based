@@ -1,0 +1,27 @@
+map_name: new_map1iudhfiaus_amcl.yaml
+locations:
+  khoihanh:
+    x: 8.47
+    y: -0.512
+    yaw: 3.1296950926683498
+    note: Khởi hành / Trạm nước
+  diem1:
+    x: -2.288
+    y: -0.384
+    yaw: -0.011897560921443362
+    note: Điểm tuần tra 1
+routes:
+  patrol_route:
+  - khoihanh
+  - diem1
+waypoints:
+- name: khoihanh
+  x: 8.47
+  y: -0.512
+  yaw: 3.1296950926683498
+  note: Khởi hành / Trạm nước
+- name: diem1
+  x: -2.288
+  y: -0.384
+  yaw: -0.011897560921443362
+  note: Điểm tuần tra 1
