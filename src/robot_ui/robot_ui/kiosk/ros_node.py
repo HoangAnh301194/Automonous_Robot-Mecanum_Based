@@ -2467,6 +2467,17 @@ class KioskRosNode(Node):
         self.get_logger().info("[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         self._record_layer_log("all", "[EMERGENCY CLEANUP] Quét và đóng sạch toàn bộ tiến trình ROS 2...")
         patterns = [
+            "resilient_camera_node",
+            "astra_camera_node",
+            "astra_camera",
+            "usb_cam_node_exe",
+            "three_astra",
+            "yolo_node",
+            "tracking_node",
+            "hand_wave_detector",
+            "rough_localizer",
+            "dual_camera_obstacles",
+            "obstacle_detector",
             "robot_state_publisher",
             "scan_to_scan_filter_chain",
             "real_odom",
@@ -2476,6 +2487,7 @@ class KioskRosNode(Node):
             "async_slam_toolbox",
             "nav2_bringup",
             "component_container",
+            "component_container_isolated",
             "nav2_container",
             "bt_navigator",
             "controller_server",
@@ -2491,16 +2503,7 @@ class KioskRosNode(Node):
             "sllidar_node",
             "esp_bridge_node",
             "ai_perception",
-            "three_astra",
-            "dual_camera_obstacles",
-            "obstacle_detector",
             "debugger_gui",
-            "astra_camera_node",
-            "usb_cam_node_exe",
-            "yolo_node",
-            "tracking_node",
-            "hand_wave_detector",
-            "rough_localizer",
             "backend.launch.py",
             "config_manager_node",
             "system_monitor_node",
@@ -2512,6 +2515,9 @@ class KioskRosNode(Node):
             "velocity_smoother",
             "front_astra_optical_alias",
             "rqt_image_view",
+            "rqt_gui",
+            "rviz2",
+            "mpv",
         ]
         # 1. Cập nhật state machine ngay lập tức dưới lock (non-blocking)
         with self._lifecycle_lock:
@@ -2537,8 +2543,11 @@ class KioskRosNode(Node):
         self.signals.layer_status_changed.emit(stopped_states)
         self.signals.slam_status_changed.emit(False, "SLAM đã dừng")
 
-        # 2. Thực thi pkill trên background thread để không bao giờ block Qt UI main loop
+        # 2. Thực thi siêu dọn dẹp trên background thread để không bao giờ block Qt UI main loop
         def _cleanup_worker():
+            my_pid = os.getpid()
+
+            # Lớp 1: Quét diệt danh sách core modules bằng pkill
             regex = "|".join(patterns)
             try:
                 subprocess.run(["pkill", "-9", "-f", regex], capture_output=True, timeout=2.0)
@@ -2548,8 +2557,38 @@ class KioskRosNode(Node):
                         subprocess.run(["pkill", "-9", "-f", p], capture_output=True, timeout=0.2)
                     except Exception:
                         pass
-            self.get_logger().info("[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
-            self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất quét và đóng tiến trình ROS 2.")
+
+            # Lớp 2: Quét diệt các tiến trình con mồ côi trong workspace (bảo vệ an toàn cho Kiosk UI PID)
+            try:
+                out = subprocess.check_output(["pgrep", "-f", "ros2_ws/install"], text=True)
+                for pid_str in out.strip().split():
+                    try:
+                        p = int(pid_str)
+                        if p != my_pid:
+                            os.kill(p, signal.SIGKILL)
+                    except (ValueError, OSError):
+                        pass
+            except Exception:
+                pass
+
+            # Lớp 3: Giải phóng khóa phần cứng camera /dev/video* (nếu có node kẹt lock V4L2)
+            try:
+                for v_idx in range(6):
+                    v_dev = f"/dev/video{v_idx}"
+                    if os.path.exists(v_dev):
+                        subprocess.run(["fuser", "-k", "-9", v_dev], capture_output=True, timeout=0.3)
+            except Exception:
+                pass
+
+            # Lớp 4: Dừng ros2 daemon để dọn sạch topic ảo và cache DDS
+            try:
+                subprocess.run(["ros2", "daemon", "stop"], capture_output=True, timeout=1.5)
+            except Exception:
+                pass
+
+            self.get_logger().info("[EMERGENCY CLEANUP] Hoàn tất dọn dẹp siêu sạch toàn bộ tiến trình & giải phóng phần cứng.")
+            self._record_layer_log("all", "[EMERGENCY CLEANUP] Hoàn tất dọn dẹp siêu sạch toàn bộ tiến trình & giải phóng phần cứng.")
 
         threading.Thread(target=_cleanup_worker, daemon=True).start()
+
 
