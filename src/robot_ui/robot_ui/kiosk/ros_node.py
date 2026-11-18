@@ -55,19 +55,15 @@ except ImportError:
 from robot_ui.kiosk.signals import KioskSignals
 
 
+# Đường cong xả 3 bình ắc quy chì Yamato 12V 30Ah ghép nối tiếp (36V)
 _BATTERY_36V_CURVE = [
-    (31.5, 0.0),
-    (33.0, 5.0),
-    (34.2, 10.0),
-    (35.4, 20.0),
-    (36.0, 30.0),
-    (36.6, 40.0),
-    (37.2, 50.0),
-    (37.8, 60.0),
-    (38.4, 70.0),
-    (39.0, 80.0),
-    (39.9, 90.0),
-    (41.5, 100.0),
+    (33.60, 0.0),    # 11.20V/bình (ngưỡng ngắt an toàn)
+    (34.80, 10.0),   # 11.60V/bình (cảnh báo nguy cấp)
+    (35.70, 25.0),   # 11.90V/bình (ngưỡng pin yếu)
+    (36.45, 50.0),   # 12.15V/bình (mức trung bình)
+    (37.20, 75.0),   # 12.40V/bình (dung lượng tốt)
+    (37.80, 90.0),   # 12.60V/bình
+    (38.40, 100.0),  # 12.80V/bình (đầy)
 ]
 
 

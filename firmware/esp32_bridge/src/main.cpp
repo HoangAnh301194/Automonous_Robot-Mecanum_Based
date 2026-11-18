@@ -27,6 +27,7 @@
  */
 
 #include <Arduino.h>
+#include <IRsend.h>
 
 // Định nghĩa chân UART và an toàn
 #define PC_BAUD            115200     // Khớp với ROS 2 Humble driver
@@ -34,6 +35,13 @@
 #define HOVER_RX_PIN       16         // Nhận từ Hoverboard TX
 #define HOVER_TX_PIN       17         // Truyền sang Hoverboard RX
 #define ESTOP_PIN          4          // Nút dừng khẩn cấp E-Stop
+
+// Định nghĩa chân phát hồng ngoại (IR) điều khiển ấm nước
+#define IR_PIN             18         // Chân phát IR điều khiển transistor 2N2222
+#define IR_CODE_POWER      0xD81      // Bật/Tắt nguồn ấm (Symphony 12-bit)
+#define IR_CODE_BOIL       0xD82      // Đun sôi nước
+#define IR_CODE_PUMP       0xDC3      // Bơm nước lên ấm
+#define IR_CODE_MODE       0xD84      // Giữ ấm / hãm trà
 
 // Định nghĩa chân đọc xung RC 2 kênh
 #define RC_CH1_PIN         22         // Kênh 1: Lái (Steer)
@@ -44,8 +52,17 @@
 #define RC_TIMEOUT_MS      250        // Mất sóng RC quá 250ms -> coi như tắt tay điều khiển
 
 #define START_FRAME        0xABCD
+#define START_FRAME_KETTLE 0xABCE
 
-// Gói lệnh điều khiển chuẩn Hoverboard FOC
+enum KettleCommandId : uint16_t {
+  KETTLE_CMD_NONE  = 0,
+  KETTLE_CMD_POWER = 1,
+  KETTLE_CMD_BOIL  = 2,
+  KETTLE_CMD_PUMP  = 3,
+  KETTLE_CMD_MODE  = 4
+};
+
+// Gói lệnh điều khiển chuẩn Hoverboard FOC (8 byte)
 typedef struct {
   uint16_t start;
   int16_t  steer;
@@ -53,11 +70,27 @@ typedef struct {
   uint16_t checksum;
 } __attribute__((packed)) SerialCommand;
 
+// Gói lệnh điều khiển ấm nước nội bộ ESP32 (8 byte)
+typedef struct {
+  uint16_t start;     // 0xABCE
+  uint16_t cmd_id;    // KettleCommandId
+  uint16_t param;     // Dự phòng
+  uint16_t checksum;  // start ^ cmd_id ^ param
+} __attribute__((packed)) SerialKettleCommand;
+
 static SerialCommand stopCommand;
 static SerialCommand rcCommand;
 
 static uint32_t lastPcPacketTime = 0;
 static bool emergencyStopped = false;
+
+// Đối tượng phát hồng ngoại và hàng đợi xử lý IR trên Core 0
+static IRsend irsend(IR_PIN);
+static QueueHandle_t kettleQueue = nullptr;
+
+// Bộ đệm nhận byte stream từ PC để tách frame motor và frame ấm nước
+static uint8_t pcRxBuf[8];
+static uint8_t pcRxIdx = 0;
 
 // Biến lưu độ rộng xung PWM từ RC (đơn vị: micro-giây)
 volatile uint32_t rc_ch1_start = 0;
@@ -94,6 +127,123 @@ void IRAM_ATTR isr_rc_ch2() {
   }
 }
 
+// Task FreeRTOS chạy độc lập trên Core 0 phát tín hiệu IR điều khiển ấm nước
+void ir_kettle_task(void *pvParameters) {
+  (void)pvParameters;
+  uint16_t cmd_id = 0;
+  uint32_t last_ir_send = 0;
+
+  for (;;) {
+    if (xQueueReceive(kettleQueue, &cmd_id, portMAX_DELAY) == pdTRUE) {
+      uint32_t now = millis();
+      // Giới hạn tần suất gửi IR: giãn cách tối thiểu 800ms giữa 2 lần phát
+      if (now - last_ir_send < 800) {
+        vTaskDelay(pdMS_TO_TICKS(800 - (now - last_ir_send)));
+      }
+
+      uint32_t ir_code = 0;
+      switch (cmd_id) {
+        case KETTLE_CMD_POWER:
+          ir_code = IR_CODE_POWER;
+          break;
+        case KETTLE_CMD_BOIL:
+          ir_code = IR_CODE_BOIL;
+          break;
+        case KETTLE_CMD_PUMP:
+          ir_code = IR_CODE_PUMP;
+          break;
+        case KETTLE_CMD_MODE:
+          ir_code = IR_CODE_MODE;
+          break;
+        default:
+          break;
+      }
+
+      if (ir_code != 0) {
+        // Giao thức Symphony 12-bit, repeat = 0 (phát đúng 1 lần, đặc biệt an toàn cho toggle POWER)
+        irsend.sendSymphony(ir_code, 12, 0);
+        last_ir_send = millis();
+      }
+    }
+  }
+}
+
+// Hàm phân tích byte stream từ PC để tách frame motor 0xABCD và frame ấm nước 0xABCE
+void processPcByte(uint8_t b, bool estopTriggered, bool rcActive) {
+  pcRxBuf[pcRxIdx++] = b;
+
+  if (pcRxIdx == 1) {
+    if (pcRxBuf[0] != 0xCD && pcRxBuf[0] != 0xCE) {
+      pcRxIdx = 0;
+    }
+    return;
+  }
+  if (pcRxIdx == 2) {
+    if (pcRxBuf[1] != 0xAB) {
+      if (pcRxBuf[1] == 0xCD || pcRxBuf[1] == 0xCE) {
+        pcRxBuf[0] = pcRxBuf[1];
+        pcRxIdx = 1;
+      } else {
+        pcRxIdx = 0;
+      }
+    }
+    return;
+  }
+
+  if (pcRxIdx < 8) {
+    return;
+  }
+
+  // Đủ 8 byte khung gói tin
+  uint16_t frame_start = (uint16_t)pcRxBuf[0] | ((uint16_t)pcRxBuf[1] << 8);
+  bool valid_frame = false;
+
+  if (frame_start == START_FRAME) {
+    // Gói lệnh điều khiển động cơ 0xABCD
+    SerialCommand *cmd = (SerialCommand*)pcRxBuf;
+    uint16_t calc_cs = (uint16_t)(cmd->start ^ cmd->steer ^ cmd->speed);
+    if (calc_cs == cmd->checksum) {
+      valid_frame = true;
+      // Chỉ gói động cơ hợp lệ mới cập nhật Watchdog
+      lastPcPacketTime = millis();
+      if (!estopTriggered && !rcActive) {
+        Serial2.write(pcRxBuf, 8);
+        emergencyStopped = false;
+      }
+    }
+  } else if (frame_start == START_FRAME_KETTLE) {
+    // Gói lệnh điều khiển ấm nước 0xABCE
+    SerialKettleCommand *kcmd = (SerialKettleCommand*)pcRxBuf;
+    uint16_t calc_cs = (uint16_t)(kcmd->start ^ kcmd->cmd_id ^ kcmd->param);
+    if (calc_cs == kcmd->checksum) {
+      valid_frame = true;
+      // TUYỆT ĐỐI KHÔNG cập nhật lastPcPacketTime (tránh làm sai lệch Watchdog motor)
+      // TUYỆT ĐỐI KHÔNG chuyển xuống Serial2 (Hoverboard STM32)
+      // Đẩy vào hàng đợi FreeRTOS để Core 0 phát IR không chặn luồng motor
+      if (kettleQueue != nullptr) {
+        uint16_t cid = kcmd->cmd_id;
+        xQueueSend(kettleQueue, &cid, 0);
+      }
+    }
+  }
+
+  if (valid_frame) {
+    pcRxIdx = 0;
+  } else {
+    // Gói lỗi checksum hoặc lệch byte -> quét tìm byte start tiếp theo trong đệm
+    uint8_t new_idx = 0;
+    for (uint8_t i = 1; i < 8; i++) {
+      if (pcRxBuf[i] == 0xCD || pcRxBuf[i] == 0xCE) {
+        uint8_t rem = 8 - i;
+        memmove(pcRxBuf, pcRxBuf + i, rem);
+        new_idx = rem;
+        break;
+      }
+    }
+    pcRxIdx = new_idx;
+  }
+}
+
 void setup() {
   // 1. Cấu hình chân E-Stop
   pinMode(ESTOP_PIN, INPUT_PULLUP);
@@ -112,11 +262,24 @@ void setup() {
 
   rcCommand.start      = START_FRAME;
 
-  // 4. Khởi tạo UART kết nối PC (USB)
+  // 4. Khởi tạo phát IR ấm nước và Task FreeRTOS trên Core 0
+  irsend.begin();
+  kettleQueue = xQueueCreate(5, sizeof(uint16_t));
+  xTaskCreatePinnedToCore(
+    ir_kettle_task,
+    "ir_kettle_task",
+    4096,
+    NULL,
+    1,
+    NULL,
+    0
+  );
+
+  // 5. Khởi tạo UART kết nối PC (USB)
   Serial.begin(PC_BAUD);
   Serial.setRxBufferSize(BUFFER_SIZE);
 
-  // 5. Khởi tạo UART2 kết nối Bo Hoverboard
+  // 6. Khởi tạo UART2 kết nối Bo Hoverboard
   Serial2.begin(HOVER_BAUD, SERIAL_8N1, HOVER_RX_PIN, HOVER_TX_PIN);
   Serial2.setRxBufferSize(BUFFER_SIZE);
 
@@ -163,6 +326,7 @@ void loop() {
     }
     // Xóa bộ đệm PC để không tích lũy lệnh
     while (Serial.available()) Serial.read();
+    pcRxIdx = 0;
   }
   else if (rcActive) {
     // Người điều khiển đang gạt cần RC -> Ưu tiên tuyệt đối lái bằng tay!
@@ -183,18 +347,13 @@ void loop() {
       Serial.read();
       lastPcPacketTime = millis();
     }
+    pcRxIdx = 0;
   }
   else {
     // Tay RC ở giữa hoặc tắt -> Chạy chế độ Tự hành từ PC (ROS 2)
-    bytesRead = Serial.available();
-    if (bytesRead > 0) {
-      if (bytesRead > sizeof(buffer)) bytesRead = sizeof(buffer);
-      Serial.readBytes(buffer, bytesRead);
-      lastPcPacketTime = millis();
-
-      // Chuyển tiếp tức thì xuống Hoverboard
-      Serial2.write(buffer, bytesRead);
-      emergencyStopped = false;
+    while (Serial.available()) {
+      uint8_t b = (uint8_t)Serial.read();
+      processPcByte(b, estopTriggered, rcActive);
     }
 
     // Safety Watchdog PC: mất kết nối PC quá 200ms -> ngắt động cơ
