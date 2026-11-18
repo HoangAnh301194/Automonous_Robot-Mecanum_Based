@@ -942,6 +942,11 @@ class KioskWindow(QMainWindow):
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
+        admin_pages = {"admin", "slam", "navigation", "system_config", "detection_debug"}
+        if getattr(self, "_active_page", "") in admin_pages or getattr(self, "_is_admin", False) is True:
+            LOG.info("[UI Service] Bỏ qua popup vì đang ở trang cấu hình/quản trị: %s", self._active_page)
+            return
+
         if cmd == "SHOW_SERVING":
             if hasattr(self, "service_page"):
                 # Cập nhật hiển thị chế độ phục vụ nhưng KHÔNG phát ngược tín hiệu điều khiển ra ROS 2 backend

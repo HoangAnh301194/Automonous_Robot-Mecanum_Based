@@ -522,12 +522,11 @@ def test_customer_encounter_range_and_lateral_threshold():
     assert node.check_person(0.30, 0.10) is False
 
 
-def test_audio_player_random_greeting_on_encounter_and_wave():
-    """Verify AudioPlayerNode plays chao_thay_co or chuc_20_11 on encounter and wave arrival."""
+def test_audio_player_greeting_chao_thay_co_on_encounter_and_wave():
+    """Verify AudioPlayerNode plays chao_thay_co on encounter and wave arrival."""
     import importlib.util
     from std_msgs.msg import String
 
-    # Load audio_player_node directly from scripts
     spec = importlib.util.spec_from_file_location(
         "audio_player_node",
         "/home/a/ros2_ws/src/mo_hinh/scripts/audio_player_node.py"
@@ -550,13 +549,12 @@ def test_audio_player_random_greeting_on_encounter_and_wave():
     # Test 1: Log encounter ("👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước...")
     msg_encounter = String()
     msg_encounter.data = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước..."
-    for _ in range(10):
+    for _ in range(5):
         player.cb_mission_log(msg_encounter)
 
-    assert len(player.played) == 10
-    # Every sound played must be one of the two teacher greetings
+    assert len(player.played) == 5
     for s in player.played:
-        assert s in ['chao_thay_co', 'chuc_20_11']
+        assert s == 'chao_thay_co'
 
     # Test 2: Log arrival at waving person
     player.played.clear()
@@ -564,4 +562,30 @@ def test_audio_player_random_greeting_on_encounter_and_wave():
     msg_wave.data = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
     player.cb_mission_log(msg_wave)
     assert len(player.played) == 1
-    assert player.played[0] in ['chao_thay_co', 'chuc_20_11']
+    assert player.played[0] == 'chao_thay_co'
+
+
+def test_no_encounter_or_waving_when_not_patrolling():
+    """Verify neither waving nor encounter triggers when HMI_start_patrol is False."""
+    cond_wave = IsHandWavingDetected("TestWave")
+    cond_enc = IsCustomerEncountered("TestEnc")
+    bb = Blackboard()
+
+    # 1. Patrol is NOT active
+    bb.set('HMI_start_patrol', False)
+    bb.set('HAND_WAVE_ACTIVE', True)
+    bb.set('PERSON_IN_PATH', True)
+    bb.set('IS_SERVING', False)
+
+    # Must return FAILURE to prevent interrupting operator during SLAM/Waypoint config
+    assert cond_wave.tick(bb) == NodeStatus.FAILURE
+    assert cond_enc.tick(bb) == NodeStatus.FAILURE
+
+    # 2. Patrol IS active
+    bb.set('HMI_start_patrol', True)
+    assert cond_wave.tick(bb) == NodeStatus.SUCCESS
+
+    # Encounter requires HAND_WAVE_ACTIVE to be False (since waving takes precedence)
+    bb.set('HAND_WAVE_ACTIVE', False)
+    assert cond_enc.tick(bb) == NodeStatus.SUCCESS
+

@@ -52,6 +52,10 @@ class IsServingCustomer(Condition):
 class IsHandWavingDetected(Condition):
     """Ưu tiên cao nhất khi chạy: Có người giơ tay vẫy gọi xe hoặc đang tiếp cận người vẫy."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
+        # Chỉ kích hoạt khi đang trong chế độ tuần tra hoạt động
+        if not blackboard.get('HMI_start_patrol', False):
+            return NodeStatus.FAILURE
+
         if blackboard.get('IS_SERVING', False):
             return NodeStatus.FAILURE
 
@@ -68,6 +72,10 @@ class IsHandWavingDetected(Condition):
 class IsCustomerEncountered(Condition):
     """Gặp người đứng chắn đường (cự ly < 1.8m, không vẫy) hoặc đang giữ đếm ngược 5s."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
+        # Chỉ kích hoạt khi đang trong chế độ tuần tra hoạt động
+        if not blackboard.get('HMI_start_patrol', False):
+            return NodeStatus.FAILURE
+
         if (
             blackboard.get('IS_SERVING', False)
             or blackboard.get('HAND_WAVE_ACTIVE', False)

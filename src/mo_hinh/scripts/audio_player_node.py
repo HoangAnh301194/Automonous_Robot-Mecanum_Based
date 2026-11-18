@@ -278,14 +278,11 @@ class AudioPlayerNode(Node):
         """Topic /mission/status_log từ Behavior Tree tuần tra & phục vụ."""
         text = msg.data
         if "GẶP NGƯỜI TRƯỚC MẶT" in text:
-            # Có người đứng phía trước (0.4m - 2.0m, lệch <= 0.5m duy trì 1.5s):
-            # Phát ngẫu nhiên chao_thay_co hoặc chuc_20_11 không cần giơ tay
-            greeting = random.choice(['chao_thay_co', 'chuc_20_11'])
-            self.play_sound(greeting, force=True, priority=False)
+            # Có người đứng phía trước trong lúc tuần tra: phát chao_thay_co
+            self.play_sound('chao_thay_co', force=True, priority=False)
         elif "ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY" in text:
-            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> Phát ngẫu nhiên câu chào Thầy Cô
-            greeting = random.choice(['chao_thay_co', 'chuc_20_11'])
-            self.play_sound(greeting, force=True, priority=False)
+            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> phát chao_thay_co
+            self.play_sound('chao_thay_co', force=True, priority=False)
         elif "PHÁT HIỆN NGƯỜI VẪY TAY" in text:
             self.play_sound('den_nguoi_vay_tay', force=False, priority=False)
         elif "Hết 5s không yêu cầu nước" in text:
