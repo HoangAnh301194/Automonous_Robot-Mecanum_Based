@@ -36,6 +36,7 @@
 
 | **Map Saver Timeout 5s Config** | `609aed13-4b65-4add-8353-9e2a6eaaa444` | `ros_node.py` | `save_map_timeout:=5.0`, `map_saver_cli` | HOÀN TẤT | Hoàn thành: Cấu hình tham số save_map_timeout:=5.0 cho lệnh map_saver_cli trong ros_node.py (cả AMCL và localization) giúp map_saver kiên nhẫn đợi nhận frame map từ SLAM, loại bỏ triệt để lỗi Waiting on external map; đã push lên cả 2 nhánh remote simulator_interface và simulator_interface_lord. |
 | **Person Encounter Greeting & Range** | `0370205c-ea3d-44b5-91a8-c3f7a4f9ff0e` | `mission_controller_node.py`, `audio_player_node.py`, `bt_nodes.py`, `window.py` | `/mission/status_log`, `/audio/play_sound` | HOÀN TẤT | Hoàn thành: (1) Chỉ dùng audio chao_thay_co; (2) Chỉ kích hoạt đón người/vẫy tay khi đang tuần tra (HMI_start_patrol=True); (3) Kiosk UI bảo vệ màn hình Admin/SLAM/Nav không bị popup đá văng; pass 100% 46 unit tests và build colcon thành công. |
+| **Map 2-Finger Touch Gestures** | `0370205c-ea3d-44b5-91a8-c3f7a4f9ff0e` | `navigation_page.py`, `test_kiosk_navigation_page.py` | Multi-touch (Pinch Zoom, Two-finger Rotate & Pan) | HOÀN TẤT | Hoàn thành: Tích hợp cử chỉ cảm ứng 2 ngón tay (pinch zoom & 2-finger rotate), xoay quanh tâm viewport, ma trận chuyển đổi tọa độ world/screen xoay nghịch đảo, nút la bàn 🧭 reset hướng Bắc, Shift+drag xoay chuột máy tính; pass 100% unit tests và build colcon. |
 
 ---
 

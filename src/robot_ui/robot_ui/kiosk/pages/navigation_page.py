@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 import yaml
-from PyQt5.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import QEvent, QPoint, QPointF, QRectF, QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import (
     QColor,
     QFont,
@@ -221,6 +221,7 @@ class InteractiveNavMapWidget(QWidget):
         super().__init__(parent)
         self.setObjectName("interactiveNavMapWidget")
         self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.setMouseTracking(True)
 
         self._map: dict[str, Any] | None = None
@@ -248,12 +249,15 @@ class InteractiveNavMapWidget(QWidget):
         self._front_obs_points: list[tuple[float, float]] = []
         self._rear_obs_points: list[tuple[float, float]] = []
 
-        # Zoom & Pan State
+        # Zoom, Pan & Rotation State (Touch Pinch-to-zoom & Two-finger Rotation)
         self._zoom_factor = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
+        self._rotation_deg = 0.0
         self._is_panning = False
         self._last_pan_pos: QPoint | None = None
+        self._is_touch_gesturing = False
+        self._last_gesture_time: float = 0.0
         self._selection_enabled = True
         self._is_active = True
         self._map_dirty = False
@@ -274,7 +278,7 @@ class InteractiveNavMapWidget(QWidget):
         self._init_touch_zoom_controls()
 
     def _init_touch_zoom_controls(self) -> None:
-        """Create on-map touch zoom buttons (+, -, reset) in the top-right corner."""
+        """Create on-map touch zoom buttons (+, -, reset, compass) in the top-right corner."""
         btn_layout = QVBoxLayout()
         btn_layout.setContentsMargins(0, 8, 8, 0)
         btn_layout.setSpacing(6)
@@ -299,6 +303,12 @@ class InteractiveNavMapWidget(QWidget):
             }
         """
 
+        self.btn_compass = QPushButton("🧭", self)
+        self.btn_compass.setFixedSize(36, 36)
+        self.btn_compass.setToolTip("Đặt lại hướng Bắc (0°)")
+        self.btn_compass.setStyleSheet(btn_style + " QPushButton { font-size: 15px; }")
+        self.btn_compass.clicked.connect(self.reset_rotation)
+
         self.btn_zoom_in = QPushButton("+", self)
         self.btn_zoom_in.setFixedSize(36, 36)
         self.btn_zoom_in.setToolTip("Phóng to (+25%)")
@@ -317,13 +327,14 @@ class InteractiveNavMapWidget(QWidget):
         self.btn_zoom_reset.setStyleSheet(btn_style + " QPushButton { font-size: 11px; font-weight: 700; }")
         self.btn_zoom_reset.clicked.connect(self.reset_view)
 
+        btn_layout.addWidget(self.btn_compass)
         btn_layout.addWidget(self.btn_zoom_in)
         btn_layout.addWidget(self.btn_zoom_out)
         btn_layout.addWidget(self.btn_zoom_reset)
         self.setLayout(btn_layout)
 
     # -------------------------------------------------------------------------
-    # Zoom & Pan Control
+    # Zoom, Pan & Rotation Control
     # -------------------------------------------------------------------------
     def zoom_in(self) -> None:
         self.set_zoom(self._zoom_factor * 1.25)
@@ -335,7 +346,19 @@ class InteractiveNavMapWidget(QWidget):
         self._zoom_factor = 1.0
         self._pan_x = 0.0
         self._pan_y = 0.0
+        self._rotation_deg = 0.0
         self.update()
+
+    def reset_rotation(self) -> None:
+        self.set_rotation(0.0)
+
+    def set_rotation(self, deg: float) -> None:
+        norm_deg = float(deg) % 360.0
+        if norm_deg > 180.0:
+            norm_deg -= 360.0
+        if abs(norm_deg - self._rotation_deg) > 1e-3:
+            self._rotation_deg = norm_deg
+            self.update()
 
     def set_zoom(self, zoom: float) -> None:
         new_zoom = max(0.5, min(12.0, zoom))
@@ -542,7 +565,21 @@ class InteractiveNavMapWidget(QWidget):
         return QPointF(sx, sy)
 
     def _screen_to_world(self, point: QPointF, target: QRectF, check_free: bool = True) -> tuple[float, float] | None:
-        if not self._map or not target.contains(point):
+        if not self._map:
+            return None
+
+        # Apply inverse rotation around target center if map is rotated
+        if abs(self._rotation_deg) > 1e-4:
+            rad = math.radians(-self._rotation_deg)
+            cx = target.center().x()
+            cy = target.center().y()
+            px = point.x() - cx
+            py = point.y() - cy
+            cos_r = math.cos(rad)
+            sin_r = math.sin(rad)
+            point = QPointF(cx + px * cos_r - py * sin_r, cy + px * sin_r + py * cos_r)
+
+        if not target.contains(point):
             return None
         pw = int(self._map.get("preview_width", 0))
         ph = int(self._map.get("preview_height", 0))
@@ -576,6 +613,68 @@ class InteractiveNavMapWidget(QWidget):
     # -------------------------------------------------------------------------
     # Mouse & Touch Events
     # -------------------------------------------------------------------------
+    def event(self, event: QEvent) -> bool:
+        if event.type() in (QEvent.TouchBegin, QEvent.TouchUpdate, QEvent.TouchEnd, QEvent.TouchCancel):
+            if self._handle_touch_event(event):
+                return True
+        return super().event(event)
+
+    def _handle_touch_event(self, event: Any) -> bool:
+        touch_points = event.touchPoints()
+        num_points = len(touch_points)
+
+        if event.type() in (QEvent.TouchEnd, QEvent.TouchCancel) or num_points < 2:
+            if self._is_touch_gesturing:
+                self._is_touch_gesturing = False
+                self._last_gesture_time = time.monotonic()
+            return False
+
+        if num_points >= 2:
+            p1_curr = touch_points[0].pos()
+            p2_curr = touch_points[1].pos()
+            p1_prev = touch_points[0].lastPos()
+            p2_prev = touch_points[1].lastPos()
+
+            # 1. Pinch Zoom
+            d_curr = math.hypot(p2_curr.x() - p1_curr.x(), p2_curr.y() - p1_curr.y())
+            d_prev = math.hypot(p2_prev.x() - p1_prev.x(), p2_prev.y() - p1_prev.y())
+
+            if d_prev > 10.0 and d_curr > 10.0:
+                scale = d_curr / d_prev
+                scale = max(0.80, min(1.25, scale))
+                if abs(scale - 1.0) > 0.002:
+                    self.set_zoom(self._zoom_factor * scale)
+
+            # 2. Two-finger rotation
+            angle_curr = math.atan2(p2_curr.y() - p1_curr.y(), p2_curr.x() - p1_curr.x())
+            angle_prev = math.atan2(p2_prev.y() - p1_prev.y(), p2_prev.x() - p1_prev.x())
+            delta_angle = angle_curr - angle_prev
+            delta_angle = (delta_angle + math.pi) % (2.0 * math.pi) - math.pi
+
+            delta_deg = math.degrees(delta_angle)
+            if abs(delta_deg) < 30.0:
+                new_rot = (self._rotation_deg + delta_deg) % 360.0
+                if new_rot > 180.0:
+                    new_rot -= 360.0
+                self._rotation_deg = new_rot
+
+            # 3. Two-finger pan
+            mid_curr = (p1_curr + p2_curr) / 2.0
+            mid_prev = (p1_prev + p2_prev) / 2.0
+            dx_pan = mid_curr.x() - mid_prev.x()
+            dy_pan = mid_curr.y() - mid_prev.y()
+            if math.hypot(dx_pan, dy_pan) < 80.0:
+                self._pan_x += dx_pan
+                self._pan_y += dy_pan
+
+            self._is_touch_gesturing = True
+            self._last_gesture_time = time.monotonic()
+            self.update()
+            event.accept()
+            return True
+
+        return False
+
     def wheelEvent(self, event: Any) -> None:
         delta = event.angleDelta().y()
         if delta == 0:
@@ -585,7 +684,11 @@ class InteractiveNavMapWidget(QWidget):
         event.accept()
 
     def mousePressEvent(self, event: Any) -> None:
-        if event.button() in (Qt.RightButton, Qt.MiddleButton):
+        if time.monotonic() - getattr(self, "_last_gesture_time", 0.0) < 0.35:
+            event.accept()
+            return
+
+        if event.button() in (Qt.RightButton, Qt.MiddleButton) or (event.modifiers() & Qt.ShiftModifier):
             self._is_panning = True
             self._last_pan_pos = event.pos()
             self.setCursor(Qt.ClosedHandCursor)
@@ -644,8 +747,15 @@ class InteractiveNavMapWidget(QWidget):
     def mouseMoveEvent(self, event: Any) -> None:
         if self._is_panning and self._last_pan_pos is not None:
             delta = event.pos() - self._last_pan_pos
-            self._pan_x += delta.x()
-            self._pan_y += delta.y()
+            if event.modifiers() & Qt.ShiftModifier:
+                # Shift + Drag: Rotate map (for desktop / mouse testing)
+                new_rot = (self._rotation_deg + delta.x() * 0.5) % 360.0
+                if new_rot > 180.0:
+                    new_rot -= 360.0
+                self._rotation_deg = new_rot
+            else:
+                self._pan_x += delta.x()
+                self._pan_y += delta.y()
             self._last_pan_pos = event.pos()
             self.update()
             event.accept()
@@ -667,8 +777,19 @@ class InteractiveNavMapWidget(QWidget):
                     step = int(self._map.get("sample_step", 1)) if self._map else 1
                     oyaw = float(self._map.get("origin_yaw", 0.0)) if self._map else 0.0
 
-                    d_cell_x = (dx_scr / target.width()) * pw
-                    d_cell_y = (-dy_scr / target.height()) * ph
+                    # Unrotate screen drag vector if map is rotated
+                    if abs(self._rotation_deg) > 1e-4:
+                        rot_rad = math.radians(-self._rotation_deg)
+                        cos_rot = math.cos(rot_rad)
+                        sin_rot = math.sin(rot_rad)
+                        d_unrot_x = dx_scr * cos_rot - dy_scr * sin_rot
+                        d_unrot_y = dx_scr * sin_rot + dy_scr * cos_rot
+                    else:
+                        d_unrot_x = dx_scr
+                        d_unrot_y = dy_scr
+
+                    d_cell_x = (d_unrot_x / target.width()) * pw
+                    d_cell_y = (-d_unrot_y / target.height()) * ph
                     d_dist_x = d_cell_x * res * step
                     d_dist_y = d_cell_y * res * step
 
@@ -693,6 +814,10 @@ class InteractiveNavMapWidget(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:
+        if time.monotonic() - getattr(self, "_last_gesture_time", 0.0) < 0.35:
+            event.accept()
+            return
+
         if event.button() in (Qt.RightButton, Qt.MiddleButton) and self._is_panning:
             self._is_panning = False
             self._last_pan_pos = None
@@ -753,6 +878,13 @@ class InteractiveNavMapWidget(QWidget):
         widget_clip.addRoundedRect(QRectF(self.rect()).adjusted(2, 2, -2, -2), 10, 10)
         painter.save()
         painter.setClipPath(widget_clip)
+
+        # Apply map rotation around center of transformed map
+        if abs(self._rotation_deg) > 1e-4:
+            c = target.center()
+            painter.translate(c)
+            painter.rotate(self._rotation_deg)
+            painter.translate(-c)
 
         # 1. Map Image
         painter.drawImage(target, self._map_image)
@@ -975,6 +1107,8 @@ class InteractiveNavMapWidget(QWidget):
 
         # Zoom & Status HUD in bottom-left corner
         hud_text = f"Zoom: {self._zoom_factor:.1f}x"
+        if abs(self._rotation_deg) > 0.5:
+            hud_text += f" | {self._rotation_deg:.0f}°"
         if self._initial_pose_mode:
             hud_text += " | [2D POSE] (Chạm & kéo)"
         elif self._pick_mode:

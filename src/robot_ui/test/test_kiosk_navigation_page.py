@@ -157,6 +157,59 @@ class TestKioskNavigationPage(unittest.TestCase):
         self.page.set_robot_status({"battery_percent": 42.0})
         self.assertEqual(self.page.battery_text_label.text(), "42%")
 
+    def test_map_rotation_and_compass(self):
+        """Test rotation setter, normalization, compass button, and reset_view."""
+        map_w = self.page.map_widget
+        self.assertIsNotNone(map_w.btn_compass)
+
+        # Test rotation setting and normalization
+        map_w.set_rotation(45.0)
+        self.assertAlmostEqual(map_w._rotation_deg, 45.0, places=2)
+
+        map_w.set_rotation(390.0)  # 390 % 360 = 30
+        self.assertAlmostEqual(map_w._rotation_deg, 30.0, places=2)
+
+        # Test compass reset button
+        map_w.btn_compass.click()
+        self.assertAlmostEqual(map_w._rotation_deg, 0.0, places=2)
+
+        # Test reset_view resets rotation as well
+        map_w.set_rotation(90.0)
+        map_w.set_zoom(2.5)
+        map_w.reset_view()
+        self.assertAlmostEqual(map_w._rotation_deg, 0.0, places=2)
+        self.assertAlmostEqual(map_w._zoom_factor, 1.0, places=2)
+
+    def test_screen_to_world_with_rotation(self):
+        """Test coordinate transformation with rotation applied."""
+        map_w = self.page.map_widget
+        fake_map = {
+            "origin_x": 0.0,
+            "origin_y": 0.0,
+            "origin_yaw": 0.0,
+            "resolution": 0.05,
+            "preview_width": 100,
+            "preview_height": 100,
+            "sample_step": 1,
+            "cells": [0] * (100 * 100),
+        }
+        map_w._map = fake_map
+        from PyQt5.QtCore import QPointF, QRectF
+        target = QRectF(0, 0, 200, 200)
+
+        # Center point unrotated
+        pt_center = QPointF(100, 100)
+        map_w.set_rotation(0.0)
+        w1 = map_w._screen_to_world(pt_center, target, check_free=False)
+        self.assertIsNotNone(w1)
+
+        # Center point rotated 90 degrees should still map to center
+        map_w.set_rotation(90.0)
+        w2 = map_w._screen_to_world(pt_center, target, check_free=False)
+        self.assertIsNotNone(w2)
+        self.assertAlmostEqual(w1[0], w2[0], places=2)
+        self.assertAlmostEqual(w1[1], w2[1], places=2)
+
 
 if __name__ == "__main__":
     unittest.main()
