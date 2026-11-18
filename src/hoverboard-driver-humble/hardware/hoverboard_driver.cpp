@@ -47,6 +47,15 @@ namespace hoverboard_driver
     connected_pub = this->create_publisher<std_msgs::msg::Bool>("hoverboard/connected", 3);
     imu_pub[0] = this->create_publisher<sensor_msgs::msg::Imu>("hoverboard/imu0/data", 3);
     imu_pub[1] = this->create_publisher<sensor_msgs::msg::Imu>("hoverboard/imu1/data", 3);
+    kettle_status_pub_ = this->create_publisher<std_msgs::msg::String>("water/kettle_status", 10);
+
+    kettle_cmd_sub_ = this->create_subscription<std_msgs::msg::String>(
+        "water/kettle_command", 10,
+        [this](const std_msgs::msg::String::SharedPtr msg) {
+          if (kettle_cmd_callback_) {
+            kettle_cmd_callback_(msg->data);
+          }
+        });
 
     declare_parameter("f", 10.2);
     declare_parameter("p", 1.0);
@@ -161,6 +170,18 @@ namespace hoverboard_driver
     imu_msg.orientation_covariance[0] = -1.0;
 
     imu_pub[message.imuId]->publish(imu_msg);
+  }
+
+  void hoverboard_driver_node::publish_kettle_status(const std::string &status)
+  {
+    std_msgs::msg::String msg;
+    msg.data = status;
+    kettle_status_pub_->publish(msg);
+  }
+
+  void hoverboard_driver_node::set_kettle_cmd_callback(std::function<void(const std::string&)> cb)
+  {
+    kettle_cmd_callback_ = cb;
   }
 
   rcl_interfaces::msg::SetParametersResult hoverboard_driver_node::parametersCallback(
@@ -281,6 +302,10 @@ namespace hoverboard_driver
     }
 
     hardware_publisher = std::make_shared<hoverboard_driver_node>(); // fire up the publisher node
+    hardware_publisher->set_kettle_cmd_callback(
+        [this](const std::string &cmd_str) {
+          this->handle_kettle_command(cmd_str);
+        });
     // Set IMU parameters from hardware_info (URDF)
     if (info_.hardware_parameters.count("imu_enabled"))
       hardware_publisher->imu_enabled_ = info_.hardware_parameters["imu_enabled"] == "true" || info_.hardware_parameters["imu_enabled"] == "1";
@@ -397,6 +422,18 @@ namespace hoverboard_driver
     tcflush(port_fd, TCIFLUSH);
     tcsetattr(port_fd, TCSANOW, &options);
 
+    // Khởi động luồng nền quay Executor cho hardware_publisher để nhận lệnh ROS 2 Topic
+    if (!node_thread_running_.load()) {
+      node_thread_running_.store(true);
+      node_executor_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+      node_executor_->add_node(hardware_publisher);
+      node_thread_ = std::thread([this]() {
+        if (node_executor_) {
+          node_executor_->spin();
+        }
+      });
+    }
+
     RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "Successfully activated!");
 
     return hardware_interface::CallbackReturn::SUCCESS;
@@ -405,8 +442,21 @@ namespace hoverboard_driver
   hardware_interface::CallbackReturn hoverboard_driver::on_deactivate(
       const rclcpp_lifecycle::State & /*previous_state*/)
   {
-    if (port_fd != -1)
+    if (node_thread_running_.load()) {
+      node_thread_running_.store(false);
+      if (node_executor_) {
+        node_executor_->cancel();
+      }
+      if (node_thread_.joinable()) {
+        node_thread_.join();
+      }
+      node_executor_.reset();
+    }
+
+    if (port_fd != -1) {
       close(port_fd);
+      port_fd = -1;
+    }
 
     RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "Successfully deactivated!");
 
@@ -578,6 +628,7 @@ namespace hoverboard_driver
     double pid_outputs[2];
     pid_outputs[0] = pids[0](hw_velocities_[left_wheel], hw_commands_[left_wheel], period);
     pid_outputs[1] = pids[1](hw_velocities_[left_wheel], hw_commands_[right_wheel], period);
+    (void)pid_outputs;
 
     // Convert PID outputs in RAD/S to RPM
     //double set_speed[2] = {
@@ -599,12 +650,80 @@ namespace hoverboard_driver
     command.speed = (int16_t)speed;
     command.checksum = (uint16_t)(command.start ^ command.steer ^ command.speed);
 
+    // Luôn ưu tiên ghi lệnh motor trước
     int rc = ::write(port_fd, (const void *)&command, sizeof(command));
     if (rc < 0)
     {
       RCLCPP_ERROR(rclcpp::get_logger("hoverboard_driver"), "Error writing to hoverboard serial port");
     }
+
+    // Gửi lệnh ấm nước ngay sau gói motor nếu có yêu cầu (Single-Writer, lock-free)
+    if (kettle_cmd_pending_.exchange(false, std::memory_order_acq_rel))
+    {
+      int krc = ::write(port_fd, (const void *)&pending_kettle_cmd_, sizeof(pending_kettle_cmd_));
+      if (krc < 0)
+      {
+        RCLCPP_ERROR(rclcpp::get_logger("hoverboard_driver"), "Error writing kettle command to serial port");
+        hardware_publisher->publish_kettle_status("ERROR: SERIAL_WRITE_FAILED");
+      }
+      else
+      {
+        RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "Dispatched kettle command (ID: %u) to ESP32 bridge", pending_kettle_cmd_.cmd_id);
+        hardware_publisher->publish_kettle_status("DISPATCHED");
+      }
+    }
     return hardware_interface::return_type::OK;
+  }
+
+  void hoverboard_driver::handle_kettle_command(const std::string &cmd_str)
+  {
+    std::string s = cmd_str;
+    s.erase(0, s.find_first_not_of(" \t\n\r"));
+    s.erase(s.find_last_not_of(" \t\n\r") + 1);
+    std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+
+    uint16_t cmd_id = KETTLE_CMD_NONE;
+    if (s == "POWER") {
+      cmd_id = KETTLE_CMD_POWER;
+    } else if (s == "BOIL") {
+      cmd_id = KETTLE_CMD_BOIL;
+    } else if (s == "PUMP") {
+      cmd_id = KETTLE_CMD_PUMP;
+    } else if (s == "MODE") {
+      cmd_id = KETTLE_CMD_MODE;
+    } else {
+      RCLCPP_WARN(rclcpp::get_logger("hoverboard_driver"), "Unknown kettle command: '%s'", cmd_str.c_str());
+      hardware_publisher->publish_kettle_status("REJECTED: UNKNOWN_COMMAND (" + cmd_str + ")");
+      return;
+    }
+
+    // KIỂM TRA ĐIỀU KIỆN AN TOÀN: Vận tốc thực tế của bánh xe
+    // Không cho phép BOIL hoặc PUMP khi robot đang di chuyển
+    if (cmd_id == KETTLE_CMD_BOIL || cmd_id == KETTLE_CMD_PUMP) {
+      double v_left = (hw_velocities_.size() > left_wheel && !std::isnan(hw_velocities_[left_wheel])) ? hw_velocities_[left_wheel] : 0.0;
+      double v_right = (hw_velocities_.size() > right_wheel && !std::isnan(hw_velocities_[right_wheel])) ? hw_velocities_[right_wheel] : 0.0;
+      const double VEL_THRESHOLD = 0.05; // rad/s
+      if (std::abs(v_left) > VEL_THRESHOLD || std::abs(v_right) > VEL_THRESHOLD) {
+        RCLCPP_WARN(rclcpp::get_logger("hoverboard_driver"),
+                    "SAFETY INTERLOCK: Rejected kettle %s command! Robot is moving (vL=%.3f, vR=%.3f rad/s)",
+                    s.c_str(), v_left, v_right);
+        hardware_publisher->publish_kettle_status("REJECTED: ROBOT_MOVING (" + s + ")");
+        return;
+      }
+    }
+
+    // Đóng gói SerialKettleCommand (8 byte)
+    SerialKettleCommand kcmd;
+    kcmd.start = START_FRAME_KETTLE;
+    kcmd.cmd_id = cmd_id;
+    kcmd.param = 0;
+    kcmd.checksum = (uint16_t)(kcmd.start ^ kcmd.cmd_id ^ kcmd.param);
+
+    pending_kettle_cmd_ = kcmd;
+    kettle_cmd_pending_.store(true, std::memory_order_release);
+
+    RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "Kettle command '%s' (0x%04X) queued for serial dispatch", s.c_str(), cmd_id);
+    hardware_publisher->publish_kettle_status("QUEUED: " + s);
   }
 
   void hoverboard_driver::on_encoder_update(const rclcpp::Time &time, int16_t right, int16_t left)
@@ -670,6 +789,16 @@ namespace hoverboard_driver
   // Destructor is called at Ctrl-C after ros2 launch
   hoverboard_driver::~hoverboard_driver()
   {
+    if (node_thread_running_.load()) {
+      node_thread_running_.store(false);
+      if (node_executor_) {
+        node_executor_->cancel();
+      }
+      if (node_thread_.joinable()) {
+        node_thread_.join();
+      }
+      node_executor_.reset();
+    }
     if (port_fd != -1) {
       close(port_fd);
       port_fd = -1;

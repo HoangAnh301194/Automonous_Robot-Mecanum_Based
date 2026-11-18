@@ -32,10 +32,13 @@
 #include "hoverboard_driver/config.hpp"
 #include "hoverboard_driver/protocol.hpp"
 #include "hoverboard_driver/pid.hpp"
-#include "rclcpp/rclcpp.hpp"
+#include <atomic>
+#include <thread>
+#include <functional>
 #include "sensor_msgs/msg/imu.hpp"
 #include "std_msgs/msg/float64.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 namespace hoverboard_driver
@@ -92,6 +95,14 @@ namespace hoverboard_driver
     /// @param message value to publish
     void publish_imu(const SerialImu& message, const rclcpp::Time &time);
 
+    /// @brief publish kettle controller status
+    /// @param status status message string
+    void publish_kettle_status(const std::string &status);
+
+    /// @brief register callback for incoming kettle commands
+    /// @param cb callback function
+    void set_kettle_cmd_callback(std::function<void(const std::string&)> cb);
+
     /// @brief parameter callback method. 
     /// @param parameters 
     /// @return 
@@ -128,8 +139,13 @@ namespace hoverboard_driver
     rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr temp_pub;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr connected_pub;
     rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr imu_pub[2];
+    rclcpp::Publisher<std_msgs::msg::String>::SharedPtr kettle_status_pub_;
 
-        // Parameter Callback handle
+    // Subscribers
+    rclcpp::Subscription<std_msgs::msg::String>::SharedPtr kettle_cmd_sub_;
+    std::function<void(const std::string&)> kettle_cmd_callback_;
+
+    // Parameter Callback handle
     OnSetParametersCallbackHandle::SharedPtr callback_handle_;
   };
 
@@ -199,6 +215,14 @@ namespace hoverboard_driver
 
     double last_write = 0.0; // Time since last write() in seconds
     const double write_period = 0.1; // Period between writes in seconds. 0.1s = 100ms = 10Hz
+
+    // Kettle IR integration
+    void handle_kettle_command(const std::string &cmd_str);
+    std::atomic<bool> kettle_cmd_pending_{false};
+    SerialKettleCommand pending_kettle_cmd_{};
+    std::thread node_thread_;
+    std::atomic<bool> node_thread_running_{false};
+    std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> node_executor_;
   };
 
 } // namespace hoverboard_driver
