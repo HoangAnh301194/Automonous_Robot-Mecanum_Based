@@ -7,13 +7,28 @@ from nav_msgs.msg import Odometry
 from robot_interfaces.msg import WaterStatus, RobotStatus
 
 
+# Đường cong xả 3 bình ắc quy chì Yamato 12V 30Ah ghép nối tiếp (36V)
+_BATTERY_36V_CURVE = (
+    (33.60, 0.0),    # 11.20V/bình (ngưỡng ngắt an toàn)
+    (34.80, 10.0),   # 11.60V/bình (cảnh báo nguy cấp)
+    (35.70, 25.0),   # 11.90V/bình (ngưỡng pin yếu)
+    (36.45, 50.0),   # 12.15V/bình (mức trung bình)
+    (37.20, 75.0),   # 12.40V/bình (dung lượng tốt)
+    (37.80, 90.0),   # 12.60V/bình
+    (38.40, 100.0),  # 12.80V/bình (đầy)
+)
+
+
 def _voltage_to_percentage_36v(v: float) -> float:
-    """Nội suy % dung lượng pin 36V 10S từ điện áp."""
-    if v >= 41.5:
-        return 100.0
-    if v <= 31.0:
+    """Nội suy % dung lượng 3 bình ắc quy chì Yamato 12V 30Ah nối tiếp (36V) từ điện áp."""
+    if v <= _BATTERY_36V_CURVE[0][0]:
         return 0.0
-    return max(0.0, min(100.0, (v - 31.0) / (41.5 - 31.0) * 100.0))
+    if v >= _BATTERY_36V_CURVE[-1][0]:
+        return 100.0
+    for (v0, p0), (v1, p1) in zip(_BATTERY_36V_CURVE, _BATTERY_36V_CURVE[1:]):
+        if v <= v1:
+            return p0 + (v - v0) / (v1 - v0) * (p1 - p0)
+    return 100.0
 
 
 class SystemMonitorNode(Node):
