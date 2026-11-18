@@ -1,0 +1,38 @@
+map_name: khoaa1_amcl.yaml
+locations:
+  khoihanh:
+    x: -10.773
+    y: 11.338
+    yaw: -0.3945475069270901
+    note: Khởi hành / Trạm nước
+  diem1:
+    x: -8.441
+    y: 10.367
+    yaw: -1.6746571815956415
+    note: Điểm tuần tra 1
+  diem2:
+    x: -9.413
+    y: 1.042
+    yaw: 1.702126174792263
+    note: Điểm tuần tra 2
+routes:
+  patrol_route:
+  - khoihanh
+  - diem1
+  - diem2
+waypoints:
+- name: khoihanh
+  x: -10.773
+  y: 11.338
+  yaw: -0.3945475069270901
+  note: Khởi hành / Trạm nước
+- name: diem1
+  x: -8.441
+  y: 10.367
+  yaw: -1.6746571815956415
+  note: Điểm tuần tra 1
+- name: diem2
+  x: -9.413
+  y: 1.042
+  yaw: 1.702126174792263
+  note: Điểm tuần tra 2
