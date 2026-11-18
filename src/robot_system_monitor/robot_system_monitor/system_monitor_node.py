@@ -2,8 +2,19 @@ import rclpy
 from rclpy.node import Node
 
 from sensor_msgs.msg import BatteryState, LaserScan
+from std_msgs.msg import Float64
 from nav_msgs.msg import Odometry
 from robot_interfaces.msg import WaterStatus, RobotStatus
+
+
+def _voltage_to_percentage_36v(v: float) -> float:
+    """Nội suy % dung lượng pin 36V 10S từ điện áp."""
+    if v >= 41.5:
+        return 100.0
+    if v <= 31.0:
+        return 0.0
+    return max(0.0, min(100.0, (v - 31.0) / (41.5 - 31.0) * 100.0))
+
 
 class SystemMonitorNode(Node):
     def __init__(self):
@@ -11,6 +22,8 @@ class SystemMonitorNode(Node):
 
         # Subscriptions
         self.sub_battery = self.create_subscription(BatteryState, '/battery_state', self.cb_battery, 10)
+        self.sub_battery_alt = self.create_subscription(BatteryState, '/battery', self.cb_battery, 10)
+        self.sub_hoverboard_voltage = self.create_subscription(Float64, '/hoverboard/battery_voltage', self.cb_hoverboard_voltage, 10)
         self.sub_scan = self.create_subscription(LaserScan, '/scan', self.cb_scan, 10)
         self.sub_water = self.create_subscription(WaterStatus, '/water/status', self.cb_water, 10)
         self.sub_odom = self.create_subscription(Odometry, '/odom', self.cb_odom, 10)
@@ -21,8 +34,8 @@ class SystemMonitorNode(Node):
         # Timers
         self.timer = self.create_timer(0.5, self.publish_status) # 2 Hz
 
-        # State variables
-        self.battery_percent = 100.0
+        # State variables (khởi tạo 0.0 thay vì 100.0 để tránh phát pin ảo khi chưa nhận dữ liệu)
+        self.battery_percent = 0.0
         self.battery_low = False
         
         self.water_liter = 0.0
@@ -43,6 +56,12 @@ class SystemMonitorNode(Node):
             self.battery_percent = msg.percentage
             
         self.battery_low = (self.battery_percent < 20.0)
+
+    def cb_hoverboard_voltage(self, msg: Float64):
+        raw_v = float(msg.data)
+        if 20.0 <= raw_v <= 50.0:
+            self.battery_percent = _voltage_to_percentage_36v(raw_v)
+            self.battery_low = (self.battery_percent < 20.0)
 
     def cb_scan(self, msg):
         self.last_scan_time = self.get_clock().now()
