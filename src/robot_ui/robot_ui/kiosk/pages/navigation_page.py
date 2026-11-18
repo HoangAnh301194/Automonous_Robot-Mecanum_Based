@@ -427,6 +427,18 @@ class InteractiveNavMapWidget(QWidget):
         ).copy()
 
     def set_map(self, map_data: dict[str, Any]) -> None:
+        if not map_data:
+            return
+        # Bảo vệ độ phân giải: Nếu bản đồ hiện tại có số pixel nhiều hơn đáng kể bản đồ mới (downsampled),
+        # giữ nguyên bản đồ chi tiết hơn để tránh vỡ nét khi zoom.
+        if self._map:
+            cur_cells_len = len(self._map.get("cells", []))
+            new_cells_len = len(map_data.get("cells", []))
+            cur_step = int(self._map.get("sample_step", 1))
+            new_step = int(map_data.get("sample_step", 1))
+            if cur_step < new_step and new_cells_len < cur_cells_len * 0.5:
+                return
+
         self._map = map_data
         if not self._is_active:
             self._map_dirty = True

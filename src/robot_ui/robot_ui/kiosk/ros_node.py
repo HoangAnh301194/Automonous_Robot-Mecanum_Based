@@ -108,7 +108,7 @@ class LocalizationState(str, Enum):
 class KioskRosNode(Node):
     """Small ROS adapter dedicated to the native customer UI."""
 
-    MAP_PREVIEW_MAX_DIMENSION = 200
+    MAP_PREVIEW_MAX_DIMENSION = 4096
     PATH_PREVIEW_MAX_POINTS = 400
 
     def __init__(self, signals: KioskSignals) -> None:
@@ -436,11 +436,14 @@ class KioskRosNode(Node):
         step = max(1, math.ceil(max(width, height) / self.MAP_PREVIEW_MAX_DIMENSION))
         preview_width = math.ceil(width / step)
         preview_height = math.ceil(height / step)
-        cells = [
-            int(msg.data[source_y * width + source_x])
-            for source_y in range(0, height, step)
-            for source_x in range(0, width, step)
-        ]
+        if step == 1:
+            cells = [int(x) for x in msg.data]
+        else:
+            cells = [
+                int(msg.data[source_y * width + source_x])
+                for source_y in range(0, height, step)
+                for source_x in range(0, width, step)
+            ]
         orientation = msg.info.origin.orientation
         self.signals.map_changed.emit(
             {

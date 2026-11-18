@@ -284,7 +284,44 @@ class TestKioskNavigationPage(unittest.TestCase):
         map_w.render(pix)
         self.assertFalse(pix.isNull())
 
+    def test_map_resolution_protection(self):
+        """Test that set_map rejects low-res downsampled maps when high-res map is already loaded."""
+        map_w = self.page.map_widget
+        high_res = {
+            "origin_x": 0.0,
+            "origin_y": 0.0,
+            "origin_yaw": 0.0,
+            "resolution": 0.05,
+            "preview_width": 200,
+            "preview_height": 200,
+            "sample_step": 1,
+            "cells": [0] * (200 * 200),
+        }
+        map_w.set_map(high_res)
+        self.assertEqual(map_w._map["preview_width"], 200)
+
+        # Attempt to overwrite with downsampled map (sample_step=5, 40x40)
+        low_res = {
+            "origin_x": 0.0,
+            "origin_y": 0.0,
+            "origin_yaw": 0.0,
+            "resolution": 0.05,
+            "preview_width": 40,
+            "preview_height": 40,
+            "sample_step": 5,
+            "cells": [0] * (40 * 40),
+        }
+        map_w.set_map(low_res)
+        # Should retain high_res map
+        self.assertEqual(map_w._map["preview_width"], 200)
+
+    def test_ros_node_map_preview_dimension(self):
+        """Verify that KioskRosNode.MAP_PREVIEW_MAX_DIMENSION is 4096 (preserving 1:1 resolution)."""
+        from robot_ui.kiosk.ros_node import KioskRosNode
+        self.assertEqual(KioskRosNode.MAP_PREVIEW_MAX_DIMENSION, 4096)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 
