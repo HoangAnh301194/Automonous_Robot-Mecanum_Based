@@ -795,6 +795,14 @@ def test_ip32_standby_pose_capture_and_navigate(qapp, tmp_path):
     assert target[0] == pytest.approx(1.50)
     assert target[1] == pytest.approx(2.80)
     assert target[2] == pytest.approx(0.785)
+
+    # 5. Kiểm tra chụp trực tiếp từ tọa độ live _current_robot_pose (không bị lấy nhầm _goal)
+    page._goal = (99.0, 99.0, 0.0)
+    page._current_robot_pose = {"x": 3.456, "y": 7.890, "yaw": -1.234}
+    page._capture_current_pose_as_standby(silent=True)
+    assert page._standby_wp["x"] == pytest.approx(3.456)
+    assert page._standby_wp["y"] == pytest.approx(7.890)
+    assert page._standby_wp["yaw"] == pytest.approx(-1.234)
     page.close()
 
 

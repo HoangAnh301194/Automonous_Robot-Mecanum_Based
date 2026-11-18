@@ -3163,35 +3163,41 @@ class NavigationPage(QWidget):
                 pass
         return None
 
-    def _capture_current_pose_as_standby(self) -> None:
-        """Chụp tọa độ hiện tại của robot hoặc ứng viên 2D pose làm Trạm Chờ thông thoáng (tram_cho)."""
-        x: float | None = None
-        y: float | None = None
-        yaw: float = 0.0
-
-        if hasattr(self, "_robot_pose") and self._robot_pose is not None:
-            x, y, yaw = self._robot_pose
-        elif hasattr(self, "_goal") and self._goal is not None:
-            x, y, yaw = self._goal
+    def _capture_current_pose_as_standby(self, silent: bool = False) -> None:
+        """Chụp tọa độ thực tế hiện tại của robot từ TF/Odometry làm Trạm Chờ thông thoáng (tram_cho)."""
+        pose = None
+        if getattr(self, "_current_robot_pose", None) and "x" in self._current_robot_pose:
+            pose = self._current_robot_pose
+        elif hasattr(self, "map_widget") and getattr(self.map_widget, "_pose", None) and "x" in self.map_widget._pose:
+            pose = self.map_widget._pose
         elif (
             hasattr(self, "map_widget")
-            and hasattr(self.map_widget, "_candidate_initial_pose")
-            and self.map_widget._candidate_initial_pose is not None
+            and getattr(self.map_widget, "_candidate_initial_pose", None)
+            and "x" in self.map_widget._candidate_initial_pose
         ):
-            x, y, yaw = self.map_widget._candidate_initial_pose
+            pose = self.map_widget._candidate_initial_pose
 
-        if x is None or y is None:
+        if not pose or "x" not in pose or "y" not in pose:
             self.set_command_status(
                 "warn",
-                "[WARN] Chưa có tọa độ robot hoặc mục tiêu hợp lệ để lưu làm Trạm Chờ!"
+                "[WARN] Chưa có tọa độ robot! Vui lòng định vị robot bằng '🎯 VỀ ĐIỂM GỐC' hoặc '2D POSE ESTIMATE' trước."
             )
-            QMessageBox.warning(
-                self,
-                "Chưa có tọa độ",
-                "Không tìm thấy tọa độ robot hoặc mục tiêu hợp lệ trên bản đồ!\n\n"
-                "Vui lòng định vị robot hoặc chấm 1 điểm thông thoáng trên bản đồ trước."
+            self.append_patrol_log(
+                "[WAYPOINT][WARN] Không thể chụp Trạm Chờ vì robot chưa có tọa độ vị trí thực tế.",
+                "warn"
             )
+            if not silent:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có tọa độ",
+                    "Không tìm thấy tọa độ vị trí thực tế của robot trên bản đồ!\n\n"
+                    "Vui lòng định vị robot bằng '🎯 VỀ ĐIỂM GỐC' hoặc '2D POSE ESTIMATE' trước khi lưu Trạm Chờ."
+                )
             return
+
+        x = float(pose["x"])
+        y = float(pose["y"])
+        yaw = float(pose.get("yaw", 0.0))
 
         map_name = self._current_map_path.name if self._current_map_path else "default"
         deg = math.degrees(yaw)
@@ -3202,16 +3208,17 @@ class NavigationPage(QWidget):
                 "success"
             )
             self.set_command_status("success", f"Đã lưu Trạm Chờ: X={x:.2f}, Y={y:.2f} m (tram_cho)")
-            QMessageBox.information(
-                self,
-                "Lưu Trạm Chờ Thành Công",
-                f"Đã lưu vị trí robot làm TRẠM CHỜ (tram_cho) cho {map_name}:\n\n"
-                f"• X: {x:.3f} m\n"
-                f"• Y: {y:.3f} m\n"
-                f"• Hướng (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
-                f"Từ bây giờ, khi kết thúc ca làm việc hoặc cần nghỉ ngơi, chỉ cần ấn nút '🚏 VỀ TRẠM CHỜ' "
-                f"để Nav2 tự động lái robot về vị trí an toàn này!"
-            )
+            if not silent:
+                QMessageBox.information(
+                    self,
+                    "Lưu Trạm Chờ Thành Công",
+                    f"Đã lưu vị trí robot làm TRẠM CHỜ (tram_cho) cho {map_name}:\n\n"
+                    f"• X: {x:.3f} m\n"
+                    f"• Y: {y:.3f} m\n"
+                    f"• Hướng (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                    f"Từ bây giờ, khi kết thúc ca làm việc hoặc cần nghỉ ngơi, chỉ cần ấn nút '🚏 VỀ TRẠM CHỜ' "
+                    f"để Nav2 tự động lái robot về vị trí an toàn này!"
+                )
 
     def _save_standby_pose_to_yaml(self, x: float, y: float, yaw: float) -> bool:
         """Ghi Trạm Chờ 'tram_cho' vào file YAML của bản đồ hiện tại và đồng bộ hệ thống."""
