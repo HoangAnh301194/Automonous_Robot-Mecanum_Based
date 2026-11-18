@@ -14,6 +14,10 @@ def resolve_path(sub_dir, file_name, pkg_name='mo_hinh'):
         return os.path.join(get_package_share_directory(pkg_name), sub_dir, file_name)
     except Exception:
         pass
+    launch_dir = os.path.dirname(os.path.abspath(__file__))
+    local_path = os.path.normpath(os.path.join(launch_dir, '..', sub_dir, file_name))
+    if os.path.exists(local_path):
+        return local_path
     user_src_path = os.path.expanduser(f'~/ros2_ws/src/{pkg_name}/{sub_dir}/{file_name}')
     if os.path.exists(user_src_path):
         return user_src_path
@@ -26,7 +30,13 @@ def generate_launch_description():
     urdf_file = resolve_path('urdf', 'xe.urdf')
     default_world = resolve_path('worlds', 'map_a2.world')
     worlds_dir = os.path.dirname(default_world)
-    workspace_root = os.environ.get('WS', os.path.expanduser('~/ros2_ws'))
+    ws_candidates = [
+        os.environ.get('WS', ''),
+        os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..')),
+        os.getcwd(),
+        os.path.expanduser('~/ros2_ws'),
+    ]
+    workspace_root = next((c for c in ws_candidates if c and os.path.isdir(os.path.join(c, 'my_map'))), os.path.expanduser('~/ros2_ws'))
     ws_src_dir = os.path.join(workspace_root, 'src')
     ws_install_dir = os.path.join(workspace_root, 'install')
     map_models_dir = os.path.join(workspace_root, 'my_map')

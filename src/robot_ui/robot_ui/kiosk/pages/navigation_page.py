@@ -21,8 +21,11 @@ Features:
 """
 from __future__ import annotations
 
+import html
 import math
+import time
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -40,10 +43,14 @@ from PyQt5.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QTextCursor,
 )
 from PyQt5.QtWidgets import (
+    QDialog,
+    QDoubleSpinBox,
     QFrame,
     QGraphicsOpacityEffect,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -51,9 +58,11 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -201,6 +210,7 @@ class InteractiveNavMapWidget(QWidget):
 
     goal_selected = pyqtSignal(float, float, float)     # (x, y, yaw)
     waypoint_picked = pyqtSignal(float, float, float)   # (x, y, yaw)
+    initial_pose_picked = pyqtSignal(float, float, float) # (x, y, yaw)
     invalid_goal = pyqtSignal(str)
 
     def __init__(
@@ -224,6 +234,15 @@ class InteractiveNavMapWidget(QWidget):
         self._batch_waypoints: list[dict[str, Any]] = []
         self._pick_mode = False
 
+        # Initial Pose Picking Mode (RViz-style 2D Pose Estimate: Press -> Drag -> Release)
+        self._initial_pose_mode = False
+        self._is_dragging_pose = False
+        self._estimate_start_world: tuple[float, float] | None = None
+        self._estimate_start_screen: QPointF | None = None
+        self._estimate_current_screen: QPointF | None = None
+        self._estimate_yaw: float = 0.0
+        self._candidate_initial_pose: dict[str, float] | None = None
+
         # Sensor points in world frame (map coordinates)
         self._scan_points: list[tuple[float, float]] = []
         self._front_obs_points: list[tuple[float, float]] = []
@@ -238,6 +257,9 @@ class InteractiveNavMapWidget(QWidget):
         self._selection_enabled = True
         self._is_active = True
         self._map_dirty = False
+        self._last_pose_paint_time: float = 0.0
+        self._last_scan_paint_time: float = 0.0
+        self._last_obs_paint_time: float = 0.0
 
         self._goal_icon = QPixmap(str(goal_icon)) if goal_icon is not None else QPixmap()
         if not self._goal_icon.isNull():
@@ -375,7 +397,10 @@ class InteractiveNavMapWidget(QWidget):
     def set_pose(self, pose: dict[str, Any]) -> None:
         self._pose = pose
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_pose_paint_time >= 0.066:  # Giới hạn tối đa 15 Hz repaint
+                self._last_pose_paint_time = now
+                self.update()
 
     def set_path(self, path: list[list[float]]) -> None:
         self._path = path
@@ -408,6 +433,36 @@ class InteractiveNavMapWidget(QWidget):
         if self._is_active:
             self.update()
 
+    def set_initial_pose_mode(self, enabled: bool) -> None:
+        """Kích hoạt chế độ 2D Pose Estimate (Press -> Drag -> Release)."""
+        self._initial_pose_mode = enabled
+        self._is_dragging_pose = False
+        self._estimate_start_world = None
+        self._estimate_start_screen = None
+        self._estimate_current_screen = None
+        self.setCursor(Qt.CrossCursor if enabled else Qt.PointingHandCursor)
+        if not enabled:
+            self._candidate_initial_pose = None
+        if self._is_active:
+            self.update()
+
+    def set_estimate_mode(self, enabled: bool) -> None:
+        """Alias cho set_initial_pose_mode tương thích reference simulator."""
+        self.set_initial_pose_mode(enabled)
+
+    def set_candidate_initial_pose(self, x: float | None, y: float | None, yaw: float | None = 0.0) -> None:
+        """Lưu và hiển thị preview điểm định vị ứng viên trên bản đồ."""
+        if x is None or y is None:
+            self._candidate_initial_pose = None
+        else:
+            self._candidate_initial_pose = {
+                "x": float(x),
+                "y": float(y),
+                "yaw": float(yaw or 0.0),
+            }
+        if self._is_active:
+            self.update()
+
     def set_selection_enabled(self, enabled: bool) -> None:
         self._selection_enabled = enabled
         if not self._pick_mode:
@@ -416,7 +471,10 @@ class InteractiveNavMapWidget(QWidget):
     def set_scan_points(self, points: list[tuple[float, float]]) -> None:
         self._scan_points = points
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_scan_paint_time >= 0.10:  # Giới hạn tối đa 10 Hz repaint
+                self._last_scan_paint_time = now
+                self.update()
 
     def set_obstacle_points(self, side: str, points: list[tuple[float, float]]) -> None:
         if side == "front":
@@ -424,7 +482,10 @@ class InteractiveNavMapWidget(QWidget):
         elif side == "rear":
             self._rear_obs_points = points
         if self._is_active:
-            self.update()
+            now = time.monotonic()
+            if now - self._last_obs_paint_time >= 0.125:  # Giới hạn tối đa 8 Hz repaint
+                self._last_obs_paint_time = now
+                self.update()
 
     # -------------------------------------------------------------------------
     # Coordinate Transforms with Zoom & Pan
@@ -480,7 +541,7 @@ class InteractiveNavMapWidget(QWidget):
         sy = target.bottom() - (cell_y / ph) * target.height()
         return QPointF(sx, sy)
 
-    def _screen_to_world(self, point: QPointF, target: QRectF) -> tuple[float, float] | None:
+    def _screen_to_world(self, point: QPointF, target: QRectF, check_free: bool = True) -> tuple[float, float] | None:
         if not self._map or not target.contains(point):
             return None
         pw = int(self._map.get("preview_width", 0))
@@ -496,11 +557,12 @@ class InteractiveNavMapWidget(QWidget):
         iy = min(ph - 1, max(0, int(cell_y)))
 
         # Free space validation check
-        cells = self._map.get("cells", [])
-        idx = iy * pw + ix
-        if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
-            self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
-            return None
+        if check_free:
+            cells = self._map.get("cells", [])
+            idx = iy * pw + ix
+            if idx >= len(cells) or int(cells[idx]) < 0 or int(cells[idx]) >= 50:
+                self.invalid_goal.emit("Vùng chọn rơi vào vật cản hoặc chưa rõ bản đồ")
+                return None
 
         dist_x = cell_x * res * step
         dist_y = cell_y * res * step
@@ -530,33 +592,54 @@ class InteractiveNavMapWidget(QWidget):
             event.accept()
             return
 
-        if event.button() == Qt.LeftButton and self._selection_enabled:
+        if event.button() == Qt.LeftButton:
             target = self._transformed_map_rect()
-            world = self._screen_to_world(QPointF(event.pos()), target)
-            if world is None:
+            if target.isEmpty() or not target.contains(QPointF(event.pos())):
                 return
-            wx, wy = world
 
-            if self._pick_mode:
-                # Mode: Batch Waypoint Picking for Patrol Route
-                yaw = 0.0
-                if self._batch_waypoints:
-                    last_wp = self._batch_waypoints[-1]
-                    dx = wx - float(last_wp.get("x", 0.0))
-                    dy = wy - float(last_wp.get("y", 0.0))
-                    yaw = math.atan2(dy, dx)
-                self.waypoint_picked.emit(wx, wy, yaw)
-            else:
-                # Mode: Single Goal Selection
-                if self._pose:
-                    rx = float(self._pose.get("x", wx))
-                    ry = float(self._pose.get("y", wy))
-                    yaw = math.atan2(wy - ry, wx - rx)
-                else:
+            if self._initial_pose_mode:
+                # Mode: RViz 2D Pose Estimate (Bắt đầu Press -> Drag)
+                world = self._screen_to_world(QPointF(event.pos()), target, check_free=True)
+                if world is None:
+                    return
+                wx, wy = world
+                fallback_yaw = float(self._pose.get("yaw", 0.0)) if self._pose else 0.0
+                self._is_dragging_pose = True
+                self._estimate_start_world = (wx, wy)
+                self._estimate_start_screen = QPointF(event.pos())
+                self._estimate_current_screen = QPointF(event.pos())
+                self._estimate_yaw = fallback_yaw
+                self.set_candidate_initial_pose(wx, wy, fallback_yaw)
+                self.update()
+                event.accept()
+                return
+
+            if self._selection_enabled:
+                world = self._screen_to_world(QPointF(event.pos()), target, check_free=True)
+                if world is None:
+                    return
+                wx, wy = world
+
+                if self._pick_mode:
+                    # Mode: Batch Waypoint Picking for Patrol Route
                     yaw = 0.0
-                self.set_goal(wx, wy, yaw)
-                self.goal_selected.emit(wx, wy, yaw)
-            event.accept()
+                    if self._batch_waypoints:
+                        last_wp = self._batch_waypoints[-1]
+                        dx = wx - float(last_wp.get("x", 0.0))
+                        dy = wy - float(last_wp.get("y", 0.0))
+                        yaw = math.atan2(dy, dx)
+                    self.waypoint_picked.emit(wx, wy, yaw)
+                else:
+                    # Mode: Single Goal Selection
+                    if self._pose:
+                        rx = float(self._pose.get("x", wx))
+                        ry = float(self._pose.get("y", wy))
+                        yaw = math.atan2(wy - ry, wx - rx)
+                    else:
+                        yaw = 0.0
+                    self.set_goal(wx, wy, yaw)
+                    self.goal_selected.emit(wx, wy, yaw)
+                event.accept()
 
     def mouseMoveEvent(self, event: Any) -> None:
         if self._is_panning and self._last_pan_pos is not None:
@@ -567,15 +650,74 @@ class InteractiveNavMapWidget(QWidget):
             self.update()
             event.accept()
             return
+
+        if self._initial_pose_mode and self._is_dragging_pose and self._estimate_start_screen is not None:
+            curr_pos = QPointF(event.pos())
+            self._estimate_current_screen = curr_pos
+            dx_scr = curr_pos.x() - self._estimate_start_screen.x()
+            dy_scr = curr_pos.y() - self._estimate_start_screen.y()
+            drag_dist_scr = math.hypot(dx_scr, dy_scr)
+
+            if drag_dist_scr >= 8.0:
+                target = self._transformed_map_rect()
+                if not target.isEmpty():
+                    pw = float(self._map.get("preview_width", 1)) if self._map else 1.0
+                    ph = float(self._map.get("preview_height", 1)) if self._map else 1.0
+                    res = float(self._map.get("resolution", 0.05)) if self._map else 0.05
+                    step = int(self._map.get("sample_step", 1)) if self._map else 1
+                    oyaw = float(self._map.get("origin_yaw", 0.0)) if self._map else 0.0
+
+                    d_cell_x = (dx_scr / target.width()) * pw
+                    d_cell_y = (-dy_scr / target.height()) * ph
+                    d_dist_x = d_cell_x * res * step
+                    d_dist_y = d_cell_y * res * step
+
+                    cos_y = math.cos(oyaw)
+                    sin_y = math.sin(oyaw)
+                    dwx = cos_y * d_dist_x - sin_y * d_dist_y
+                    dwy = sin_y * d_dist_x + cos_y * d_dist_y
+
+                    if math.hypot(dwx, dwy) > 0.02:
+                        self._estimate_yaw = math.atan2(dwy, dwx)
+
+            if self._estimate_start_world:
+                self.set_candidate_initial_pose(
+                    self._estimate_start_world[0],
+                    self._estimate_start_world[1],
+                    self._estimate_yaw,
+                )
+            self.update()
+            event.accept()
+            return
+
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: Any) -> None:
         if event.button() in (Qt.RightButton, Qt.MiddleButton) and self._is_panning:
             self._is_panning = False
             self._last_pan_pos = None
-            self.setCursor(Qt.CrossCursor if self._pick_mode else Qt.PointingHandCursor)
+            self.setCursor(Qt.CrossCursor if (self._pick_mode or self._initial_pose_mode) else Qt.PointingHandCursor)
             event.accept()
             return
+
+        if event.button() == Qt.LeftButton and self._initial_pose_mode and self._is_dragging_pose:
+            self._is_dragging_pose = False
+            start_world = self._estimate_start_world
+            yaw = self._estimate_yaw
+
+            self._estimate_start_world = None
+            self._estimate_start_screen = None
+            self._estimate_current_screen = None
+
+            if start_world is not None:
+                wx, wy = start_world
+                self.set_candidate_initial_pose(wx, wy, yaw)
+                self.initial_pose_picked.emit(wx, wy, yaw)
+
+            self.set_initial_pose_mode(False)
+            event.accept()
+            return
+
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: Any) -> None:
@@ -748,6 +890,83 @@ class InteractiveNavMapWidget(QWidget):
                     painter.setBrush(QColor("#f43f5e"))
                     painter.drawEllipse(gpt, 8, 8)
 
+        # 9. Candidate Initial Pose Preview (RViz-style Green Arrow & Badge)
+        if self._candidate_initial_pose:
+            cpt = self._world_to_screen(
+                float(self._candidate_initial_pose.get("x", 0.0)),
+                float(self._candidate_initial_pose.get("y", 0.0)),
+                target,
+            )
+            if cpt is not None and self.rect().contains(cpt.toPoint()):
+                yaw = float(self._candidate_initial_pose.get("yaw", 0.0))
+                deg = math.degrees(yaw)
+
+                # Chiều dài hiển thị mũi tên trên màn hình
+                arrow_len = 45.0
+                if self._is_dragging_pose and self._estimate_start_screen and self._estimate_current_screen:
+                    drag_len = math.hypot(
+                        self._estimate_current_screen.x() - self._estimate_start_screen.x(),
+                        self._estimate_current_screen.y() - self._estimate_start_screen.y(),
+                    )
+                    arrow_len = max(35.0, min(140.0, drag_len))
+
+                # Hướng vector trên màn hình từ hệ tọa độ thế giới (đảm bảo đúng xoay map)
+                tip_world_x = float(self._candidate_initial_pose["x"]) + 0.5 * math.cos(yaw)
+                tip_world_y = float(self._candidate_initial_pose["y"]) + 0.5 * math.sin(yaw)
+                tip_scr = self._world_to_screen(tip_world_x, tip_world_y, target)
+                if tip_scr is not None:
+                    v_dx = tip_scr.x() - cpt.x()
+                    v_dy = tip_scr.y() - cpt.y()
+                    v_norm = math.hypot(v_dx, v_dy)
+                    if v_norm > 1e-4:
+                        dir_x = v_dx / v_norm
+                        dir_y = v_dy / v_norm
+                    else:
+                        dir_x = math.cos(yaw)
+                        dir_y = -math.sin(yaw)
+                else:
+                    dir_x = math.cos(yaw)
+                    dir_y = -math.sin(yaw)
+
+                arrow_tip = QPointF(cpt.x() + arrow_len * dir_x, cpt.y() + arrow_len * dir_y)
+
+                # Vòng tròn đế (Base Circle)
+                painter.setPen(QPen(QColor("#10b981"), 2, Qt.DashLine if self._is_dragging_pose else Qt.SolidLine))
+                painter.setBrush(QColor(16, 185, 129, 65 if self._is_dragging_pose else 40))
+                painter.drawEllipse(cpt, 16, 16)
+
+                painter.setPen(QPen(QColor("#ffffff"), 2))
+                painter.setBrush(QColor("#10b981"))
+                painter.drawEllipse(cpt, 5, 5)
+
+                # Thân mũi tên (Arrow Shaft)
+                painter.setPen(QPen(QColor("#10b981"), 3, Qt.SolidLine, Qt.RoundCap))
+                painter.drawLine(cpt, arrow_tip)
+
+                # Đầu mũi tên (Arrow Head)
+                perp_x = -dir_y
+                perp_y = dir_x
+                head_len = 12.0
+                head_w = 6.0
+                p_head_base = QPointF(arrow_tip.x() - head_len * dir_x, arrow_tip.y() - head_len * dir_y)
+                wing1 = QPointF(p_head_base.x() + head_w * perp_x, p_head_base.y() + head_w * perp_y)
+                wing2 = QPointF(p_head_base.x() - head_w * perp_x, p_head_base.y() - head_w * perp_y)
+                painter.setPen(QPen(QColor("#ffffff"), 1))
+                painter.setBrush(QColor("#10b981"))
+                poly_head = QPolygonF([arrow_tip, wing1, wing2])
+                painter.drawPolygon(poly_head)
+
+                # Nhãn tọa độ HUD
+                b_text = f"[2D POSE] ({self._candidate_initial_pose['x']:.2f}, {self._candidate_initial_pose['y']:.2f}, {deg:.0f}°)"
+                painter.setFont(QFont("Sans Serif", 9, QFont.Bold))
+                tw = painter.fontMetrics().horizontalAdvance(b_text) + 12
+                b_rect = QRectF(cpt.x() - tw / 2.0, cpt.y() - 32, tw, 20)
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(15, 23, 42, 230))
+                painter.drawRoundedRect(b_rect, 4, 4)
+                painter.setPen(QColor("#38bdf8"))
+                painter.drawText(b_rect, Qt.AlignCenter, b_text)
+
         painter.restore()
 
         # Border
@@ -756,7 +975,9 @@ class InteractiveNavMapWidget(QWidget):
 
         # Zoom & Status HUD in bottom-left corner
         hud_text = f"Zoom: {self._zoom_factor:.1f}x"
-        if self._pick_mode:
+        if self._initial_pose_mode:
+            hud_text += " | [2D POSE] (Chạm & kéo)"
+        elif self._pick_mode:
             hud_text += f" | Đang chấm điểm ({len(self._batch_waypoints)} điểm)"
         painter.setPen(Qt.NoPen)
         painter.setBrush(QColor(17, 20, 24, 190))
@@ -772,6 +993,284 @@ class InteractiveNavMapWidget(QWidget):
 MapWidget = InteractiveNavMapWidget
 
 
+class InitialPoseDialog(QDialog):
+    """Hộp thoại thiết lập vị trí ban đầu cho AMCL định vị robot (2D Pose Estimate)."""
+
+    pose_confirmed = pyqtSignal(float, float, float, str)  # (x, y, yaw, source)
+    pick_on_map_requested = pyqtSignal()
+
+    def __init__(
+        self,
+        current_map_path: Path | None,
+        loc_state: str,
+        loc_msg: str,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Định vị Robot - Initial Pose")
+        self.setModal(True)
+        self.resize(520, 500)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0f1318;
+                color: #f8fafc;
+                border: 1px solid #242c36;
+                border-radius: 12px;
+            }
+            QLabel {
+                color: #e2e8f0;
+            }
+            QGroupBox {
+                border: 1px solid #242c36;
+                border-radius: 10px;
+                margin-top: 14px;
+                padding: 12px 10px 10px 10px;
+                font-size: 13px;
+                font-weight: 700;
+                color: #f6c16a;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 14px;
+                padding: 0 4px;
+            }
+            QPushButton {
+                background: #171c22;
+                color: #f8fafc;
+                border: 1px solid #242c36;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+            QPushButton:hover {
+                background: #242c36;
+                border-color: #f6c16a;
+            }
+            QPushButton#primaryActionBtn {
+                background: #10b981;
+                color: #ffffff;
+                font-weight: 700;
+                border: none;
+            }
+            QPushButton#primaryActionBtn:hover {
+                background: #059669;
+            }
+            QPushButton#closeBtn {
+                background: #334155;
+                color: #ffffff;
+            }
+            QDoubleSpinBox {
+                background: #171c22;
+                color: #ffffff;
+                border: 1px solid #334155;
+                border-radius: 6px;
+                padding: 4px 8px;
+                font-size: 13px;
+            }
+            QSlider::groove:horizontal {
+                height: 6px;
+                background: #242c36;
+                border-radius: 3px;
+            }
+            QSlider::sub-page:horizontal {
+                background: #38bdf8;
+                border-radius: 3px;
+            }
+            QSlider::handle:horizontal {
+                background: #f6c16a;
+                width: 18px;
+                margin-top: -6px;
+                margin-bottom: -6px;
+                border-radius: 9px;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Header
+        lbl_title = QLabel("THIẾT LẬP VỊ TRÍ BAN ĐẦU (INITIAL POSE)")
+        lbl_title.setStyleSheet("font-size: 16px; font-weight: 800; color: #f8fafc;")
+        layout.addWidget(lbl_title)
+
+        lbl_desc = QLabel("AMCL cần tọa độ xuất phát chính xác để thiết lập liên kết TF map -> odom.")
+        lbl_desc.setStyleSheet("font-size: 12px; color: #94a3b8;")
+        lbl_desc.setWordWrap(True)
+        layout.addWidget(lbl_desc)
+
+        # Status row
+        status_box = QFrame()
+        status_box.setStyleSheet("background: #171c22; border-radius: 8px; padding: 6px 10px;")
+        s_layout = QHBoxLayout(status_box)
+        s_layout.setContentsMargins(8, 4, 8, 4)
+        lbl_st_title = QLabel("Trạng thái hiện tại:")
+        lbl_st_title.setStyleSheet("font-size: 12px; font-weight: 600; color: #cbd5e1;")
+        self.lbl_curr_status = QLabel(f"{loc_state}: {loc_msg}")
+        self.lbl_curr_status.setStyleSheet("font-size: 12px; font-weight: 700; color: #38bdf8;")
+        s_layout.addWidget(lbl_st_title)
+        s_layout.addWidget(self.lbl_curr_status, 1)
+        layout.addWidget(status_box)
+
+        self._start_wp: dict[str, Any] | None = None
+        self._current_map_path = current_map_path
+
+        # Option 1: Waypoint 'khoihanh'
+        grp_start = QGroupBox("Cách 1: Đặt tại Điểm Xuất Phát (khoihanh)")
+        g1_layout = QVBoxLayout(grp_start)
+        g1_layout.setSpacing(8)
+
+        self.lbl_wp_info = QLabel("Đang tìm cấu hình waypoint xuất phát...")
+        self.lbl_wp_info.setStyleSheet("color: #cbd5e1; font-size: 12px;")
+        self.lbl_wp_info.setWordWrap(True)
+        g1_layout.addWidget(self.lbl_wp_info)
+
+        self.btn_apply_start = QPushButton("XÁC NHẬN ĐẶT TẠI KHOIHÀNH")
+        self.btn_apply_start.setObjectName("primaryActionBtn")
+        self.btn_apply_start.clicked.connect(self._on_apply_start_clicked)
+        g1_layout.addWidget(self.btn_apply_start)
+        layout.addWidget(grp_start)
+
+        # Option 2: Manual Coordinates / Pick on Map
+        grp_manual = QGroupBox("Cách 2: Chọn Trên Bản Đồ Hoặc Chỉnh Tọa Độ Thủ Công")
+        g2_layout = QVBoxLayout(grp_manual)
+        g2_layout.setSpacing(8)
+
+        coord_row = QHBoxLayout()
+        coord_row.addWidget(QLabel("X (m):"))
+        self.spn_x = QDoubleSpinBox()
+        self.spn_x.setRange(-100.0, 100.0)
+        self.spn_x.setSingleStep(0.05)
+        self.spn_x.setDecimals(3)
+        coord_row.addWidget(self.spn_x)
+
+        coord_row.addWidget(QLabel("Y (m):"))
+        self.spn_y = QDoubleSpinBox()
+        self.spn_y.setRange(-100.0, 100.0)
+        self.spn_y.setSingleStep(0.05)
+        self.spn_y.setDecimals(3)
+        coord_row.addWidget(self.spn_y)
+        g2_layout.addLayout(coord_row)
+
+        yaw_title_row = QHBoxLayout()
+        yaw_title_row.addWidget(QLabel("Hướng Robot (Yaw):"))
+        self.lbl_yaw_val = QLabel("0.0° (0.00 rad)")
+        self.lbl_yaw_val.setStyleSheet("color: #38bdf8; font-weight: 700;")
+        yaw_title_row.addWidget(self.lbl_yaw_val, 1)
+        g2_layout.addLayout(yaw_title_row)
+
+        self.slider_yaw = QSlider(Qt.Horizontal)
+        self.slider_yaw.setRange(-180, 180)
+        self.slider_yaw.setValue(0)
+        self.slider_yaw.valueChanged.connect(self._on_yaw_slider_changed)
+        g2_layout.addWidget(self.slider_yaw)
+
+        # Quick Yaw Buttons: 0, 90, 180, -90
+        q_row = QHBoxLayout()
+        q_row.setSpacing(6)
+        for deg, txt in [(0, "0° (Đông)"), (90, "90° (Bắc)"), (180, "180° (Tây)"), (-90, "-90° (Nam)")]:
+            btn_q = QPushButton(txt)
+            btn_q.setStyleSheet("font-size: 11px; padding: 4px 6px;")
+            btn_q.clicked.connect(partial(self.slider_yaw.setValue, deg))
+            q_row.addWidget(btn_q)
+        g2_layout.addLayout(q_row)
+
+        btns_row = QHBoxLayout()
+        self.btn_pick_map = QPushButton("CHỌN TRỰC TIẾP TRÊN MAP")
+        self.btn_pick_map.clicked.connect(self._on_pick_map_clicked)
+        btns_row.addWidget(self.btn_pick_map)
+
+        self.btn_apply_manual = QPushButton("XÁC NHẬN VỊ TRÍ NÀY")
+        self.btn_apply_manual.setObjectName("primaryActionBtn")
+        self.btn_apply_manual.clicked.connect(self._on_apply_manual_clicked)
+        btns_row.addWidget(self.btn_apply_manual)
+        g2_layout.addLayout(btns_row)
+
+        layout.addWidget(grp_manual)
+
+        # Bottom Close Button
+        btn_close = QPushButton("ĐÓNG / HỦY")
+        btn_close.setObjectName("closeBtn")
+        btn_close.clicked.connect(self.reject)
+        layout.addWidget(btn_close)
+
+        self._load_khoihanh_waypoint()
+
+    def _load_khoihanh_waypoint(self) -> None:
+        if not self._current_map_path:
+            self.lbl_wp_info.setText("Chưa có bản đồ nào được nạp vào hệ thống!")
+            self.btn_apply_start.setEnabled(False)
+            return
+
+        stem = self._current_map_path.stem
+        candidates = [
+            self._current_map_path.parent / f"{stem}_waypoints.yaml",
+            _find_config_dir().parent / "my_map" / f"{stem}_waypoints.yaml",
+            _find_config_dir() / "locations.yaml",
+        ]
+        found = None
+        for c in candidates:
+            if c.is_file():
+                try:
+                    with c.open("r", encoding="utf-8") as f:
+                        data = yaml.safe_load(f) or {}
+                    locs = data.get("locations", {}) if "locations" in data else data
+                    if isinstance(locs, dict) and "khoihanh" in locs:
+                        kh = locs["khoihanh"]
+                        if isinstance(kh, dict) and "x" in kh and "y" in kh:
+                            found = {
+                                "x": float(kh.get("x", 0.0)),
+                                "y": float(kh.get("y", 0.0)),
+                                "yaw": float(kh.get("yaw", 0.0)),
+                                "note": str(kh.get("note", "Điểm xuất phát")),
+                                "file": c.name,
+                            }
+                            break
+                except Exception:
+                    pass
+
+        if found:
+            self._start_wp = found
+            deg = math.degrees(found["yaw"])
+            self.lbl_wp_info.setText(
+                f"Tọa độ: X={found['x']:.2f} m, Y={found['y']:.2f} m, Yaw={found['yaw']:.2f} rad ({deg:.0f}°)\n"
+                f"Ghi chú: {found['note']} (nguồn: {found['file']})"
+            )
+            self.btn_apply_start.setEnabled(True)
+            self.spn_x.setValue(found["x"])
+            self.spn_y.setValue(found["y"])
+            self.slider_yaw.setValue(int(deg))
+        else:
+            self.lbl_wp_info.setText(f"Bản đồ '{stem}' chưa cấu hình điểm 'khoihanh'. Vui lòng chọn thủ công.")
+            self.btn_apply_start.setEnabled(False)
+
+    def _on_yaw_slider_changed(self, deg: int) -> None:
+        rad = math.radians(deg)
+        self.lbl_yaw_val.setText(f"{deg:.1f}° ({rad:.2f} rad)")
+
+    def _on_apply_start_clicked(self) -> None:
+        if self._start_wp:
+            self.pose_confirmed.emit(
+                self._start_wp["x"],
+                self._start_wp["y"],
+                self._start_wp["yaw"],
+                "start_waypoint",
+            )
+            self.accept()
+
+    def _on_apply_manual_clicked(self) -> None:
+        x = self.spn_x.value()
+        y = self.spn_y.value()
+        yaw = math.radians(self.slider_yaw.value())
+        self.pose_confirmed.emit(x, y, yaw, "manual_dialog")
+        self.accept()
+
+    def _on_pick_map_clicked(self) -> None:
+        self.pick_on_map_requested.emit()
+        self.accept()
+
+
 class NavigationPage(QWidget):
     """Full-featured Kiosk Navigation & Patrol Dashboard."""
 
@@ -784,6 +1283,7 @@ class NavigationPage(QWidget):
     start_patrol_requested = pyqtSignal()
     pause_patrol_requested = pyqtSignal()
     reload_route_requested = pyqtSignal()
+    initial_pose_requested = pyqtSignal(dict)  # {"x": float, "y": float, "yaw": float, "source": str, "map_name": str}
 
     def __init__(self, icons: dict[str, Path | None], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -797,6 +1297,10 @@ class NavigationPage(QWidget):
         self._batch_waypoints: list[dict[str, Any]] = []
         self._current_map_path: Path | None = None
         self._is_active = True
+        self._localization_state = "NOT_INITIALIZED"
+        self._localization_message = "Chưa định vị"
+        self._last_log_feedback_time = 0.0
+        self.patrol_log_text: QTextEdit | None = None
 
         self._init_ui()
         default_map = Path("my_map/a2_amcl.yaml")
@@ -1129,6 +1633,11 @@ class NavigationPage(QWidget):
         self.btn_tab_patrol.style().unpolish(self.btn_tab_patrol)
         self.btn_tab_patrol.style().polish(self.btn_tab_patrol)
 
+        # Kích hoạt chỉ widget bản đồ của tab hiển thị để tối ưu hóa render
+        page_active = getattr(self, "_is_active", True)
+        self.map_widget.set_active(page_active and index == 0)
+        self.patrol_map_widget.set_active(page_active and index == 1)
+
         # Sync batch waypoints to map
         if index == 0:
             self.map_widget.set_pick_mode(False)
@@ -1162,6 +1671,7 @@ class NavigationPage(QWidget):
         self.map_widget = InteractiveNavMapWidget(self.icons.get("goal"))
         self.map_widget.goal_selected.connect(self._on_single_goal_selected)
         self.map_widget.invalid_goal.connect(self._show_warning)
+        self.map_widget.initial_pose_picked.connect(self._on_map_initial_pose_picked)
         layout.addWidget(self.map_widget, 1)
 
         # Bottom Progress & Control Card
@@ -1247,7 +1757,22 @@ class NavigationPage(QWidget):
             self.stop_button.setIconSize(QSize(24, 24))
         self.stop_button.clicked.connect(self._stop_navigation)
 
+        self.lbl_localization_badge = QLabel("● CHƯA ĐỊNH VỊ")
+        self.lbl_localization_badge.setObjectName("navLocBadge")
+        self.lbl_localization_badge.setStyleSheet(
+            "background: rgba(239, 68, 68, 0.2); color: #ef4444; "
+            "border: 1px solid #ef4444; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+        )
+
+        self.btn_initial_pose = QPushButton("2D POSE ESTIMATE")
+        self.btn_initial_pose.setObjectName("navToolBtn")
+        self.btn_initial_pose.setToolTip("Kích hoạt chọn vị trí và hướng robot (2D Pose Estimate) trực tiếp trên bản đồ")
+        self.btn_initial_pose.clicked.connect(self._toggle_2d_estimate)
+        self.btn_2d_estimate = self.btn_initial_pose
+
         action_row.addWidget(self.status_label, 1)
+        action_row.addWidget(self.lbl_localization_badge)
+        action_row.addWidget(self.btn_initial_pose)
         action_row.addWidget(self.start_button)
         action_row.addWidget(self.stop_button)
         dash_layout.addLayout(action_row)
@@ -1384,7 +1909,51 @@ class NavigationPage(QWidget):
         self.table_waypoints.setHorizontalHeaderLabels(["Tên điểm", "X (m)", "Y (m)", "Ghi chú"])
         self.table_waypoints.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.table_waypoints.verticalHeader().setVisible(False)
-        t_layout.addWidget(self.table_waypoints, 1)
+        self.table_waypoints.cellClicked.connect(self._on_waypoint_cell_clicked)
+        t_layout.addWidget(self.table_waypoints, 3)
+
+        # Log Console under waypoint table
+        log_head = QHBoxLayout()
+        lbl_log_title = QLabel("[NHẬT KÝ ĐIỀU HƯỚNG & TUẦN TRA]")
+        lbl_log_title.setStyleSheet("color: #38bdf8; font-size: 11px; font-weight: 800;")
+        log_head.addWidget(lbl_log_title)
+        log_head.addStretch(1)
+
+        self.btn_clear_patrol_log = QPushButton("Xóa Log")
+        self.btn_clear_patrol_log.setStyleSheet("""
+            QPushButton {
+                background: #171c22;
+                color: #94a3b8;
+                border: 1px solid #242c36;
+                border-radius: 4px;
+                font-size: 10px;
+                font-weight: 700;
+                padding: 2px 8px;
+            }
+            QPushButton:hover {
+                background: #242c36;
+                color: #ffffff;
+            }
+        """)
+        self.btn_clear_patrol_log.clicked.connect(self._clear_patrol_log)
+        log_head.addWidget(self.btn_clear_patrol_log)
+        t_layout.addLayout(log_head)
+
+        self.patrol_log_text = QTextEdit()
+        self.patrol_log_text.setReadOnly(True)
+        self.patrol_log_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #0b0f14;
+                color: #e2e8f0;
+                border: 1px solid #242c36;
+                border-radius: 6px;
+                font-family: 'DejaVu Sans Mono', 'Ubuntu Mono', 'Monospace', monospace;
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 6px;
+            }
+        """)
+        t_layout.addWidget(self.patrol_log_text, 2)
 
         right_box.addWidget(table_card, 1)
         root_layout.addLayout(right_box, 2)
@@ -1446,6 +2015,10 @@ class NavigationPage(QWidget):
         self.btn_pick_mode.setText(f"Chấm điểm trên Map: {'ON' if enabled else 'OFF'}")
         self.btn_pick_mode.style().unpolish(self.btn_pick_mode)
         self.btn_pick_mode.style().polish(self.btn_pick_mode)
+        if enabled:
+            self.append_patrol_log("[WAYPOINT][INFO] Đã bật chế độ chấm điểm tuần tra (Chạm lên map để thêm điểm).", "progress")
+        else:
+            self.append_patrol_log("[WAYPOINT][INFO] Đã tắt chế độ chấm điểm trên bản đồ.", "info")
 
     def _on_waypoint_picked_on_map(self, x: float, y: float, yaw: float) -> None:
         idx = len(self._batch_waypoints)
@@ -1461,16 +2034,60 @@ class NavigationPage(QWidget):
         self._batch_waypoints.append(new_wp)
         recompute_cyclic_waypoint_yaws(self._batch_waypoints)
         self._sync_views_from_waypoints()
+        self.append_patrol_log(f"[WAYPOINT][INFO] Đã thêm điểm '{name}': X={x:.3f}, Y={y:.3f} m", "success")
 
     def _undo_batch_waypoint(self) -> None:
         if self._batch_waypoints:
-            self._batch_waypoints.pop()
+            popped = self._batch_waypoints.pop()
             recompute_cyclic_waypoint_yaws(self._batch_waypoints)
             self._sync_views_from_waypoints()
+            p_name = popped.get("name", "gần nhất")
+            self.append_patrol_log(f"[WAYPOINT][WARN] Đã xóa điểm '{p_name}'.", "warning")
 
     def _clear_batch_waypoints(self) -> None:
         self._batch_waypoints.clear()
         self._sync_views_from_waypoints()
+        self.append_patrol_log("[WAYPOINT][WARN] Đã xóa toàn bộ danh sách điểm tuần tra.", "warning")
+
+    def _on_waypoint_cell_clicked(self, row: int, column: int) -> None:
+        """Xử lý khi người dùng chạm vào một hàng waypoint trong bảng."""
+        if 0 <= row < len(self._batch_waypoints):
+            wp = self._batch_waypoints[row]
+            name = str(wp.get("name", f"point_{row}"))
+            x = float(wp.get("x", 0.0))
+            y = float(wp.get("y", 0.0))
+            yaw = float(wp.get("yaw", 0.0))
+            self._goal = (x, y, yaw)
+            self.map_widget.set_goal(x, y, yaw)
+            self._set_button_strength(self.start_button, True)
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã chọn waypoint '{name}' trên bảng: X={x:.3f}, Y={y:.3f}",
+                "info"
+            )
+
+    def append_patrol_log(self, text: str, tone: str = "info") -> None:
+        """Ghi dòng nhật ký mới vào khung log tuần tra với timestamp và mã màu."""
+        if not hasattr(self, "patrol_log_text") or self.patrol_log_text is None:
+            return
+        t_str = datetime.now().strftime("%H:%M:%S")
+        color_map = {
+            "success": "#10b981",  # Green
+            "error": "#ef4444",    # Red
+            "warning": "#f59e0b",  # Amber/Yellow
+            "progress": "#38bdf8", # Sky blue
+            "info": "#94a3b8",     # Muted slate
+        }
+        color = color_map.get(tone, "#94a3b8")
+        escaped_text = html.escape(text)
+        html_line = f"<span style='color: #64748b;'>[{t_str}]</span> <span style='color: {color}; font-weight: 600;'>{escaped_text}</span>"
+        self.patrol_log_text.append(html_line)
+        self.patrol_log_text.moveCursor(QTextCursor.End)
+
+    def _clear_patrol_log(self) -> None:
+        """Xóa trắng nội dung khung log tuần tra."""
+        if hasattr(self, "patrol_log_text") and self.patrol_log_text is not None:
+            self.patrol_log_text.clear()
+            self.append_patrol_log("[INFO] Đã xóa nhật ký điều hướng.", "info")
 
     def _sync_views_from_waypoints(self) -> None:
         """Update both maps, table, and summary label from current waypoints."""
@@ -1635,6 +2252,7 @@ class NavigationPage(QWidget):
                     "Nạp cấu hình thành công",
                     f"Đã nạp {len(loaded)} điểm tuần tra từ:\n{wp_file.name}",
                 )
+            self.append_patrol_log(f"[WAYPOINT][INFO] Đã nạp {len(loaded)} điểm tuần tra từ file {wp_file.name}.", "info")
             return True
         except Exception as exc:
             if not silent:
@@ -1706,6 +2324,10 @@ class NavigationPage(QWidget):
             self._sync_active_config_files()
             self._sync_views_from_waypoints()
 
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã lưu {len(self._batch_waypoints)} điểm vào {target_wp_file.name}.",
+                "success"
+            )
             QMessageBox.information(
                 self,
                 "Lưu lộ trình thành công",
@@ -1739,26 +2361,166 @@ class NavigationPage(QWidget):
         self._set_button_strength(self.start_button, True)
 
     def _show_warning(self, message: str) -> None:
-        self.status_label.setText(f"Cảnh báo: {message}")
+        self.set_command_status("warning", f"[WARN] {message}")
 
     def _start_single_navigation(self) -> None:
+        self.append_patrol_log("[NAV][INFO] Đã bấm nút: BẮT ĐẦU ĐI.", "progress")
+        if self._localization_state != "LOCALIZED":
+            self.set_command_status(
+                "error",
+                "[ERROR] Robot chưa hoàn tất định vị ban đầu (chưa đạt LOCALIZED). Vui lòng bấm 2D POSE ESTIMATE."
+            )
+            QMessageBox.warning(
+                self,
+                "Chưa Định Vị Robot",
+                "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
+                f"Trạng thái hiện tại: {self._localization_state}.\n"
+                "Vui lòng bấm '2D POSE ESTIMATE' để xác nhận vị trí xuất phát trước khi bắt đầu điều hướng!",
+            )
+            return
         if self._goal is None:
-            self._show_warning("Hãy chọn điểm đến trên bản đồ")
+            self._show_warning("Hãy chọn điểm đến trên bản đồ trước khi bắt đầu điều hướng")
             return
         self.set_navigation_active(True)
+        self.set_command_status(
+            "progress",
+            f"[INFO] Bắt đầu điều hướng tới tọa độ: X={self._goal[0]:.2f}, Y={self._goal[1]:.2f}..."
+        )
         self.start_requested.emit(*self._goal)
 
     def _stop_navigation(self) -> None:
+        self.append_patrol_log("[NAV][WARN] Đã bấm nút: DỪNG HÀNH TRÌNH.", "warning")
         self.set_navigation_active(False)
+        self.set_command_status("warning", "[WARN] Đã yêu cầu dừng hành trình điều hướng.")
         self.cancel_requested.emit()
         self.nav_progress_bar.setValue(0)
         self.lbl_dist_remain.setText("Cự ly còn lại: -- m")
 
     def _start_patrol(self) -> None:
+        self.append_patrol_log("[PATROL][INFO] Đã bấm nút: BẮT ĐẦU TUẦN TRA.", "progress")
+        if self._localization_state != "LOCALIZED":
+            self.set_command_status(
+                "error",
+                "[ERROR] Robot chưa hoàn tất định vị ban đầu. Vui lòng bấm 2D POSE ESTIMATE trước khi tuần tra."
+            )
+            QMessageBox.warning(
+                self,
+                "Chưa Định Vị Robot",
+                "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
+                f"Trạng thái hiện tại: {self._localization_state}.\n"
+                "Vui lòng bấm '2D POSE ESTIMATE' để xác nhận vị trí xuất phát trước khi bắt đầu tuần tra!",
+            )
+            return
+        self.set_command_status("progress", "[INFO] Đang gửi yêu cầu bắt đầu tuần tra...")
         self.start_patrol_requested.emit()
 
     def _pause_patrol(self) -> None:
+        self.append_patrol_log("[PATROL][WARN] Đã bấm nút: TẠM DỪNG TUẦN TRA.", "warning")
         self.pause_patrol_requested.emit()
+
+    def _toggle_2d_estimate(self) -> None:
+        """Bật/tắt chế độ chọn vị trí và hướng robot (2D Pose Estimate) trực tiếp trên bản đồ."""
+        if self.map_widget._initial_pose_mode:
+            self.map_widget.set_initial_pose_mode(False)
+            self.btn_initial_pose.setText("2D POSE ESTIMATE")
+            self.btn_initial_pose.setStyleSheet("")
+            self.append_patrol_log("[ESTIMATE][INFO] Đã hủy chế độ 2D Pose Estimate.", "info")
+            self.set_command_status("warning", "[INFO] Đã hủy chế độ 2D Pose Estimate.")
+            return
+
+        self.map_widget.set_initial_pose_mode(True)
+        self.btn_initial_pose.setText("HỦY 2D POSE")
+        self.btn_initial_pose.setStyleSheet(
+            "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
+        )
+        self.append_patrol_log("[ESTIMATE][INFO] Đã bật chế độ 2D Pose Estimate (Chạm và kéo trên bản đồ).", "progress")
+        self.set_command_status("progress", "[INFO] Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
+
+    def _on_initial_pose_button_clicked(self) -> None:
+        """Alias tương thích luồng cũ."""
+        self._toggle_2d_estimate()
+
+    def _enable_map_pose_pick_mode(self) -> None:
+        """Kích hoạt mode nếu được gọi từ dialog cũ."""
+        self.map_widget.set_initial_pose_mode(True)
+        self.btn_initial_pose.setText("HỦY 2D POSE")
+        self.btn_initial_pose.setStyleSheet(
+            "background: #059669; color: #ffffff; font-weight: 700; border: 1px solid #10b981;"
+        )
+        self.set_command_status("progress", "[INFO] Chạm và kéo trên bản đồ để chọn vị trí và hướng robot.")
+
+    def _on_map_initial_pose_picked(self, x: float, y: float, yaw: float) -> None:
+        """Xử lý khi người dùng hoàn tất thao tác Press -> Drag -> Release trên bản đồ."""
+        self._send_initial_pose(x, y, yaw, "2d_pose_estimate")
+
+    def _on_initial_pose_selected(self, x: float, y: float, yaw: float) -> None:
+        """Alias tương thích reference simulator."""
+        self._on_map_initial_pose_picked(x, y, yaw)
+
+    def _send_initial_pose(self, x: float, y: float, yaw: float, source: str) -> None:
+        map_name = self._current_map_path.name if self._current_map_path else ""
+        deg = math.degrees(yaw)
+        self.set_command_status(
+            "progress",
+            f"[INFO] Đang gửi 2D Pose: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)..."
+        )
+        self.initial_pose_requested.emit({
+            "x": float(x),
+            "y": float(y),
+            "yaw": float(yaw),
+            "source": source,
+            "map_name": map_name,
+        })
+        self.map_widget.set_initial_pose_mode(False)
+        self.map_widget.set_candidate_initial_pose(x, y, yaw)
+        self.btn_initial_pose.setText("2D POSE ESTIMATE")
+        self.btn_initial_pose.setStyleSheet("")
+
+    def set_localization_status(self, state: str, message: str) -> None:
+        """Cập nhật huy hiệu trạng thái Localization và kiểm soát điều kiện điều hướng."""
+        self._localization_state = str(state).upper()
+        self._localization_message = message
+
+        if self._localization_state == "LOCALIZED":
+            self.lbl_localization_badge.setText("● ĐÃ ĐỊNH VỊ (TF OK)")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(16, 185, 129, 0.2); color: #10b981; "
+                "border: 1px solid #10b981; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+            self.status_label.setText(f"Đã định vị thành công: {message}")
+        elif self._localization_state == "TF_AVAILABLE":
+            self.lbl_localization_badge.setText("● ĐANG HỘI TỤ...")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(245, 158, 11, 0.2); color: #f59e0b; "
+                "border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+            self.status_label.setText(f"Có TF map->odom, chờ AMCL hội tụ vị trí: {message}")
+        elif self._localization_state == "WAITING_FOR_LOCALIZATION":
+            self.lbl_localization_badge.setText("● CHỜ AMCL...")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(245, 158, 11, 0.2); color: #f59e0b; "
+                "border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+            self.status_label.setText(f"Đang chờ AMCL định vị: {message}")
+        elif self._localization_state == "PUBLISHING":
+            self.lbl_localization_badge.setText("● ĐANG GỬI POSE...")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(56, 189, 248, 0.2); color: #38bdf8; "
+                "border: 1px solid #38bdf8; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+        else:
+            self.lbl_localization_badge.setText("● CHƯA ĐỊNH VỊ")
+            self.lbl_localization_badge.setStyleSheet(
+                "background: rgba(239, 68, 68, 0.2); color: #ef4444; "
+                "border: 1px solid #ef4444; border-radius: 6px; padding: 4px 8px; font-weight: 700; font-size: 11px;"
+            )
+
+    def on_initial_pose_confirmed(self, data: dict[str, Any]) -> None:
+        """Xác nhận định vị từ AMCL kèm tọa độ thực tế."""
+        x = float(data.get("x", 0.0))
+        y = float(data.get("y", 0.0))
+        cov = float(data.get("covariance_norm", 0.0))
+        self.set_localization_status("LOCALIZED", f"Vị trí: ({x:.2f}, {y:.2f}) | Sai số ước lượng: {cov:.2f}m")
 
     # -------------------------------------------------------------------------
     # Header Badges & Fullscreen
@@ -1834,6 +2596,14 @@ class NavigationPage(QWidget):
         self.lbl_est_time.setText(f"Ước tính: {est_sec:.1f} s")
         self.lbl_recovery_count.setText(f"Tự cứu: {recov} lần")
 
+        now = time.monotonic()
+        if now - self._last_log_feedback_time >= 3.0:
+            self._last_log_feedback_time = now
+            self.append_patrol_log(
+                f"[NAV][DEBUG] Tiến độ: Còn lại {dist:.2f} m | Thời gian chạy: {nav_sec:.1f} s | Ước tính: {est_sec:.1f} s | Tự cứu: {recov}",
+                "progress"
+            )
+
     def load_map_yaml(self, yaml_path: Path | str | None) -> bool:
         """Load and render map from YAML file, and automatically load corresponding map waypoints."""
         map_data = parse_nav_map_yaml(yaml_path)
@@ -1858,8 +2628,9 @@ class NavigationPage(QWidget):
     def set_active(self, active: bool) -> None:
         """Thông báo trạng thái hiển thị của trang Navigation để tối ưu hóa render map."""
         self._is_active = active
-        self.map_widget.set_active(active)
-        self.patrol_map_widget.set_active(active)
+        current_tab = self.stack.currentIndex() if hasattr(self, "stack") else 0
+        self.map_widget.set_active(active and current_tab == 0)
+        self.patrol_map_widget.set_active(active and current_tab == 1)
 
     def set_map(self, map_data: dict[str, Any]) -> None:
         self.map_widget.set_map(map_data)
@@ -1893,7 +2664,16 @@ class NavigationPage(QWidget):
             self.set_navigation_active(False)
 
     def set_command_status(self, tone: str, message: str) -> None:
+        color_map = {
+            "success": "#10b981",  # Green
+            "error": "#ef4444",    # Red
+            "warning": "#f59e0b",  # Amber/Yellow
+            "progress": "#38bdf8", # Sky blue
+        }
+        color = color_map.get(tone, "#94a3b8")
+        self.status_label.setStyleSheet(f"color: {color}; font-weight: 600; font-size: 13px;")
         self.status_label.setText(message)
+        self.append_patrol_log(message, tone)
         if tone in {"success", "error", "warning"}:
             self.set_navigation_active(False)
             if tone == "success":

@@ -10,10 +10,7 @@ from PyQt5.QtCore import QEvent, QTimer, Qt
 from PyQt5.QtGui import QKeyEvent
 from PyQt5.QtWidgets import (
     QApplication,
-    QFrame,
-    QHBoxLayout,
     QMainWindow,
-    QPushButton,
     QStackedWidget,
     QWidget,
 )
@@ -211,16 +208,25 @@ QScrollArea {
     border: none;
 }
 QScrollBar:vertical {
-    width: 8px;
-    background: transparent;
+    width: 28px;
+    background: #0f1318;
+    margin: 0px;
+    border-radius: 6px;
 }
 QScrollBar::handle:vertical {
-    min-height: 28px;
-    background: #cad3d8;
-    border-radius: 4px;
+    min-height: 54px;
+    background: #475569;
+    border-radius: 6px;
+    margin: 3px;
+}
+QScrollBar::handle:vertical:hover, QScrollBar::handle:vertical:pressed {
+    background: #ffb32c;
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-    height: 0;
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 QWidget#navigationPage {
     background: #f7f9fc;
@@ -615,6 +621,7 @@ class KioskWindow(QMainWindow):
         self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
         self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
         self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
+        self.navigation_page.initial_pose_requested.connect(self._on_initial_pose_requested)
         self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.slam_page.home_requested.connect(self.return_to_home)
         self.slam_page.back_requested.connect(self.go_back)
@@ -631,6 +638,8 @@ class KioskWindow(QMainWindow):
         self.system_config_page.start_layer_requested.connect(self.ros_node.start_layer)
         self.system_config_page.stop_layer_requested.connect(self.ros_node.stop_layer)
         self.system_config_page.emergency_cleanup_requested.connect(self.ros_node.cleanup_ros_processes)
+        self.system_config_page.swap_ports_requested.connect(self._on_swap_serial_ports)
+        self.system_config_page.rescan_ports_requested.connect(self._on_rescan_serial_ports)
         self.system_config_page.actuator_test_requested.connect(self.ros_node.test_actuator)
         self.detection_debug_page.home_requested.connect(self.return_to_home)
         self.detection_debug_page.back_requested.connect(self.go_back)
@@ -662,6 +671,8 @@ class KioskWindow(QMainWindow):
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
         signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
+        signals.localization_status_changed.connect(self.navigation_page.set_localization_status)
+        signals.initial_pose_confirmed.connect(self.navigation_page.on_initial_pose_confirmed)
         signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
         signals.scan_points_changed.connect(self.slam_page.set_scan_points)
         signals.obstacle_points_changed.connect(self.navigation_page.set_obstacle_points)
@@ -825,6 +836,21 @@ class KioskWindow(QMainWindow):
             self.idle_page.video.pause()
             if hasattr(self, "_wakeword_worker"):
                 self._wakeword_worker.pause_listening()
+
+        if hasattr(self, "_robot_status") and self._robot_status:
+            if page_id == "navigation":
+                self.navigation_page.set_robot_status(self._robot_status)
+            elif page_id == "admin":
+                self.admin_page.set_robot_status(self._robot_status)
+            elif page_id == "system_config" and hasattr(self, "system_config_page"):
+                self.system_config_page.update_battery_water(self._robot_status, force=True)
+            elif page_id == "detection_debug" and hasattr(self, "detection_debug_page"):
+                bat = self._robot_status.get("battery_percent") or self._robot_status.get("battery")
+                if isinstance(bat, (int, float)):
+                    self.detection_debug_page.update_battery(float(bat))
+            elif page_id == "slam" and hasattr(self, "slam_page"):
+                self.slam_page.set_battery(self._robot_status.get("battery_percent") or self._robot_status.get("battery"))
+
         if page_id == "navigation":
             self.ros_node.request_locations()
             if hasattr(self, "navigation_page"):
@@ -970,6 +996,14 @@ class KioskWindow(QMainWindow):
             self.navigation_page.load_map_yaml(map_path)
         self.show_page("admin")
 
+    def _on_initial_pose_requested(self, payload: dict) -> None:
+        x = float(payload.get("x", 0.0))
+        y = float(payload.get("y", 0.0))
+        yaw = float(payload.get("yaw", 0.0))
+        map_name = str(payload.get("map_name", ""))
+        LOG.info("[UI Navigation] Phát Initial Pose: X=%.2f, Y=%.2f, Yaw=%.2f (Map: %s)", x, y, yaw, map_name)
+        self.ros_node.publish_initial_pose(x, y, yaw, map_name=map_name)
+
     def _on_admin_detection(self) -> None:
         LOG.info("[UI Admin] Mở Detection Debug từ trang Admin.")
         self.show_page("detection_debug")
@@ -977,6 +1011,24 @@ class KioskWindow(QMainWindow):
     def _on_admin_system_status(self) -> None:
         LOG.info("[UI Admin] Mở trang Cấu hình Hệ thống (System Configuration).")
         self.show_page("system_config")
+        self._on_rescan_serial_ports()
+
+    def _on_swap_serial_ports(self) -> None:
+        """Hoán đổi cổng Serial giữa Hoverboard và LiDAR."""
+        esp, lidar, src = self.ros_node.swap_serial_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+
+    def _on_rescan_serial_ports(self) -> None:
+        """Quét và đồng bộ thông tin cổng Serial lên giao diện Kiosk."""
+        esp, lidar, src = self.ros_node.get_detected_ports()
+        if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+            self.system_config_page.ros2_screen.set_detected_ports(esp, lidar, src)
+        if hasattr(self.ros_node, "rescan_serial_ports_async"):
+            def _async_update(e, l, s):
+                if hasattr(self, "system_config_page") and hasattr(self.system_config_page, "ros2_screen"):
+                    self.system_config_page.ros2_screen.set_detected_ports(e, l, s)
+            self.ros_node.rescan_serial_ports_async(_async_update)
 
     def _on_connection(self, connected: bool) -> None:
         self._connected = connected
@@ -988,18 +1040,22 @@ class KioskWindow(QMainWindow):
     def _on_robot_status(self, status: dict[str, Any]) -> None:
         self._robot_status = status
         self._robot_status_received_at = time.monotonic()
-        self.idle_page.set_robot_status(status)
-        self.admin_page.set_robot_status(status)
-        self.navigation_page.set_robot_status(status)
-        if hasattr(self, "slam_page"):
+        active = getattr(self, "_active_page", "")
+        if active == "idle":
+            self.idle_page.set_robot_status(status)
+            self._update_emotion()
+        elif active == "admin":
+            self.admin_page.set_robot_status(status)
+        elif active == "navigation":
+            self.navigation_page.set_robot_status(status)
+        elif active == "slam" and hasattr(self, "slam_page"):
             self.slam_page.set_battery(status.get("battery_percent") or status.get("battery"))
-        if hasattr(self, "system_config_page"):
+        elif active == "system_config" and hasattr(self, "system_config_page"):
             self.system_config_page.update_battery_water(status)
-        if hasattr(self, "detection_debug_page"):
+        elif active == "detection_debug" and hasattr(self, "detection_debug_page"):
             bat = status.get("battery_percent") or status.get("battery")
             if isinstance(bat, (int, float)):
                 self.detection_debug_page.update_battery(float(bat))
-        self._update_emotion()
 
     def _on_navigation_status(self, status: dict[str, Any]) -> None:
         self._navigation_status = status
@@ -1169,14 +1225,26 @@ class KioskWindow(QMainWindow):
                 self.navigation_page.set_wifi(check_wifi_connected())
         if self._active_page == "idle":
             return
+
+        # Giữ màn hình, không bao giờ tự thoát về màn hình chờ khi ở các trang quản trị kỹ thuật
+        if self._active_page in {"admin", "slam", "navigation", "system_config", "detection_debug"}:
+            self._last_activity_at = time.monotonic()
+            return
+
+        # Không thoát phiên khi SLAM đang quét
+        if hasattr(self, "ros_node") and (
+            self.ros_node.is_layer_running("layer3")
+            or (getattr(self.ros_node, "_slam_proc", None) is not None and self.ros_node._slam_proc.poll() is None)
+        ):
+            self._last_activity_at = time.monotonic()
+            return
+
         # Do not expire session while visitor is actively recording, waiting for STT/LLM/TTS, or robot is speaking
         if self._voice_controller.is_active or self._llm_worker.is_busy:
             self._last_activity_at = time.monotonic()
             return
         timeout = (
-            self._admin_idle_timeout_seconds
-            if self._active_page in {"admin", "navigation", "slam"}
-            else 300
+            300
             if self._active_page == "service"
             else self._idle_timeout_seconds
         )

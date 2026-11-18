@@ -13,7 +13,7 @@ import glob
 import time
 from typing import Any, Callable, Optional
 
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
     QFrame,
@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QPushButton,
     QScrollArea,
+    QScroller,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -44,6 +45,8 @@ class ROS2SystemDetailScreen(QWidget):
     stop_layer_requested = pyqtSignal(str)
     emergency_cleanup_requested = pyqtSignal()
     log_filter_changed = pyqtSignal(str)
+    swap_ports_requested = pyqtSignal()
+    rescan_ports_requested = pyqtSignal()
 
     def __init__(
         self,
@@ -68,6 +71,11 @@ class ROS2SystemDetailScreen(QWidget):
         self._auto_scroll: bool = True
         self._filter_buttons: dict[str, QPushButton] = {}
         self._is_console_visible: bool = True
+        self._pending_render_lines: list[str] = []
+        self._batch_render_timer = QTimer(self)
+        self._batch_render_timer.setInterval(100)  # Gom log flush định kỳ 100ms
+        self._batch_render_timer.setSingleShot(True)
+        self._batch_render_timer.timeout.connect(self._flush_pending_logs)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -90,6 +98,8 @@ class ROS2SystemDetailScreen(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
 
         container = QWidget()
         c_layout = QVBoxLayout(container)
@@ -104,25 +114,25 @@ class ROS2SystemDetailScreen(QWidget):
             ("layer_navigation", "Layer 2: Điều Hướng Tự Hành Nav2", "nav2_bringup, amcl, costmap_2d, controller_server"),
             ("layer_slam", "Layer 3: Lập Bản Đồ SLAM Toolbox", "slam_toolbox, map_saver_server"),
             ("layer_perception", "Layer 4: Thị Giác Máy Tính AI Astra", "astra_camera, yolo_detector, hand_wave_pose"),
-            ("layer_voice_interaction", "Layer 5: Giọng Nói & Tương Tác", "wake_word_kws, llm_worker, audio_player"),
+            ("layer_voice_interaction", "Layer 5: Backend & Quản Lý Nhiệm Vụ (Mission Control)", "mission_controller, navigation_manager, config_manager, audio_player"),
         ]
 
         for key, name, desc in layers_info:
             row_frame = QFrame()
+            row_frame.setFixedHeight(54)
             row_frame.setStyleSheet(f"""
                 QFrame {{
                     background-color: {KioskTheme.COLOR_SURFACE_ALT};
                     border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
                     border-radius: 6px;
-                    padding: 4px 8px;
                 }}
             """)
             rl = QHBoxLayout(row_frame)
-            rl.setContentsMargins(10, 6, 10, 6)
+            rl.setContentsMargins(12, 4, 12, 4)
             rl.setSpacing(10)
 
             title_box = QVBoxLayout()
-            title_box.setSpacing(2)
+            title_box.setSpacing(1)
             lbl_name = QLabel(name)
             lbl_name.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_PRIMARY}; font-size: 13px; font-weight: 700;")
             lbl_desc = QLabel(desc)
@@ -136,7 +146,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addWidget(lbl_st)
 
             btn_start = QPushButton("BẬT")
-            btn_start.setFixedSize(54, KioskTheme.TOUCH_TARGET_MIN)
+            btn_start.setFixedSize(56, 38)
             btn_start.setCursor(Qt.PointingHandCursor)
             btn_start.setStyleSheet(f"""
                 QPushButton {{
@@ -153,7 +163,7 @@ class ROS2SystemDetailScreen(QWidget):
             rl.addWidget(btn_start)
 
             btn_stop = QPushButton("TẮT")
-            btn_stop.setFixedSize(54, KioskTheme.TOUCH_TARGET_MIN)
+            btn_stop.setFixedSize(56, 38)
             btn_stop.setCursor(Qt.PointingHandCursor)
             btn_stop.setStyleSheet(f"""
                 QPushButton {{
@@ -191,7 +201,7 @@ class ROS2SystemDetailScreen(QWidget):
             ("layer2", "L2: Điều Hướng"),
             ("layer3", "L3: SLAM"),
             ("layer4", "L4: AI Vision"),
-            ("layer5", "L5: Giọng Nói"),
+            ("layer5", "L5: Backend Mission"),
         ]
 
         for f_key, f_label in filters:
@@ -253,6 +263,12 @@ class ROS2SystemDetailScreen(QWidget):
             }}
         """)
         self.txt_layer_log.setText("[CONSOLE] Hệ thống sẵn sàng. Bấm BẬT ở một Layer để xem luồng khởi động tiến trình...")
+        orig_toPlainText = self.txt_layer_log.toPlainText
+        def _flushing_toPlainText() -> str:
+            if getattr(self, "_pending_render_lines", None):
+                self._flush_pending_logs()
+            return orig_toPlainText()
+        self.txt_layer_log.toPlainText = _flushing_toPlainText
         log_layout.addWidget(self.txt_layer_log)
 
         c_layout.addWidget(card_log)
@@ -298,9 +314,30 @@ class ROS2SystemDetailScreen(QWidget):
         ports_row.addWidget(self.btn_swap_ports)
         port_layout.addLayout(ports_row)
 
-        self.lbl_ports_info = QLabel("Cổng phát hiện: Đang quét...")
-        self.lbl_ports_info.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px; padding: 4px 0;")
-        port_layout.addWidget(self.lbl_ports_info)
+        ports_desc_frame = QFrame()
+        ports_desc_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 6px;
+                padding: 6px 10px;
+            }}
+        """)
+        pdf_layout = QVBoxLayout(ports_desc_frame)
+        pdf_layout.setContentsMargins(8, 6, 8, 6)
+        pdf_layout.setSpacing(4)
+
+        self.lbl_esp_port = QLabel("⚡ Động cơ Hoverboard / ESP32: Đang quét...")
+        self.lbl_esp_port.setStyleSheet(f"color: {KioskTheme.COLOR_HEALTHY}; font-size: 12px; font-weight: bold;")
+        self.lbl_lidar_port = QLabel("📡 Cảm biến LiDAR SLAMTEC: Đang quét...")
+        self.lbl_lidar_port.setStyleSheet(f"color: {KioskTheme.COLOR_ACCENT}; font-size: 12px; font-weight: bold;")
+        self.lbl_ports_info = QLabel("Cơ chế nhận diện: Chờ khởi tạo...")
+        self.lbl_ports_info.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px;")
+
+        pdf_layout.addWidget(self.lbl_esp_port)
+        pdf_layout.addWidget(self.lbl_lidar_port)
+        pdf_layout.addWidget(self.lbl_ports_info)
+        port_layout.addWidget(ports_desc_frame)
         c_layout.addWidget(card_ports)
 
         # C. ADVANCED CONTROLS / RISKY ACTIONS (SEPARATE SECTION)
@@ -329,6 +366,7 @@ class ROS2SystemDetailScreen(QWidget):
         danger_layout.addWidget(self.btn_emergency_cleanup)
 
         c_layout.addWidget(card_danger)
+        c_layout.addStretch(1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)
@@ -342,6 +380,8 @@ class ROS2SystemDetailScreen(QWidget):
         "layer3": "layer_slam",
         "layer4": "layer_perception",
         "layer5": "layer_voice_interaction",
+        "layer_backend": "layer_voice_interaction",
+        "layer_mission": "layer_voice_interaction",
     }
 
     def update_layer_status(self, layers_state: dict[str, Any]) -> None:
@@ -353,25 +393,27 @@ class ROS2SystemDetailScreen(QWidget):
                 btn_start = self.layer_rows[k].get("start_btn")
                 btn_stop = self.layer_rows[k].get("stop_btn")
 
-                if is_on == "STARTING":
+                state_str = str(is_on.value) if hasattr(is_on, "value") else str(is_on)
+
+                if state_str == "STARTING":
                     lbl.set_status("STARTING", HealthStatus.UNKNOWN)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(False)
-                elif is_on == "STOPPING":
+                elif state_str == "STOPPING":
                     lbl.set_status("STOPPING", HealthStatus.WARNING)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(False)
-                elif is_on == "ERROR":
+                elif state_str == "ERROR":
                     lbl.set_status("ERROR", HealthStatus.CRITICAL)
                     if btn_start:
                         btn_start.setEnabled(False)
                     if btn_stop:
                         btn_stop.setEnabled(True)
-                elif is_on is True or is_on == "RUNNING":
+                elif is_on is True or state_str == "RUNNING":
                     lbl.set_status("RUNNING", HealthStatus.RUNNING)
                     if btn_start:
                         btn_start.setEnabled(False)
@@ -421,14 +463,19 @@ class ROS2SystemDetailScreen(QWidget):
         was_visible = self._is_console_visible
         self._is_console_visible = visible
         if visible and not was_visible:
+            self._pending_render_lines.clear()
             self._refresh_log_view()
+        elif not visible:
+            self._pending_render_lines.clear()
+            if self._batch_render_timer.isActive():
+                self._batch_render_timer.stop()
 
     def refresh_display(self) -> None:
         """Cập nhật lại giao diện và snapshot log khi mở lại màn hình ROS 2."""
         self._refresh_log_view()
 
     def append_layer_log(self, layer_key: str, text: str) -> None:
-        """Thêm dòng log mới từ tiến trình Layer và chỉ render lên console nếu đang hiển thị."""
+        """Thêm dòng log mới từ tiến trình Layer và chỉ render lên console theo batch nếu đang hiển thị."""
         norm_key = self._normalize_layer_key(layer_key)
         now_str = time.strftime("%H:%M:%S")
         prefix = norm_key.upper() if norm_key != "all" else "SYSTEM"
@@ -440,14 +487,36 @@ class ROS2SystemDetailScreen(QWidget):
             self._logs_by_layer[target_key].append(formatted_line)
 
         if self._is_console_visible and self._current_filter in ("all", norm_key):
-            self.txt_layer_log.append(formatted_line)
-            if self._auto_scroll:
-                cursor = self.txt_layer_log.textCursor()
-                cursor.movePosition(QTextCursor.End)
-                self.txt_layer_log.setTextCursor(cursor)
+            self._pending_render_lines.append(formatted_line)
+            if not self._batch_render_timer.isActive():
+                self._batch_render_timer.start()
+
+    def _flush_pending_logs(self) -> None:
+        """Render các dòng log đang gom theo đợt để tránh làm đơ main Qt event loop."""
+        if not self._pending_render_lines:
+            return
+        pending = self._pending_render_lines
+        self._pending_render_lines = []
+        if not self._is_console_visible:
+            return
+
+        cursor = self.txt_layer_log.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        current_text = self.txt_layer_log.toPlainText()
+        if not current_text or current_text.startswith("[CONSOLE] Chưa có log") or current_text.startswith("[CONSOLE] Hệ thống sẵn sàng"):
+            self.txt_layer_log.setPlainText("\n".join(pending))
+        else:
+            cursor.insertText("\n" + "\n".join(pending))
+
+        if self._auto_scroll:
+            cursor.movePosition(QTextCursor.End)
+            self.txt_layer_log.setTextCursor(cursor)
 
     def _refresh_log_view(self) -> None:
         """Render lại toàn bộ snapshot log theo bộ lọc hiện tại."""
+        self._pending_render_lines.clear()
+        if self._batch_render_timer.isActive():
+            self._batch_render_timer.stop()
         if self._log_snapshot_provider is not None:
             try:
                 backend_logs = self._log_snapshot_provider(self._current_filter)
@@ -535,6 +604,9 @@ class ROS2SystemDetailScreen(QWidget):
             """)
 
     def _clear_current_log(self) -> None:
+        self._pending_render_lines.clear()
+        if self._batch_render_timer.isActive():
+            self._batch_render_timer.stop()
         if self._current_filter == "all":
             for k in self._logs_by_layer:
                 self._logs_by_layer[k].clear()
@@ -543,23 +615,22 @@ class ROS2SystemDetailScreen(QWidget):
                 self._logs_by_layer[self._current_filter].clear()
         self.txt_layer_log.setText("[CONSOLE] Đã xóa nhật ký tiến trình.")
 
-    def _on_rescan_ports(self) -> None:
-        try:
-            from robot_ui.kiosk.serial_resolver import detect_serial_ports
-            hb, lidar, method = detect_serial_ports()
-            res_str = f"Hoverboard: {hb} | LiDAR: {lidar} ({method})"
-        except Exception:
-            res_str = ""
+    def set_detected_ports(self, esp_port: str, lidar_port: str, detect_src: str) -> None:
+        """Cập nhật thông tin cổng Serial hiển thị lên giao diện."""
         ports = sorted(glob.glob("/dev/serial/by-id/*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*"))
         unique_ports = list(dict.fromkeys(ports))
         ports_str = ", ".join(unique_ports) if unique_ports else "Không phát hiện"
-        if res_str:
-            self.lbl_ports_info.setText(f"{res_str} | Tất cả cổng: {ports_str}")
-        else:
-            self.lbl_ports_info.setText(f"Cổng phát hiện: {ports_str}")
+        if hasattr(self, "lbl_esp_port"):
+            self.lbl_esp_port.setText(f"⚡ Động cơ Hoverboard / ESP32: {esp_port}")
+        if hasattr(self, "lbl_lidar_port"):
+            self.lbl_lidar_port.setText(f"📡 Cảm biến LiDAR SLAMTEC: {lidar_port}")
+        self.lbl_ports_info.setText(f"Cơ chế: {detect_src} | Cổng hệ thống: {ports_str}")
+
+    def _on_rescan_ports(self) -> None:
+        self.rescan_ports_requested.emit()
 
     def _on_swap_ports(self) -> None:
-        self.lbl_ports_info.setText("Đã yêu cầu đảo cổng cấu hình Serial Hoverboard/ESP32.")
+        self.swap_ports_requested.emit()
 
     def _on_emergency_cleanup_clicked(self) -> None:
         dialog = DangerousActionDialog(

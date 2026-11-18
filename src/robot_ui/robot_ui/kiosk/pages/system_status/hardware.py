@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QScroller,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -73,6 +74,8 @@ class HardwareDetailScreen(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        QScroller.grabGesture(scroll.viewport(), QScroller.LeftMouseButtonGesture)
 
         container = QWidget()
         c_layout = QVBoxLayout(container)
@@ -233,6 +236,7 @@ class HardwareDetailScreen(QWidget):
         n_grid.addWidget(self.card_stt, 0, 3)
         n_layout.addLayout(n_grid)
         c_layout.addWidget(card_net)
+        c_layout.addStretch(1)
 
         scroll.setWidget(container)
         layout.addWidget(scroll)

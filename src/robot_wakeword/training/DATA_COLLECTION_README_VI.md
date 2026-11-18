@@ -1,22 +1,22 @@
 # SOUTA KWS — HƯỚNG DẪN THU THẬP VÀ GỬI DỮ LIỆU GIỌNG NÓI
 
-> Dành cho thành viên hỗ trợ thu thập dữ liệu từ khóa đánh thức robot **“Sô ta”**. Không cần biết ROS 2 hoặc machine learning. Người phụ trách cung cấp **mã cộng tác viên** và quyền truy cập **repository dataset PRIVATE** trước khi bắt đầu.
+> Dành cho thành viên hỗ trợ thu thập dữ liệu từ khóa đánh thức robot **“Sô ta”**. Không cần biết ROS 2 hoặc machine learning. Người phụ trách cung cấp **mã cộng tác viên** và kênh gửi file ZIP riêng tư trước khi bắt đầu.
 
 ## 1. Mục tiêu và nguyên tắc
 
 - Thu các câu **có chứa “Sô ta”**, các câu **không chứa từ khóa**, các từ **gần giống**, cùng **tiếng ồn môi trường**.
 - Giọng nói **tự nhiên**; không cố kéo dài hai âm, không phát giọng từ loa để thay cho giọng người thật.
 - Chỉ ghi âm khi người tham gia đã **đồng ý**. Không ghi thông tin nhạy cảm, số điện thoại, địa chỉ hoặc hội thoại riêng tư.
-- File WAV là **dữ liệu giọng nói có thể nhận diện người nói**. **Không push vào repository mã nguồn công khai** `Automonous_Robot-Mecanum_Based`. Repository này đã `.gitignore` thư mục `data/` có chủ đích.
-- Không push `data/recorder_registry.json`: file đó lưu **tên người nói**, chỉ dùng nội bộ trên máy thu.
+- File WAV là **dữ liệu giọng nói có thể nhận diện người nói**. **Không upload dữ liệu lên repository mã nguồn công khai** `Automonous_Robot-Mecanum_Based`. Thư mục `data/` đã được `.gitignore` có chủ đích.
+- **Không đóng gói `data/recorder_registry.json` vào ZIP**: file này lưu **tên người nói**, chỉ dùng nội bộ trên máy thu.
 
 ## 2. Chuẩn bị trên Ubuntu
 
-Cần microphone, Python 3 và quyền truy cập 2 repository: **repository mã nguồn** và **repository dataset riêng ở chế độ PRIVATE** (đường dẫn do người phụ trách cung cấp).
+Cần microphone, Python 3 và mã nguồn Recorder. **Không cần tạo repository riêng để gửi dataset**: dữ liệu sẽ được đóng gói thành ZIP.
 
 ```bash
 sudo apt update
-sudo apt install -y git git-lfs python3-tk pulseaudio-utils
+sudo apt install -y git python3-tk pulseaudio-utils zip unzip
 
 git clone --branch simulator_interface \
   https://github.com/HoangAnh301194/Automonous_Robot-Mecanum_Based.git
@@ -44,7 +44,7 @@ pactl list short sources
 4. **Một người phải dùng cùng một ID ở cả `positive`, `negative`, `hard_negative`**. Không đăng ký một người thành nhiều ID. Nếu đổi người cầm micro, tạo ID mới.
 5. Với `ambient`, đăng ký **phiên ghi môi trường** (`session_001`, ...), không phải người nói.
 
-**Không dùng tên thật làm tên file hoặc thư mục.** `recorder_registry.json` chứa tên hiển thị và không được gửi qua Git.
+**Không dùng tên thật làm tên file hoặc thư mục.** `recorder_registry.json` chứa tên hiển thị và **không được gửi kèm ZIP**.
 
 ## 4. Chọn nhãn đúng
 
@@ -108,89 +108,76 @@ src/robot_wakeword/training/data/
 
 Định dạng mọi WAV: **PCM S16, mono, 16 kHz**. **Không đổi sampling rate hoặc chuyển thành MP3**.
 
-## 8. Gửi dataset lên Git — dùng repository PRIVATE riêng
+## 8. Xuất dataset theo nhãn, nén ZIP và gửi lại
 
-Người phụ trách phải tạo một repository **Private** trên GitHub, ví dụ `souta-kws-dataset`, và cấp quyền **Write** cho cộng tác viên. Cần bật Git LFS để lưu WAV; không push dữ liệu vào repository mã nguồn công khai.
+**Không tạo repository dataset, không cần Git LFS hay thao tác push dữ liệu lên GitHub.** Người ghi âm chỉ cần xuất tập WAV giữ nguyên nhãn, nén **toàn bộ thư mục `dataset/`** thành file `.zip` và gửi lại cho **người phụ trách thu thập/tổng hợp dữ liệu** qua kênh riêng tư đã thống nhất.
 
-### 8.1. Người phụ trách thiết lập một lần
+### 8.1. Xuất dữ liệu theo đúng nhãn
 
-Trong repository dataset PRIVATE (đã clone trên máy):
+Người phụ trách cấp **mã cộng tác viên duy nhất** như `c01`, `c02`, `c03`. Cùng một người thu dùng **cùng mã** ở mọi lần gửi, để không trùng `speaker_001` giữa các máy.
 
-```bash
-cd ~/souta-kws-dataset
-git lfs install
-git lfs track '*.wav'
-# File .gitattributes phải được commit để mọi người cùng có quy tắc LFS
-git add .gitattributes
-git commit -m 'chore: track WAV with Git LFS'
-git push origin main
-```
-
-Nếu GitHub repository vẫn chưa có file nào hoặc nhánh mặc định không phải `main`, người phụ trách cần khởi tạo nhánh tương ứng trước khi gửi lệnh cho nhóm. **Không gửi token, password hoặc private SSH key vào nhóm chat.**
-
-### 8.2. Mỗi cộng tác viên xuất dữ liệu và đẩy lên
-
-Người phụ trách cấp **mã cộng tác viên duy nhất** như `c01`, `c02`, `c03`. Cùng một người thu phải giữ nguyên mã này ở mọi lần xuất. Mã được dùng để tránh trùng `speaker_001` của hai máy khác nhau.
-
-Clone private dataset repo bằng URL mà người phụ trách cung cấp:
-
-```bash
-cd ~
-git clone <PRIVATE_DATASET_REPO_URL> souta-kws-dataset
-cd souta-kws-dataset
-git lfs install
-```
-
-Sau đó quay về **thư mục training của Recorder** và chạy (thay `c01` bằng mã của mình):
+Trong thư mục `training`, chạy (thay `c01` bằng mã của mình):
 
 ```bash
 cd ~/Automonous_Robot-Mecanum_Based/src/robot_wakeword/training
 python3 export_dataset.py \
   --collector c01 \
-  --dest ~/souta-kws-dataset/data/raw
+  --dest ~/souta_kws_exports/c01/dataset/raw
 ```
 
-Lệnh chỉ **copy WAV**, không upload tên người nói; tự chuyển ID như sau:
+Script **sao chép WAV, giữ các nhãn** `positive`, `negative`, `hard_negative`, `ambient` và chuyển ID về dạng có mã cộng tác viên. Thư mục đầu ra:
 
 ```text
-Nguồn trên máy thu:  data/raw/positive/speaker_001/001.wav
-Trong repo PRIVATE: data/raw/positive/speaker_c01_001/001.wav
-
-Nguồn trên máy thu:  data/raw/negative/speaker_001/001.wav
-Trong repo PRIVATE: data/raw/negative/speaker_c01_001/001.wav
+souta_kws_exports/c01/
+└── dataset/
+    └── raw/
+        ├── positive/speaker_c01_001/001.wav
+        ├── negative/speaker_c01_001/001.wav
+        ├── hard_negative/speaker_c01_001/001.wav
+        └── ambient/session_c01_001/001.wav
 ```
 
-Một người giữ nguyên `speaker_c01_001` trong **mọi label**, nhờ đó pipeline không trộn giọng cùng người giữa Train/Validation/Test. Với tiếng môi trường, script dùng dạng `session_c01_001`.
+Một người giữ nguyên `speaker_c01_001` trong **mọi nhãn**; tiếng môi trường dùng `session_c01_001`. Script **không xuất `recorder_registry.json`** (có tên người nói), không xóa bản thu gốc và không ghi đè nếu tên trùng nhưng nội dung khác.
 
-Script **không ghi đè** file đã tồn tại: file giống thì bỏ qua; file trùng tên nhưng khác dữ liệu thì báo lỗi để kiểm tra. Không xóa dữ liệu gốc.
-
-Kiểm tra kỹ repository đang là **PRIVATE** trước khi push:
+### 8.2. Nén nguyên thư mục dataset thành file ZIP
 
 ```bash
-cd ~/souta-kws-dataset
-git remote -v
-git status --short
-git add .gitattributes data/raw
-git commit -m 'data(kws): add recordings c01'
-git pull --rebase origin main
-git push origin main
+cd ~/souta_kws_exports/c01
+zip -r "souta_kws_c01_$(date +%Y%m%d).zip" dataset/
 ```
 
-Nếu `git pull --rebase` gặp conflict, **dừng và báo người phụ trách**, không force push. Lặp lại bước xuất và commit/push khi có thêm bản thu mới. Cần kiểm tra hạn mức lưu trữ/băng thông Git LFS của repo.
+Ví dụ file tạo ra: `souta_kws_c01_20261117.zip`. **Phải nén thư mục `dataset/` chứ không nén từng file WAV rời**, vì cần giữ `dataset/raw/<label>/<speaker_or_session_id>/*.wav`.
 
-> Nếu không có quyền truy cập GitHub private hoặc mạng kém, gửi bản WAV bằng kênh lưu trữ **riêng tư** được người phụ trách chỉ định. Không nén rồi đưa lên repository mã nguồn công khai.
-
-## 9. Người phụ trách gộp dữ liệu để huấn luyện
-
-Trên máy train, clone/pull **repository dữ liệu private**, sau đó chép riêng `data/raw/` vào `src/robot_wakeword/training/data/raw/` của pipeline. Không lấy `recorder_registry.json` của bất kỳ cộng tác viên nào.
+Kiểm tra file ZIP có thể giải nén và có đúng nhãn (thay tên file cho phù hợp):
 
 ```bash
-# Ở thư mục training chứa souta_kws.py
-cp -an ~/souta-kws-dataset/data/raw/. data/raw/
+unzip -t souta_kws_c01_20261117.zip
+unzip -l souta_kws_c01_20261117.zip
+```
+
+### 8.3. Gửi lại cho người phụ trách thu thập
+
+1. Gửi **file ZIP đã tạo** qua kênh riêng tư do người phụ trách chỉ định (tin nhắn trực tiếp hoặc đường dẫn được giới hạn quyền truy cập).
+2. Kèm **mã cộng tác viên**, ngày gửi, số lượng mẫu theo từng nhãn và ghi chú môi trường thu nếu cần. **Không phải gửi tên thật của người nói.**
+3. **Không gửi** `recorder_registry.json`; không tải ZIP lên repo công khai hoặc chia sẻ link cho mọi người.
+4. Nếu thu thêm dữ liệu, xuất lại bằng **cùng mã cộng tác viên**, tạo ZIP mới và ghi rõ đó là bản cập nhật để người tổng hợp kiểm tra trùng.
+
+## 9. Người phụ trách nhận ZIP và gộp dữ liệu để huấn luyện
+
+Người phụ trách tải ZIP từ kênh nhận riêng tư; kiểm tra cấu trúc, nhãn và WAV trước khi nhập vào pipeline. Ví dụ với file `souta_kws_c01_20261117.zip` được lưu ở `~/Downloads`:
+
+```bash
+mkdir -p ~/souta_kws_inbox/c01
+unzip -q ~/Downloads/souta_kws_c01_20261117.zip -d ~/souta_kws_inbox/c01
+
+# Tại src/robot_wakeword/training (chứa souta_kws.py)
+cp -an ~/souta_kws_inbox/c01/dataset/raw/. data/raw/
 
 env -u LD_LIBRARY_PATH -u PYTHONPATH \
   python souta_kws.py prepare --raw data/raw --manifest data/manifest.csv
 ```
+
+`cp -an` **không ghi đè file trùng đường dẫn**, nhưng có thể bỏ qua mà không báo lỗi. Nếu có trùng tên, phải đối chiếu nội dung trước khi chấp nhận dữ liệu, không tự ý ghi đè. Giữ lại ZIP gốc để đối soát; **không nhận `recorder_registry.json`**.
 
 `prepare` đọc các folder speaker/session, xác minh WAV và tạo các split **theo danh tính người nói**, không phải ngẫu nhiên theo từng file. Chỉ thực hiện khi tập positive và negative có đủ nhóm độc lập.
 
@@ -204,7 +191,8 @@ env -u LD_LIBRARY_PATH -u PYTHONPATH \
 | Micro không có tiếng | Kiểm tra `pactl list short sources`, chọn đúng input trong GUI |
 | Âm quá nhỏ/rè | Đổi khoảng cách micro, giảm gain nếu clipping, thu lại |
 | Ghi nhầm nhãn | **Bỏ bản thu / Không lưu**; chọn nhãn đúng và thu lại |
-| Không thể push Git | Kiểm tra quyền Write, Git LFS, nhánh, và gửi toàn bộ thông báo lỗi |
+| Không tạo được ZIP | Kiểm tra `zip`/`unzip`, dung lượng ổ đĩa và đường dẫn thư mục xuất |
+| ZIP thiếu nhãn/không giải nén được | Xuất lại qua `export_dataset.py`, nén nguyên thư mục `dataset/` và thử `unzip -t` |
 | Trùng file WAV khác nội dung | Không ghi đè; kiểm tra lại mã cộng tác viên và nguồn dữ liệu |
 
-**Liên hệ người phụ trách để được cấp:** `collector_id`, private dataset repository URL, quyền Write, thời hạn và số mẫu cần thu.
+**Liên hệ người phụ trách để được cấp:** `collector_id`, kênh gửi ZIP riêng tư, thời hạn và số mẫu cần thu.

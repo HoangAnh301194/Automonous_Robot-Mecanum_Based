@@ -40,4 +40,7 @@ class KioskSignals(QObject):
     layer_log_received = pyqtSignal(str, str)             # (layer_key, log_line)
     preflight_step_updated = pyqtSignal(str, bool, str)   # (step_key, is_ok, message)
     actuator_test_result = pyqtSignal(str, bool, str)     # (test_key, is_ok, message)
+    # Localization signals
+    localization_status_changed = pyqtSignal(str, str)    # (state: LocalizationState, message: str)
+    initial_pose_confirmed = pyqtSignal(dict)             # {"x": float, "y": float, "yaw": float, "covariance_norm": float}
 
