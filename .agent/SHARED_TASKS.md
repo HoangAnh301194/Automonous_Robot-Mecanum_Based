@@ -30,6 +30,8 @@
 
 | **SLAM & Admin Idle Fix + Anti-lag Orin Deploy** | `609aed13-4b65-4add-8353-9e2a6eaaa444` | `window.py`, `ros_node.py`, `mapper_params_online_async.yaml`, `kiosk.launch.py` | `idle_timeout`, `map_update`, `pre_launch_cleanup` | HOÀN TẤT | Hoàn thành: (1) Bỏ timeout màn hình chờ 90s khi ở Admin/SLAM/Nav/System/Detection, (2) Tăng tốc độ vẽ map SLAM khi xoay tại chỗ (map_update_interval 1.5s, heading 0.15rad ~ 8.6°), (3) Pre-launch cleanup diệt sạch tiến trình mồ côi trong kiosk.launch.py; Đã chuyển sang nhánh simulator_interface, pull và build thành công trên Jetson Orin (0 errors). |
 
+| **Battery Truth Single Source & Sync** | `609aed13-4b65-4add-8353-9e2a6eaaa444` | `ros_node.py`, `system_monitor_node.py` | `robot_status_changed`, `/hoverboard/battery_voltage`, `/robot_status` | HOÀN TẤT | Hoàn thành: Khắc phục triệt để hiện tượng giật pin (100% vs 77%): Ưu tiên dữ liệu pin thực tế từ phần cứng Hoverboard, chặn giá trị mặc định 100% từ backend đè lên; hỗ trợ topic hoverboard voltage trong system_monitor_node; đã build pass và push lên cả 2 nhánh simulator_interface và simulator_interface_lord. |
+
 ---
 
 ## 2. Quy ước sử dụng dành cho Agent
