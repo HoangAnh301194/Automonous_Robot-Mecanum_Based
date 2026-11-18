@@ -398,9 +398,15 @@ class KioskRosNode(Node):
         )
 
     def _on_map(self, msg: OccupancyGrid) -> None:
-        """Nhận /map, throttle 5s và offload xử lý sang daemon thread."""
+        """Nhận /map, throttle thích ứng (1.2s khi SLAM, 5s khi Navigation) và offload xử lý sang worker thread."""
         now = time.monotonic()
-        if now - getattr(self, "_last_map_process_time", 0.0) < 5.0:
+        is_slam = (
+            (self._slam_proc is not None and self._slam_proc.poll() is None)
+            or self.is_layer_running("layer3")
+            or self.is_layer_running("layer_slam")
+        )
+        min_interval = 1.2 if is_slam else 5.0
+        if now - getattr(self, "_last_map_process_time", 0.0) < min_interval:
             return
         self._last_map_process_time = now
         threading.Thread(

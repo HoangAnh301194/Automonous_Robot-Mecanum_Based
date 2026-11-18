@@ -1228,14 +1228,26 @@ class KioskWindow(QMainWindow):
                 self.navigation_page.set_wifi(check_wifi_connected())
         if self._active_page == "idle":
             return
+
+        # Giữ màn hình, không bao giờ tự thoát về màn hình chờ khi ở các trang quản trị kỹ thuật
+        if self._active_page in {"admin", "slam", "navigation", "system_config", "detection_debug"}:
+            self._last_activity_at = time.monotonic()
+            return
+
+        # Không thoát phiên khi SLAM đang quét
+        if hasattr(self, "ros_node") and (
+            self.ros_node.is_layer_running("layer3")
+            or (getattr(self.ros_node, "_slam_proc", None) is not None and self.ros_node._slam_proc.poll() is None)
+        ):
+            self._last_activity_at = time.monotonic()
+            return
+
         # Do not expire session while visitor is actively recording, waiting for STT/LLM/TTS, or robot is speaking
         if self._voice_controller.is_active or self._llm_worker.is_busy:
             self._last_activity_at = time.monotonic()
             return
         timeout = (
-            self._admin_idle_timeout_seconds
-            if self._active_page in {"admin", "navigation", "slam"}
-            else 300
+            300
             if self._active_page == "service"
             else self._idle_timeout_seconds
         )
