@@ -9,10 +9,11 @@ Giao diện PyQt5 gồm **Home, Navigation, Chatbot (9router + RAG) & Voice Assi
 ### Trên Jetson Orin (`~/ros2_ws`):
 ```bash
 cd ~/ros2_ws
-git checkout simulator_interface
-git pull origin simulator_interface
+git fetch origin
+git checkout simulator_interface_lord  # (hoặc simulator_interface)
+git pull origin simulator_interface_lord
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select robot_ui
+colcon build --packages-up-to robot_ui robot_system_monitor mo_hinh layer1_bringup --symlink-install
 source install/setup.bash
 ```
 
