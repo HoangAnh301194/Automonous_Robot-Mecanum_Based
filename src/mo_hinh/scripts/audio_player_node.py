@@ -2,8 +2,8 @@
 """audio_player_node.py - Tự động phát âm thanh thông báo offline cho Robot.
 
 Cơ chế:
-1. Hàng đợi (Queue) phát tuần tự: Tránh tình trạng các topic đến dồn dập làm kill tiến trình âm thanh đang phát dở.
-2. Bộ đệm khoảng lặng (Silence padding): Chèn 350ms silence vào đầu âm thanh bằng adelay filter để DAC/soundcard kịp thức dậy.
+1. Hàng đợi (Queue) phát tuần tự: Tránh tình trạng các topic đến dồn dập làm kill âm thanh đang phát.
+2. Bộ đệm khoảng lặng: Chèn 350ms silence vào đầu âm thanh bằng adelay filter để DAC kịp thức dậy.
 3. Độ ưu tiên (Priority): Cảnh báo lùi là âm thanh khẩn cấp có quyền ngắt các câu nói thông thường.
 4. Lắng nghe các topic:
     + /audio/play_sound (std_msgs/String): phát trực tiếp tên file/key
@@ -14,6 +14,7 @@ Cơ chế:
 
 import os
 import queue
+import random
 import shutil
 import subprocess
 import threading
@@ -128,6 +129,31 @@ class AudioPlayerNode(Node):
                 sub_path = os.path.join(self.audio_dir, sub, filename)
                 if os.path.isfile(sub_path):
                     filepath = sub_path
+                    break
+
+        if not os.path.isfile(filepath):
+            # Tìm thêm ở các thư mục âm thanh dự phòng (robot_ui/audio)
+            fallback_dirs = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'robot_ui', 'audio')),
+                '/home/a/ros2_ws/src/robot_ui/audio',
+                '/home/orin/ros2_ws/src/robot_ui/audio',
+            ]
+            try:
+                fallback_dirs.append(os.path.join(get_package_share_directory('robot_ui'), 'audio'))
+            except PackageNotFoundError:
+                pass
+
+            for f_dir in fallback_dirs:
+                f_path = os.path.join(f_dir, filename)
+                if os.path.isfile(f_path):
+                    filepath = f_path
+                    break
+                for sub in ['greetings', 'nav2', 'events']:
+                    f_sub = os.path.join(f_dir, sub, filename)
+                    if os.path.isfile(f_sub):
+                        filepath = f_sub
+                        break
+                if os.path.isfile(filepath):
                     break
 
         if not os.path.isfile(filepath):
@@ -251,9 +277,15 @@ class AudioPlayerNode(Node):
     def cb_mission_log(self, msg: String):
         """Topic /mission/status_log từ Behavior Tree tuần tra & phục vụ."""
         text = msg.data
-        if "ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY" in text:
-            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> Chúc mừng 20/11 ngay lập tức
-            self.play_sound('chuc_20_11', force=True, priority=False)
+        if "GẶP NGƯỜI TRƯỚC MẶT" in text:
+            # Có người đứng phía trước (0.4m - 2.0m, lệch <= 0.5m duy trì 1.5s):
+            # Phát ngẫu nhiên chao_thay_co hoặc chuc_20_11 không cần giơ tay
+            greeting = random.choice(['chao_thay_co', 'chuc_20_11'])
+            self.play_sound(greeting, force=True, priority=False)
+        elif "ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY" in text:
+            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> Phát ngẫu nhiên câu chào Thầy Cô
+            greeting = random.choice(['chao_thay_co', 'chuc_20_11'])
+            self.play_sound(greeting, force=True, priority=False)
         elif "PHÁT HIỆN NGƯỜI VẪY TAY" in text:
             self.play_sound('den_nguoi_vay_tay', force=False, priority=False)
         elif "Hết 5s không yêu cầu nước" in text:

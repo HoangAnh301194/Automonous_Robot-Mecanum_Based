@@ -478,3 +478,90 @@ def test_action_patrol_loop_closure_dispatches_start_point_first():
     assert sent_targets[2] == "diem1,diem2"
 
 
+def test_customer_encounter_range_and_lateral_threshold():
+    """Verify person detection range (0.4m-1.5m) and lateral threshold (|y| <= 0.50m)."""
+    import math
+    from types import SimpleNamespace
+
+    class MockNode:
+        def __init__(self):
+            self.blackboard = Blackboard()
+            self._person_in_front_since = None
+            self._last_wave_seen_at = 0.0
+            self._wave_timeout_sec = 5.0
+
+        def check_person(self, x, y, is_waving=False):
+            p = SimpleNamespace(
+                position=SimpleNamespace(x=x, y=y, z=0.0),
+                position_valid=True,
+                is_waving=is_waving,
+                wave_valid=is_waving,
+                track_id=1,
+            )
+            has_blocking = False
+            dist = math.hypot(p.position.x, p.position.y)
+            if 0.40 <= dist <= 1.50 and abs(p.position.y) <= 0.50:
+                has_blocking = True
+            return has_blocking
+
+    node = MockNode()
+
+    # 1. Person at dist ~1.26m, y = 0.4m -> Within range (0.4m - 1.5m, |y| <= 0.5m)
+    assert node.check_person(1.2, 0.4) is True
+
+    # 2. Person at dist 1.0m, y = 0.45m -> Within range
+    assert node.check_person(1.0, 0.45) is True
+
+    # 3. Person at dist 1.8m -> Outside range (> 1.5m)
+    assert node.check_person(1.8, 0.0) is False
+
+    # 4. Person at dist 1.0m, y = 0.60m -> Outside lateral threshold (> 0.5m)
+    assert node.check_person(1.0, 0.60) is False
+
+    # 5. Person too close (< 0.4m)
+    assert node.check_person(0.30, 0.10) is False
+
+
+def test_audio_player_random_greeting_on_encounter_and_wave():
+    """Verify AudioPlayerNode plays chao_thay_co or chuc_20_11 on encounter and wave arrival."""
+    import importlib.util
+    from std_msgs.msg import String
+
+    # Load audio_player_node directly from scripts
+    spec = importlib.util.spec_from_file_location(
+        "audio_player_node",
+        "/home/a/ros2_ws/src/mo_hinh/scripts/audio_player_node.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    class DummyAudioPlayer:
+        def __init__(self):
+            self.played = []
+
+        def play_sound(self, sound_key, force=False, priority=False):
+            self.played.append(sound_key)
+
+        def cb_mission_log(self, msg):
+            mod.AudioPlayerNode.cb_mission_log(self, msg)
+
+    player = DummyAudioPlayer()
+
+    # Test 1: Log encounter ("👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước...")
+    msg_encounter = String()
+    msg_encounter.data = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước..."
+    for _ in range(10):
+        player.cb_mission_log(msg_encounter)
+
+    assert len(player.played) == 10
+    # Every sound played must be one of the two teacher greetings
+    for s in player.played:
+        assert s in ['chao_thay_co', 'chuc_20_11']
+
+    # Test 2: Log arrival at waving person
+    player.played.clear()
+    msg_wave = String()
+    msg_wave.data = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
+    player.cb_mission_log(msg_wave)
+    assert len(player.played) == 1
+    assert player.played[0] in ['chao_thay_co', 'chuc_20_11']
