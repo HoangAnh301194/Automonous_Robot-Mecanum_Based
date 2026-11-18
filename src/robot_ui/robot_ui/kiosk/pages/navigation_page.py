@@ -160,14 +160,22 @@ def parse_nav_map_yaml(yaml_path: Path | str | None) -> dict[str, Any] | None:
         # In ROS OccupancyGrid, row 0 is bottom row (y=0 in map frame is bottom)
         arr_flipped = np.flipud(arr)
 
+        cells = np.full((h, w), -1, dtype=np.int16)
         if negate:
             occ = arr_flipped.astype(np.float32) / 255.0
+            cells[occ < free_thresh] = 0
+            cells[occ > occupied_thresh] = 100
         else:
+            # Chuẩn ROS trinary map:
+            # 0: Vật cản (Occupied)
+            # 254: Vùng đi được (Free space)
+            # 205: Vùng xám chưa quét (Unknown)
             occ = (255.0 - arr_flipped.astype(np.float32)) / 255.0
-
-        cells = np.full((h, w), -1, dtype=np.int16)
-        cells[occ < free_thresh] = 0
-        cells[occ > occupied_thresh] = 100
+            free_limit = min(float(free_thresh), 0.15)
+            cells[occ < free_limit] = 0
+            cells[occ > occupied_thresh] = 100
+            # Bảo đảm vùng xám 205 và lân cận (180..230) luôn là Unknown (-1)
+            cells[(arr_flipped >= 180) & (arr_flipped <= 230)] = -1
 
         # Bảo toàn độ phân giải gốc của bản đồ (không downsampling bỏ pixel tường 1-pixel)
         max_dim = 4096
@@ -401,10 +409,18 @@ class InteractiveNavMapWidget(QWidget):
             self._map_image = QImage()
             return
         cells = cells[: width * height].reshape((height, width))
+        obs = (cells >= 50)
+        # Giãn nhẹ 1 pixel (4-connectivity) để các nét tường 1-pixel không bị đứt đoạn hay biến thành chấm khi thu phóng
+        dilated_obs = obs.copy()
+        dilated_obs[1:, :] |= obs[:-1, :]
+        dilated_obs[:-1, :] |= obs[1:, :]
+        dilated_obs[:, 1:] |= obs[:, :-1]
+        dilated_obs[:, :-1] |= obs[:, 1:]
+
         rgb = np.empty((height, width, 3), dtype=np.uint8)
-        rgb[cells < 0] = (40, 48, 58)                      # Unknown: Xám trung tính dịu mắt, tách bạch với tường
+        rgb[cells < 0] = (38, 44, 52)                      # Unknown: Xám đá phiến sẫm (Dark Slate), phân định rõ ranh giới hành lang
         rgb[(cells >= 0) & (cells < 50)] = (245, 247, 250) # Free space: Trắng sáng rõ ràng
-        rgb[cells >= 50] = (0, 0, 0)                        # Obstacle: Đen tuyền 100% cực kỳ sắc nét
+        rgb[dilated_obs] = (0, 0, 0)                        # Obstacle: Đen tuyền 100%, nét tường liền mạch và sắc nét
         rgb = np.ascontiguousarray(np.flipud(rgb))
         self._map_image = QImage(
             rgb.data, width, height, width * 3, QImage.Format_RGB888
@@ -945,6 +961,7 @@ class InteractiveNavMapWidget(QWidget):
 
             # Draw waypoint nodes and badges
             painter.setFont(QFont("Sans Serif", 9, QFont.Bold))
+            placed_badge_rects: list[QRectF] = []
             for i, (wp, pt) in enumerate(zip(self._batch_waypoints, wp_screen_pts)):
                 if pt is None or not self.rect().contains(pt.toPoint()):
                     continue
@@ -963,15 +980,24 @@ class InteractiveNavMapWidget(QWidget):
                 painter.setPen(QPen(node_color, 2))
                 painter.drawLine(pt, QPointF(ax, ay))
 
-                # Name badge
+                # Name badge with collision avoidance (tránh đè nhãn khi các điểm xuất phát/tuần tra ở gần nhau)
                 name = str(wp.get("name", f"P{i}"))
                 badge_w = painter.fontMetrics().horizontalAdvance(name) + 12
-                badge_rect = QRectF(pt.x() - badge_w / 2.0, pt.y() - 26, badge_w, 18)
+                badge_h = 18.0
+                candidate_offsets = [-26.0, 12.0, -44.0, 30.0]
+                best_rect = QRectF(pt.x() - badge_w / 2.0, pt.y() - 26.0, badge_w, badge_h)
+                for off_y in candidate_offsets:
+                    cand = QRectF(pt.x() - badge_w / 2.0, pt.y() + off_y, badge_w, badge_h)
+                    if not any(cand.intersects(r) for r in placed_badge_rects):
+                        best_rect = cand
+                        break
+                placed_badge_rects.append(best_rect)
+
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(17, 20, 24, 220))
-                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.drawRoundedRect(best_rect, 4, 4)
                 painter.setPen(node_color)
-                painter.drawText(badge_rect, Qt.AlignCenter, name)
+                painter.drawText(best_rect, Qt.AlignCenter, name)
 
         # 6. Predefined Locations (if not already covered by waypoints)
         if not self._batch_waypoints and self._locations:

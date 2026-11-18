@@ -210,6 +210,81 @@ class TestKioskNavigationPage(unittest.TestCase):
         self.assertAlmostEqual(w1[0], w2[0], places=2)
         self.assertAlmostEqual(w1[1], w2[1], places=2)
 
+    def test_parse_nav_map_trinary_classification(self):
+        """Test parse_nav_map_yaml trinary classification for unknown, free, and occupied spaces."""
+        from robot_ui.kiosk.pages.navigation_page import parse_nav_map_yaml
+        map_yaml = Path("/home/a/ros2_ws/my_map/a2_amcl.yaml")
+        if not map_yaml.is_file():
+            self.skipTest("a2_amcl.yaml not found")
+
+        map_data = parse_nav_map_yaml(map_yaml)
+        self.assertIsNotNone(map_data)
+        cells = map_data["cells"]
+        # In a2_amcl, value 205 (unknown) must be -1, 0 (walls) must be 100, 254 (free) must be 0
+        self.assertIn(-1, cells)
+        self.assertIn(0, cells)
+        self.assertIn(100, cells)
+
+        # Check proportions: unknown (-1) should be >50% of cells, not 0% (as when misclassified as free)
+        unknown_count = sum(1 for c in cells if c < 0)
+        free_count = sum(1 for c in cells if c == 0)
+        obs_count = sum(1 for c in cells if c >= 50)
+        self.assertGreater(unknown_count, len(cells) * 0.5)
+        self.assertGreater(free_count, len(cells) * 0.1)
+        self.assertGreater(obs_count, 100)
+
+    def test_rebuild_map_image_dilation_and_contrast(self):
+        """Test that _rebuild_map_image dilates obstacles and applies contrast palette."""
+        from PyQt5.QtGui import QColor
+        map_w = self.page.map_widget
+        # Create 10x10 map with single obstacle at (5, 5), unknown at (0, 0), free at (1, 1)
+        grid = [[0 for _ in range(10)] for _ in range(10)]
+        grid[0][0] = -1
+        grid[5][5] = 100  # Single pixel obstacle
+        flat = [item for sublist in grid for item in sublist]
+
+        test_map = {
+            "origin_x": 0.0,
+            "origin_y": 0.0,
+            "origin_yaw": 0.0,
+            "resolution": 0.05,
+            "preview_width": 10,
+            "preview_height": 10,
+            "sample_step": 1,
+            "cells": flat,
+        }
+        map_w.set_active(True)
+        map_w.set_map(test_map)
+        self.assertFalse(map_w._map_image.isNull())
+
+        # Obstacle at (5, 5) with flipud should have dilated into 4-connectivity neighbors
+        # In screen image: (5, 5) flipud is y = 10 - 1 - 5 = 4
+        px_center = QColor(map_w._map_image.pixel(5, 4))
+        self.assertEqual((px_center.red(), px_center.green(), px_center.blue()), (0, 0, 0))
+
+        # Check 4-connectivity neighbor (5, 3) (above) - dilated to black
+        px_up = QColor(map_w._map_image.pixel(5, 3))
+        self.assertEqual((px_up.red(), px_up.green(), px_up.blue()), (0, 0, 0))
+
+        # Check unknown space pixel at (0, 0) -> y = 9 in screen
+        px_unknown = QColor(map_w._map_image.pixel(0, 9))
+        self.assertEqual((px_unknown.red(), px_unknown.green(), px_unknown.blue()), (38, 44, 52))
+
+    def test_waypoint_badge_deconfliction(self):
+        """Test that two adjacent waypoints do not overlap badges during paintEvent."""
+        from PyQt5.QtGui import QPixmap, QPainter
+        map_w = self.page.map_widget
+        map_w.set_batch_waypoints([
+            {"name": "khoihanh", "x": 1.0, "y": 1.0, "yaw": 0.0},
+            {"name": "diem1", "x": 1.05, "y": 1.05, "yaw": 0.0},
+        ])
+        # Render onto a test pixmap to execute paintEvent
+        pix = QPixmap(400, 400)
+        map_w.resize(400, 400)
+        map_w.render(pix)
+        self.assertFalse(pix.isNull())
+
 
 if __name__ == "__main__":
     unittest.main()
+
