@@ -35,6 +35,7 @@ def generate_launch_description():
     ai_color_width = LaunchConfiguration('ai_color_width')
     ai_color_height = LaunchConfiguration('ai_color_height')
     ai_color_fps = LaunchConfiguration('ai_color_fps')
+    ai_video_device = LaunchConfiguration('ai_video_device')
 
     front_obstacle_config = LaunchConfiguration('front_obstacle_config')
     rear_obstacle_config = LaunchConfiguration('rear_obstacle_config')
@@ -63,6 +64,7 @@ def generate_launch_description():
             'ai_color_width': ai_color_width,
             'ai_color_height': ai_color_height,
             'ai_color_fps': ai_color_fps,
+            'ai_video_device': ai_video_device,
         }.items(),
     )
 
@@ -140,6 +142,7 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_ai_depth', default_value='true'),
         DeclareLaunchArgument('allow_missing_cameras', default_value='true'),
         DeclareLaunchArgument('device_num', default_value='auto'),
+        DeclareLaunchArgument('ai_video_device', default_value='/dev/video2'),
         DeclareLaunchArgument('ai_color_width', default_value='640'),
         DeclareLaunchArgument('ai_color_height', default_value='480'),
         DeclareLaunchArgument('ai_color_fps', default_value='30'),

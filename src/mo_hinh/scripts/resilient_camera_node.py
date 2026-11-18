@@ -27,7 +27,7 @@ class ResilientCameraNode(Node):
         super().__init__("resilient_camera_node")
 
         # Khai báo các tham số cấu hình
-        self.declare_parameter("video_device", "/dev/video0")
+        self.declare_parameter("video_device", "/dev/video2")
         self.declare_parameter("image_width", 640)
         self.declare_parameter("image_height", 480)
         self.declare_parameter("framerate", 30.0)
@@ -71,8 +71,9 @@ class ResilientCameraNode(Node):
             return self.video_device_param
 
         # Nếu không thấy cổng chỉ định và cho phép fallback, quét /dev/video*
+        # Ưu tiên index 2 (Cam AI) trước
         if self.auto_detect_fallback:
-            for idx in [0, 2, 4, 6, 8, 1, 3, 5]:
+            for idx in [2, 0, 4, 6, 8, 1, 3, 5]:
                 cand = f"/dev/video{idx}"
                 if os.path.exists(cand):
                     # Thử mở kiểm tra nhanh

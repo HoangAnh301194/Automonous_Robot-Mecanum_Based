@@ -135,6 +135,7 @@ def generate_launch_description():
         front_serial = LaunchConfiguration('front_serial').perform(context).strip()
         rear_serial = LaunchConfiguration('rear_serial').perform(context).strip()
         ai_serial = LaunchConfiguration('ai_serial').perform(context).strip()
+        ai_video_device = LaunchConfiguration('ai_video_device').perform(context).strip()
 
         available_serials, ai_video, report, missing_serials = resolve_available_cameras(
             ai_serial=ai_serial,
@@ -142,6 +143,7 @@ def generate_launch_description():
             rear_serial=rear_serial,
             enable_ai=enable_ai,
             allow_missing=allow_missing,
+            ai_video_override=ai_video_device,
         )
 
         start_front = enable_front and (front_serial in available_serials)
@@ -238,6 +240,10 @@ def generate_launch_description():
         DeclareLaunchArgument('ai_depth_fps', default_value='15'),
 
         # AI RGB Camera parameters
+        DeclareLaunchArgument(
+            'ai_video_device', default_value='/dev/video2',
+            description='Fixed video device or "auto" for dynamic pairing (default: /dev/video2).',
+        ),
         DeclareLaunchArgument(
             'ai_color_width', default_value='640',
             description='AI RGB width (default: 640, or 1280 for HD).',

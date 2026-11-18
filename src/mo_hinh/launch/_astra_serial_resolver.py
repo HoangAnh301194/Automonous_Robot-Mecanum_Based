@@ -295,19 +295,30 @@ def resolve_video_from_serial(
 def find_fallback_uvc_video(
     sys_video_root=Path("/sys/class/video4linux"),
     dev_root=Path("/dev"),
+    preferred_device: str | None = "/dev/video2",
 ) -> str | None:
-    """Tìm cổng V4L2 index 0 của camera UVC khi OpenNI Depth bị lỗi phần cứng/sụt áp."""
-    try:
-        videos = _video_nodes(Path(sys_video_root), Path(dev_root))
-        if videos:
-            return str(videos[0][1])
-    except Exception:
-        pass
-    # Fallback kiểm tra trực tiếp các cổng video phổ biến
-    for idx in (0, 2, 4, 6):
+    """Tìm cổng V4L2 index 0 của camera UVC khi OpenNI Depth bị lỗi phần cứng/sụt áp.
+
+    Ưu tiên cổng phần cứng của Camera AI (/dev/video2) trước khi quét các cổng khác.
+    """
+    if preferred_device and Path(preferred_device).exists():
+        return str(preferred_device)
+
+    # Ưu tiên theo thứ tự: video2 (Cam AI) -> video0 -> video4 -> video6
+    for idx in (2, 0, 4, 6):
         cand = Path(dev_root) / f"video{idx}"
         if cand.exists():
             return str(cand)
+
+    try:
+        videos = _video_nodes(Path(sys_video_root), Path(dev_root))
+        if videos:
+            for _, vpath in videos:
+                if vpath.name == "video2":
+                    return str(vpath)
+            return str(videos[0][1])
+    except Exception:
+        pass
     return None
 
 
@@ -321,16 +332,25 @@ def resolve_available_cameras(
     sys_usb_root=Path("/sys/bus/usb/devices"),
     sys_video_root=Path("/sys/class/video4linux"),
     dev_root=Path("/dev"),
+    ai_video_override=None,
 ):
     """Inspect connected Astra cameras and resolve AI RGB only when present.
 
     Returns (available_serials_set, ai_video_device_or_none, report_lines, missing_serials).
     Never guesses an RGB /dev/videoN node: if ai_serial is connected and enable_ai is True,
     still requires unambiguous OpenNI -> USB hub -> V4L2 index-0 pairing among connected devices.
+    If ai_video_override is specified (e.g. /dev/video2), it takes precedence for AI RGB.
     """
     configured = [str(s).strip() for s in (front_serial, rear_serial, ai_serial)]
     if any(not s for s in configured) or len(set(configured)) != len(configured):
         raise CameraIdentityError("Camera serials (front, rear, ai) must be nonempty and unique.")
+
+    # Nếu người dùng hoặc launch file chỉ định rõ cổng video cho Cam AI (ví dụ: /dev/video2)
+    has_explicit_ai_video = (
+        ai_video_override is not None
+        and str(ai_video_override).strip().lower() not in ("", "auto", "none")
+    )
+    explicit_video_path = str(ai_video_override).strip() if has_explicit_ai_video else None
 
     try:
         devices = (
@@ -340,7 +360,10 @@ def resolve_available_cameras(
     except CameraIdentityError as exc:
         if not allow_missing:
             raise
-        fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root) if enable_ai else None
+        if explicit_video_path and os.path.exists(explicit_video_path):
+            fallback_video = explicit_video_path
+        else:
+            fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root) if enable_ai else None
         return set(), fallback_video, [f"OpenNI enumeration skipped: {exc}"], list(configured)
 
     available = {d.serial: d for d in devices}
@@ -361,6 +384,15 @@ def resolve_available_cameras(
             for s in present_serials
         ]
         return set(present_serials), None, report, missing_serials
+
+    # Nếu có chỉ định cổng AI video rõ ràng (ví dụ: /dev/video2), ưu tiên sử dụng luôn
+    if explicit_video_path and os.path.exists(explicit_video_path):
+        report = [
+            "{} [OpenNI {}] (depth)".format(s, available[s].uri)
+            for s in present_serials
+        ]
+        report.append(f"[CONFIG] Sử dụng cổng cố định cho Camera AI RGB: {explicit_video_path}")
+        return set(present_serials), explicit_video_path, report, missing_serials
 
     # Nếu enable_ai=True nhưng ai_serial không online qua OpenNI (ví dụ sụt nguồn USB Depth):
     # Tự động fallback sang cổng UVC RGB đang sống để AI không bị chết oan
