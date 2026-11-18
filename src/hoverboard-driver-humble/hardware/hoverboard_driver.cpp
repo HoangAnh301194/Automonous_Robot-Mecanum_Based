@@ -19,10 +19,12 @@
 #include <cstddef>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <vector>
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
+#include <sys/ioctl.h>
 
 #include "hardware_interface/types/hardware_interface_type_values.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -248,9 +250,10 @@ namespace hoverboard_driver
     wheel_radius = std::stod(info_.hardware_parameters["wheel_radius"]);
     max_velocity = std::stod(info_.hardware_parameters["max_velocity"]);
     port = info_.hardware_parameters["device"];
-    hw_positions_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-    hw_velocities_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
-    hw_commands_.resize(info_.joints.size(), std::numeric_limits<double>::quiet_NaN());
+    // Khởi tạo trạng thái ban đầu an toàn bằng 0.0 thay vì NaN để tránh crash controller và TF khi vừa bật Layer
+    hw_positions_.resize(info_.joints.size(), 0.0);
+    hw_velocities_.resize(info_.joints.size(), 0.0);
+    hw_commands_.resize(info_.joints.size(), 0.0);
 
     for (const hardware_interface::ComponentInfo &joint : info_.joints)
     {
@@ -407,8 +410,8 @@ namespace hoverboard_driver
 
     if ((port_fd = open(port.c_str(), O_RDWR | O_NOCTTY | O_NDELAY)) < 0)
     {
-      RCLCPP_FATAL(rclcpp::get_logger("hoverboard_driver"), "Cannot open serial port to hoverboard");
-      exit(-1);
+      RCLCPP_FATAL(rclcpp::get_logger("hoverboard_driver"), "Cannot open serial port to hoverboard (%s)", port.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
     }
 
     // CONFIGURE THE UART -- connecting to the board
@@ -422,6 +425,13 @@ namespace hoverboard_driver
     tcflush(port_fd, TCIFLUSH);
     tcsetattr(port_fd, TCSANOW, &options);
 
+    // Xóa DTR/RTS để giải phóng chân Reset của ESP32 sau khi mở cổng
+    int modem_status = 0;
+    if (ioctl(port_fd, TIOCMGET, &modem_status) == 0) {
+      modem_status &= ~(TIOCM_DTR | TIOCM_RTS);
+      ioctl(port_fd, TIOCMSET, &modem_status);
+    }
+
     // Khởi động luồng nền quay Executor cho hardware_publisher để nhận lệnh ROS 2 Topic
     if (!node_thread_running_.load()) {
       node_thread_running_.store(true);
@@ -432,6 +442,39 @@ namespace hoverboard_driver
           node_executor_->spin();
         }
       });
+    }
+
+    // Warm-up Handshake: Chờ tối đa 1.5s để ESP32 hoàn tất nạp và nhận gói tin 0xABCD hợp lệ đầu tiên
+    valid_packet_received_ = false;
+    RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"),
+                "Warm-up handshake: waiting for initial telemetry frame from %s...", port.c_str());
+    auto t_start = std::chrono::steady_clock::now();
+    rclcpp::Clock steady_clock(RCL_STEADY_TIME);
+
+    while (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t_start).count() < 1500) {
+      char c;
+      int r = ::read(port_fd, &c, 1);
+      if (r > 0) {
+        rclcpp::Time now_time = steady_clock.now();
+        protocol_recv(now_time, c);
+        if (valid_packet_received_) {
+          break;
+        }
+      } else {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+      }
+    }
+
+    if (valid_packet_received_) {
+      RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"),
+                  "Hoverboard handshake SUCCESS! Initial telemetry verified (Battery: %.2fV)",
+                  (double)msg.batVoltage / 100.0);
+      hardware_publisher->publish_connected(true);
+    } else {
+      RCLCPP_WARN(rclcpp::get_logger("hoverboard_driver"),
+                  "Hoverboard handshake TIMEOUT on %s: no valid frame received within 1.5s. Running in safe-zero state; check robot power/cables.",
+                  port.c_str());
+      hardware_publisher->publish_connected(false);
     }
 
     RCLCPP_INFO(rclcpp::get_logger("hoverboard_driver"), "Successfully activated!");
@@ -481,9 +524,6 @@ namespace hoverboard_driver
 
       while ((r = ::read(port_fd, &c, 1)) > 0 && i++ < 1024)
         protocol_recv(time, c);
-
-      if (i > 0)
-        last_read = time;
 
       if (r < 0 && errno != EAGAIN)
         RCLCPP_ERROR(rclcpp::get_logger("hoverboard_driver"), "Reading from serial %s failed: %d", port.c_str(), r);
@@ -540,6 +580,8 @@ namespace hoverboard_driver
 
       if (msg.checksum == checksum)
       {
+        valid_packet_received_ = true;
+        last_read = time;
         hardware_publisher->publish_voltage((double)msg.batVoltage / 100.0);
         hardware_publisher->publish_temp((double)msg.boardTemp / 10.0);
         ;

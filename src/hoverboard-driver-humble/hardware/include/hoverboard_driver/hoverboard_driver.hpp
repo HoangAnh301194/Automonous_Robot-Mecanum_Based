@@ -223,6 +223,7 @@ namespace hoverboard_driver
     std::thread node_thread_;
     std::atomic<bool> node_thread_running_{false};
     std::shared_ptr<rclcpp::executors::SingleThreadedExecutor> node_executor_;
+    bool valid_packet_received_{false};
   };
 
 } // namespace hoverboard_driver
