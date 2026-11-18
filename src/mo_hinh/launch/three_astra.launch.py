@@ -241,8 +241,8 @@ def generate_launch_description():
 
         # AI RGB Camera parameters
         DeclareLaunchArgument(
-            'ai_video_device', default_value='/dev/video2',
-            description='Fixed video device or "auto" for dynamic pairing (default: /dev/video2).',
+            'ai_video_device', default_value='auto',
+            description='Fixed video device or "auto" for dynamic HWID pairing (default: auto).',
         ),
         DeclareLaunchArgument(
             'ai_color_width', default_value='640',

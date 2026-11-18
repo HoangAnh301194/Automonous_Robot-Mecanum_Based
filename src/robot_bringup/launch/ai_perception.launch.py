@@ -142,7 +142,7 @@ def generate_launch_description():
         DeclareLaunchArgument('enable_ai_depth', default_value='true'),
         DeclareLaunchArgument('allow_missing_cameras', default_value='true'),
         DeclareLaunchArgument('device_num', default_value='auto'),
-        DeclareLaunchArgument('ai_video_device', default_value='/dev/video2'),
+        DeclareLaunchArgument('ai_video_device', default_value='auto'),
         DeclareLaunchArgument('ai_color_width', default_value='640'),
         DeclareLaunchArgument('ai_color_height', default_value='480'),
         DeclareLaunchArgument('ai_color_fps', default_value='30'),

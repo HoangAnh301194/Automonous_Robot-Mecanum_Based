@@ -363,7 +363,7 @@ def resolve_available_cameras(
         if explicit_video_path and os.path.exists(explicit_video_path):
             fallback_video = explicit_video_path
         else:
-            fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root) if enable_ai else None
+            fallback_video = None
         return set(), fallback_video, [f"OpenNI enumeration skipped: {exc}"], list(configured)
 
     available = {d.serial: d for d in devices}
@@ -394,17 +394,14 @@ def resolve_available_cameras(
         report.append(f"[CONFIG] Sử dụng cổng cố định cho Camera AI RGB: {explicit_video_path}")
         return set(present_serials), explicit_video_path, report, missing_serials
 
-    # Nếu enable_ai=True nhưng ai_serial không online qua OpenNI (ví dụ sụt nguồn USB Depth):
-    # Tự động fallback sang cổng UVC RGB đang sống để AI không bị chết oan
+    # Nếu enable_ai=True nhưng ai_serial không online qua OpenNI:
+    # Theo chuẩn nghiêm ngặt HWID: Tuyệt đối không đoán bừa cổng video khác khi chưa có HWID xác thực
     if ai_serial not in available:
-        fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root)
         report = [
             "{} [OpenNI {}] (depth-only)".format(s, available[s].uri)
             for s in present_serials
         ]
-        if fallback_video is not None:
-            report.append(f"[FALLBACK] ai_serial {ai_serial} khong online Depth. Su dung camera RGB UVC tai {fallback_video}")
-            return set(present_serials), fallback_video, report, missing_serials
+        report.append(f"[HWID] ai_serial {ai_serial} chưa online OpenNI; từ chối đoán cổng RGB để đảm bảo an toàn tuyệt đối.")
         return set(present_serials), None, report, missing_serials
 
     try:
