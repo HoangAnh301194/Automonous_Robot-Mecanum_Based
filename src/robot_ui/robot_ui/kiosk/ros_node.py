@@ -357,10 +357,20 @@ class KioskRosNode(Node):
             self._water_liter = float(msg.water_liter)
         if hasattr(msg, "kettle_present"):
             self._kettle_present = bool(msg.kettle_present)
+
+        # Ưu tiên dữ liệu pin thực tế từ phần cứng (Hoverboard / BatteryState)
+        # Chặn giá trị mặc định 100.0% từ backend đè làm giật số % pin
+        if len(self._battery_voltages) > 0 and self._battery_pct > 0.0:
+            effective_battery = float(self._battery_pct)
+            effective_battery_low = bool(self._battery_pct < 20.0)
+        else:
+            effective_battery = float(msg.battery_percent)
+            effective_battery_low = bool(msg.battery_low)
+
         self.signals.robot_status_changed.emit(
             {
-                "battery_percent": float(msg.battery_percent),
-                "battery_low": bool(msg.battery_low),
+                "battery_percent": effective_battery,
+                "battery_low": effective_battery_low,
                 "lidar_ok": bool(msg.lidar_ok),
                 "localization_ok": bool(msg.localization_ok),
                 "odom_ok": bool(msg.odom_ok),
