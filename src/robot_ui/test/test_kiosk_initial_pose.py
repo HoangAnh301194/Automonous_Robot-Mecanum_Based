@@ -673,3 +673,83 @@ def test_ip28_2d_pose_estimate_click_outside_map_ignored(qapp):
     page.map_widget.mouseReleaseEvent(QMouseEvent(QEvent.MouseButtonRelease, p_outside, Qt.LeftButton, Qt.LeftButton, Qt.NoModifier))
     assert len(emitted_poses) == 0
     page.close()
+
+
+def test_ip29_capture_current_pose_as_start(qapp, tmp_path):
+    """IP-29: Chụp vị trí hiện tại của robot lưu vào YAML và cập nhật danh sách waypoints."""
+    page = NavigationPage({})
+    map_yaml = tmp_path / "lab_robot.yaml"
+    map_yaml.write_text("image: lab.png\nresolution: 0.05\norigin: [0, 0, 0]\n")
+    page._current_map_path = map_yaml
+    page._batch_waypoints = []
+    page._start_wp = None
+
+    # 1. Khi chưa có tọa độ robot -> Cảnh báo không chụp được
+    page._current_robot_pose = None
+    page.map_widget._pose = None
+    page.map_widget._candidate_initial_pose = None
+    page._capture_current_pose_as_start(silent=True)
+    assert page._start_wp is None
+
+    # 2. Cung cấp tọa độ robot và chụp thành công
+    page.set_pose({"x": 3.1415, "y": -2.7182, "yaw": 0.7853})
+    page._capture_current_pose_as_start(silent=True)
+
+    assert page._start_wp is not None
+    assert page._start_wp["x"] == pytest.approx(3.142, abs=0.01)
+    assert page._start_wp["y"] == pytest.approx(-2.718, abs=0.01)
+    assert page._start_wp["yaw"] == pytest.approx(0.785, abs=0.01)
+
+    # Kiểm tra file YAML được tạo đúng chuẩn
+    wp_file = tmp_path / "lab_robot_waypoints.yaml"
+    assert wp_file.is_file()
+    import yaml
+    with wp_file.open("r", encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    assert "locations" in data
+    assert "khoihanh" in data["locations"]
+    assert data["locations"]["khoihanh"]["x"] == pytest.approx(3.142, abs=0.01)
+    assert page._batch_waypoints[0]["name"] == "khoihanh"
+    page.close()
+
+
+def test_ip30_relocalize_to_start_pose(qapp, tmp_path):
+    """IP-30: Khôi phục định vị về điểm xuất phát đã lưu (phát /initialpose)."""
+    page = NavigationPage({})
+    emitted = []
+    page.initial_pose_requested.connect(emitted.append)
+
+    # 1. Chưa có điểm xuất phát -> Bị chặn và không emit
+    page._start_wp = None
+    page._batch_waypoints = []
+    page._current_map_path = tmp_path / "empty_map.yaml"
+    page._relocalize_to_start_pose(silent=True)
+    assert len(emitted) == 0
+
+    # 2. Đã có điểm xuất phát -> Phát /initialpose với tọa độ chuẩn
+    page._start_wp = {"name": "khoihanh", "x": 1.25, "y": -4.50, "yaw": 1.57}
+    page._relocalize_to_start_pose(silent=True)
+
+    assert len(emitted) == 1
+    req = emitted[0]
+    assert req["x"] == pytest.approx(1.25)
+    assert req["y"] == pytest.approx(-4.50)
+    assert req["yaw"] == pytest.approx(1.57)
+    assert req["source"] == "restore_start_pose"
+    page.close()
+
+
+def test_ip31_buttons_presence_and_sync(qapp):
+    """IP-31: Đảm bảo đầy đủ các nút bấm Chụp & Khôi phục vị trí trên cả 2 Tab giao diện."""
+    page = NavigationPage({})
+    assert hasattr(page, "btn_capture_start_pose")
+    assert hasattr(page, "btn_relocalize_start_pose")
+    assert hasattr(page, "btn_quick_relocalize")
+    assert hasattr(page, "btn_patrol_capture_start")
+    assert hasattr(page, "btn_patrol_relocalize")
+
+    assert page.btn_capture_start_pose.text() == "📸 LƯU ĐIỂM GỐC"
+    assert page.btn_relocalize_start_pose.text() == "🎯 VỀ ĐIỂM GỐC"
+    assert page.btn_quick_relocalize.text() == "🎯 VỀ ĐIỂM GỐC"
+    page.close()
+

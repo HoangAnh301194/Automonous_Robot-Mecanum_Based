@@ -169,7 +169,8 @@ def parse_nav_map_yaml(yaml_path: Path | str | None) -> dict[str, Any] | None:
         cells[occ < free_thresh] = 0
         cells[occ > occupied_thresh] = 100
 
-        max_dim = 1024
+        # Bảo toàn độ phân giải gốc của bản đồ (không downsampling bỏ pixel tường 1-pixel)
+        max_dim = 4096
         step = max(1, math.ceil(max(w, h) / max_dim))
         preview_width = math.ceil(w / step)
         preview_height = math.ceil(h / step)
@@ -401,9 +402,9 @@ class InteractiveNavMapWidget(QWidget):
             return
         cells = cells[: width * height].reshape((height, width))
         rgb = np.empty((height, width, 3), dtype=np.uint8)
-        rgb[cells < 0] = (30, 36, 44)                    # Unknown: Dark slate
-        rgb[(cells >= 0) & (cells < 50)] = (235, 238, 242) # Free space: Off-white
-        rgb[cells >= 50] = (15, 23, 42)                  # Obstacle: Black/Navy
+        rgb[cells < 0] = (40, 48, 58)                      # Unknown: Xám trung tính dịu mắt, tách bạch với tường
+        rgb[(cells >= 0) & (cells < 50)] = (245, 247, 250) # Free space: Trắng sáng rõ ràng
+        rgb[cells >= 50] = (0, 0, 0)                        # Obstacle: Đen tuyền 100% cực kỳ sắc nét
         rgb = np.ascontiguousarray(np.flipud(rgb))
         self._map_image = QImage(
             rgb.data, width, height, width * 3, QImage.Format_RGB888
@@ -857,8 +858,6 @@ class InteractiveNavMapWidget(QWidget):
     # -------------------------------------------------------------------------
     def paintEvent(self, event: Any) -> None:
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
 
         # Background
         painter.fillRect(self.rect(), QColor("#080808"))
@@ -886,8 +885,12 @@ class InteractiveNavMapWidget(QWidget):
             painter.rotate(self._rotation_deg)
             painter.translate(-c)
 
-        # 1. Map Image
+        # 1. Map Image: Vẽ sắc nét từng ô pixel (tắt SmoothPixmapTransform chống nhòe mờ mép tường)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, False)
         painter.drawImage(target, self._map_image)
+
+        # 2. Bật Antialiasing cho các nét vẽ vector tiếp theo (LiDAR, Goal, Waypoints, Path, Robot)
+        painter.setRenderHint(QPainter.Antialiasing, True)
 
         # 2. LiDAR Points (/scan) in Cyan
         if self._scan_points:
@@ -1435,6 +1438,8 @@ class NavigationPage(QWidget):
         self._localization_message = "Chưa định vị"
         self._last_log_feedback_time = 0.0
         self.patrol_log_text: QTextEdit | None = None
+        self._current_robot_pose: dict[str, Any] | None = None
+        self._start_wp: dict[str, Any] | None = None
 
         self._init_ui()
         default_map = Path("my_map/a2_amcl.yaml")
@@ -1442,6 +1447,7 @@ class NavigationPage(QWidget):
             self.load_map_yaml(default_map)
         else:
             self._load_patrol_from_yaml(silent=True)
+            self._update_start_pose_state()
 
         self._clock_timer = QTimer(self)
         self._clock_timer.timeout.connect(self._update_clock)
@@ -1799,6 +1805,56 @@ class NavigationPage(QWidget):
         self.chips_layout.setSpacing(6)
         chips_bar.addLayout(self.chips_layout)
         chips_bar.addStretch(1)
+
+        # Nút Chụp & Khôi phục vị trí gốc (khoihanh) cho bản đồ
+        self.btn_capture_start_pose = QPushButton("📸 LƯU ĐIỂM GỐC")
+        self.btn_capture_start_pose.setObjectName("navToolBtn")
+        self.btn_capture_start_pose.setCursor(Qt.PointingHandCursor)
+        self.btn_capture_start_pose.setStyleSheet("""
+            QPushButton {
+                background: #1e293b;
+                color: #38bdf8;
+                border: 1px solid #0284c7;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #0284c7;
+                color: #ffffff;
+            }
+        """)
+        self.btn_capture_start_pose.setToolTip(
+            "Lưu tọa độ hiện tại của robot làm Điểm Xuất Phát (khoihanh) cho bản đồ này"
+        )
+        self.btn_capture_start_pose.clicked.connect(self._capture_current_pose_as_start)
+        chips_bar.addWidget(self.btn_capture_start_pose)
+
+        self.btn_relocalize_start_pose = QPushButton("🎯 VỀ ĐIỂM GỐC")
+        self.btn_relocalize_start_pose.setObjectName("navToolBtn")
+        self.btn_relocalize_start_pose.setCursor(Qt.PointingHandCursor)
+        self.btn_relocalize_start_pose.setStyleSheet("""
+            QPushButton {
+                background: #064e3b;
+                color: #34d399;
+                border: 1px solid #059669;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #059669;
+                color: #ffffff;
+            }
+        """)
+        self.btn_relocalize_start_pose.setToolTip(
+            "Khôi phục định vị AMCL về điểm xuất phát đã lưu của bản đồ này"
+        )
+        self.btn_relocalize_start_pose.clicked.connect(self._relocalize_to_start_pose)
+        chips_bar.addWidget(self.btn_relocalize_start_pose)
+
         layout.addLayout(chips_bar)
 
         # Live Map
@@ -1904,9 +1960,31 @@ class NavigationPage(QWidget):
         self.btn_initial_pose.clicked.connect(self._toggle_2d_estimate)
         self.btn_2d_estimate = self.btn_initial_pose
 
+        self.btn_quick_relocalize = QPushButton("🎯 VỀ ĐIỂM GỐC")
+        self.btn_quick_relocalize.setObjectName("navToolBtn")
+        self.btn_quick_relocalize.setCursor(Qt.PointingHandCursor)
+        self.btn_quick_relocalize.setStyleSheet("""
+            QPushButton {
+                background: #064e3b;
+                color: #34d399;
+                border: 1px solid #059669;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #059669;
+                color: #ffffff;
+            }
+        """)
+        self.btn_quick_relocalize.setToolTip("Khôi phục định vị AMCL về điểm xuất phát đã lưu của bản đồ này")
+        self.btn_quick_relocalize.clicked.connect(self._relocalize_to_start_pose)
+
         action_row.addWidget(self.status_label, 1)
         action_row.addWidget(self.lbl_localization_badge)
         action_row.addWidget(self.btn_initial_pose)
+        action_row.addWidget(self.btn_quick_relocalize)
         action_row.addWidget(self.start_button)
         action_row.addWidget(self.stop_button)
         dash_layout.addLayout(action_row)
@@ -1943,10 +2021,22 @@ class NavigationPage(QWidget):
         self.btn_clear_wp.setObjectName("navToolBtn")
         self.btn_clear_wp.clicked.connect(self._clear_batch_waypoints)
 
+        self.btn_patrol_capture_start = QPushButton("📸 Lưu điểm gốc")
+        self.btn_patrol_capture_start.setObjectName("navToolBtn")
+        self.btn_patrol_capture_start.setToolTip("Lưu vị trí hiện tại của robot làm điểm xuất phát (khoihanh)")
+        self.btn_patrol_capture_start.clicked.connect(self._capture_current_pose_as_start)
+
+        self.btn_patrol_relocalize = QPushButton("🎯 Về điểm gốc")
+        self.btn_patrol_relocalize.setObjectName("navToolBtn")
+        self.btn_patrol_relocalize.setToolTip("Khôi phục định vị AMCL về điểm xuất phát đã lưu")
+        self.btn_patrol_relocalize.clicked.connect(self._relocalize_to_start_pose)
+
         toolbar.addWidget(self.btn_pick_mode)
         toolbar.addWidget(self.btn_undo_wp)
         toolbar.addWidget(self.btn_clear_wp)
         toolbar.addStretch(1)
+        toolbar.addWidget(self.btn_patrol_capture_start)
+        toolbar.addWidget(self.btn_patrol_relocalize)
         left_box.addLayout(toolbar)
 
         self.patrol_map_widget = InteractiveNavMapWidget(self.icons.get("goal"))
@@ -2657,6 +2747,286 @@ class NavigationPage(QWidget):
         self.set_localization_status("LOCALIZED", f"Vị trí: ({x:.2f}, {y:.2f}) | Sai số ước lượng: {cov:.2f}m")
 
     # -------------------------------------------------------------------------
+    # Start Pose (khoihanh) Management: Capture & Relocalize
+    # -------------------------------------------------------------------------
+    def _update_start_pose_state(self) -> None:
+        """Tìm và cập nhật trạng thái điểm xuất phát (khoihanh) cho bản đồ hiện tại."""
+        start_wp = self._get_saved_start_pose(force_reload=True)
+        if start_wp:
+            self._start_wp = start_wp
+            deg = math.degrees(float(start_wp.get("yaw", 0.0)))
+            tip = f"Khôi phục định vị về điểm xuất phát đã lưu (X={float(start_wp['x']):.2f}m, Y={float(start_wp['y']):.2f}m, Yaw={deg:.0f}°)"
+            if hasattr(self, "btn_relocalize_start_pose"):
+                self.btn_relocalize_start_pose.setToolTip(tip)
+            if hasattr(self, "btn_quick_relocalize"):
+                self.btn_quick_relocalize.setToolTip(tip)
+            if hasattr(self, "btn_patrol_relocalize"):
+                self.btn_patrol_relocalize.setToolTip(tip)
+        else:
+            self._start_wp = None
+            tip = "Chưa có điểm xuất phát được lưu cho bản đồ này. Hãy dùng 'LƯU ĐIỂM GỐC' trước."
+            if hasattr(self, "btn_relocalize_start_pose"):
+                self.btn_relocalize_start_pose.setToolTip(tip)
+            if hasattr(self, "btn_quick_relocalize"):
+                self.btn_quick_relocalize.setToolTip(tip)
+            if hasattr(self, "btn_patrol_relocalize"):
+                self.btn_patrol_relocalize.setToolTip(tip)
+
+    def _get_saved_start_pose(self, force_reload: bool = False) -> dict[str, Any] | None:
+        """Đọc waypoint 'khoihanh' từ bộ nhớ hoặc từ file <map_stem>_waypoints.yaml."""
+        if not force_reload and getattr(self, "_start_wp", None):
+            return self._start_wp
+
+        # Kiểm tra trong _batch_waypoints
+        for wp in getattr(self, "_batch_waypoints", []):
+            if str(wp.get("name", "")).lower() == "khoihanh":
+                self._start_wp = {
+                    "name": "khoihanh",
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                    "note": str(wp.get("note", "Điểm xuất phát")),
+                }
+                return self._start_wp
+
+        # Kiểm tra đọc từ file YAML của map hiện tại
+        if self._current_map_path:
+            stem = self._current_map_path.stem
+            candidates = [
+                self._get_map_waypoints_path(self._current_map_path),
+                self._current_map_path.parent / f"{stem}_waypoints.yaml",
+                self._config_dir / "waypoints" / f"{stem}_waypoints.yaml",
+            ]
+            for c in candidates:
+                if c and c.is_file():
+                    try:
+                        with c.open("r", encoding="utf-8") as f:
+                            data = yaml.safe_load(f) or {}
+                        locs = data.get("locations", {}) if isinstance(data, dict) and "locations" in data else data
+                        if isinstance(locs, dict) and "khoihanh" in locs:
+                            kh = locs["khoihanh"]
+                            if isinstance(kh, dict) and "x" in kh and "y" in kh:
+                                self._start_wp = {
+                                    "name": "khoihanh",
+                                    "x": float(kh.get("x", 0.0)),
+                                    "y": float(kh.get("y", 0.0)),
+                                    "yaw": float(kh.get("yaw", 0.0)),
+                                    "note": str(kh.get("note", "Điểm xuất phát")),
+                                    "source_file": str(c),
+                                }
+                                return self._start_wp
+                    except Exception:
+                        pass
+        return None
+
+    def _save_start_pose_to_yaml(self, x: float, y: float, yaw: float) -> bool:
+        """Ghi điểm xuất phát 'khoihanh' vào file YAML của bản đồ hiện tại và đồng bộ hệ thống."""
+        target_wp_file = self._get_map_waypoints_path(self._current_map_path)
+        if target_wp_file is None:
+            target_wp_file = self._config_dir / "locations.yaml"
+
+        try:
+            target_wp_file.parent.mkdir(parents=True, exist_ok=True)
+            existing_data: dict[str, Any] = {}
+            if target_wp_file.is_file():
+                try:
+                    with target_wp_file.open("r", encoding="utf-8") as f:
+                        existing_data = yaml.safe_load(f) or {}
+                except Exception:
+                    existing_data = {}
+
+            locations = existing_data.get("locations", {}) if isinstance(existing_data.get("locations"), dict) else {}
+            routes = existing_data.get("routes", {}) if isinstance(existing_data.get("routes"), dict) else {}
+            wp_list = existing_data.get("waypoints", []) if isinstance(existing_data.get("waypoints"), list) else []
+
+            # Cập nhật locations["khoihanh"]
+            locations["khoihanh"] = {
+                "x": round(float(x), 3),
+                "y": round(float(y), 3),
+                "yaw": round(float(yaw), 3),
+                "note": "Điểm xuất phát",
+            }
+
+            # Cập nhật wp_list
+            found_in_list = False
+            for wp in wp_list:
+                if isinstance(wp, dict) and str(wp.get("name", "")).lower() == "khoihanh":
+                    wp["x"] = round(float(x), 3)
+                    wp["y"] = round(float(y), 3)
+                    wp["yaw"] = round(float(yaw), 3)
+                    wp["note"] = "Điểm xuất phát"
+                    found_in_list = True
+                    break
+            if not found_in_list:
+                wp_list.insert(0, {
+                    "name": "khoihanh",
+                    "x": round(float(x), 3),
+                    "y": round(float(y), 3),
+                    "yaw": round(float(yaw), 3),
+                    "note": "Điểm xuất phát",
+                })
+
+            # Đảm bảo patrol_route có khoihanh
+            patrol_route = routes.get("patrol_route", [])
+            if not isinstance(patrol_route, list):
+                patrol_route = []
+            if "khoihanh" not in patrol_route:
+                patrol_route.insert(0, "khoihanh")
+            routes["patrol_route"] = patrol_route
+
+            map_name_str = self._current_map_path.name if self._current_map_path else "default_map"
+            payload = {
+                "map_name": map_name_str,
+                "locations": locations,
+                "routes": routes,
+                "waypoints": wp_list,
+            }
+
+            with target_wp_file.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
+
+            # Cập nhật bộ nhớ nội bộ _start_wp
+            self._start_wp = {
+                "name": "khoihanh",
+                "x": round(float(x), 3),
+                "y": round(float(y), 3),
+                "yaw": round(float(yaw), 3),
+                "note": "Điểm xuất phát",
+                "source_file": str(target_wp_file),
+            }
+
+            # Cập nhật _batch_waypoints trong giao diện
+            found_in_batch = False
+            for wp in self._batch_waypoints:
+                if str(wp.get("name", "")).lower() == "khoihanh":
+                    wp["x"] = round(float(x), 3)
+                    wp["y"] = round(float(y), 3)
+                    wp["yaw"] = round(float(yaw), 3)
+                    wp["note"] = "Điểm xuất phát"
+                    found_in_batch = True
+                    break
+            if not found_in_batch:
+                self._batch_waypoints.insert(0, {
+                    "name": "khoihanh",
+                    "x": round(float(x), 3),
+                    "y": round(float(y), 3),
+                    "yaw": round(float(yaw), 3),
+                    "note": "Điểm xuất phát",
+                })
+
+            self._sync_active_config_files()
+            self._sync_views_from_waypoints()
+            self._refresh_quick_location_chips()
+            self._update_start_pose_state()
+            self.map_widget.set_batch_waypoints(self._batch_waypoints)
+            self.patrol_map_widget.set_batch_waypoints(self._batch_waypoints)
+            self.map_widget.update()
+            self.patrol_map_widget.update()
+            return True
+        except Exception as exc:
+            self.append_patrol_log(f"[WAYPOINT][ERROR] Lỗi khi lưu điểm xuất phát: {exc}", "error")
+            return False
+
+    def _capture_current_pose_as_start(self, silent: bool = False) -> None:
+        """Chụp tọa độ hiện tại của robot hoặc ứng viên 2D pose làm điểm xuất phát (khoihanh)."""
+        pose = None
+        if getattr(self, "_current_robot_pose", None) and "x" in self._current_robot_pose:
+            pose = self._current_robot_pose
+        elif self.map_widget._pose and "x" in self.map_widget._pose:
+            pose = self.map_widget._pose
+        elif self.map_widget._candidate_initial_pose and "x" in self.map_widget._candidate_initial_pose:
+            pose = self.map_widget._candidate_initial_pose
+
+        if not pose or "x" not in pose or "y" not in pose:
+            self.set_command_status(
+                "warn",
+                "[WARN] Chưa có tọa độ robot! Hãy dùng '2D POSE ESTIMATE' kéo vị trí robot trên bản đồ trước."
+            )
+            self.append_patrol_log(
+                "[WAYPOINT][WARN] Không thể chụp điểm xuất phát vì robot chưa có tọa độ hợp lệ.",
+                "warn"
+            )
+            if not silent:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có tọa độ robot",
+                    "Hiện tại robot chưa có tọa độ hợp lệ trên bản đồ!\n\n"
+                    "Cách khắc phục:\n"
+                    "1. Bấm nút '2D POSE ESTIMATE' rồi chạm kéo mũi tên trên bản đồ để xác định vị trí và hướng của robot.\n"
+                    "2. Hoặc khởi động Layer 2 và đợi robot nhận vị trí từ hệ thống cảm biến.\n"
+                    "Sau đó bấm lại '📸 LƯU ĐIỂM GỐC'."
+                )
+            return
+
+        x = float(pose["x"])
+        y = float(pose["y"])
+        yaw = float(pose.get("yaw", 0.0))
+
+        success = self._save_start_pose_to_yaml(x, y, yaw)
+        if success:
+            deg = math.degrees(yaw)
+            map_name = self._current_map_path.name if self._current_map_path else "bản đồ"
+            self.set_command_status(
+                "success",
+                f"[INFO] Đã lưu điểm xuất phát: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)"
+            )
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã chụp và lưu điểm xuất phát 'khoihanh': X={x:.2f} m, Y={y:.2f} m, Yaw={deg:.0f}° cho {map_name}.",
+                "success"
+            )
+            self.status_label.setText(f"Đã lưu điểm xuất phát: X={x:.2f}, Y={y:.2f} m (khoihanh)")
+            if not silent:
+                QMessageBox.information(
+                    self,
+                    "Lưu điểm xuất phát thành công",
+                    f"Đã lưu vị trí robot hiện tại làm ĐIỂM XUẤT PHÁT (khoihanh) cho {map_name}:\n\n"
+                    f"• X: {x:.3f} m\n"
+                    f"• Y: {y:.3f} m\n"
+                    f"• Hướng (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                    f"Từ bây giờ, nếu robot bị mất định vị, chỉ cần điều khiển robot về lại vị trí này "
+                    f"và ấn nút '🎯 VỀ ĐIỂM GỐC' để khôi phục định vị tức thì!"
+                )
+
+    def _relocalize_to_start_pose(self, silent: bool = False) -> None:
+        """Khôi phục định vị AMCL về điểm xuất phát đã lưu của bản đồ hiện tại."""
+        start_wp = self._get_saved_start_pose()
+        if not start_wp:
+            self.set_command_status(
+                "warn",
+                "[WARN] Bản đồ này chưa có điểm xuất phát đã lưu! Hãy lái robot về vạch mốc và ấn '📸 LƯU ĐIỂM GỐC' trước."
+            )
+            self.append_patrol_log(
+                "[ESTIMATE][WARN] Không tìm thấy điểm xuất phát 'khoihanh' để khôi phục định vị.",
+                "warn"
+            )
+            if not silent:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có điểm xuất phát",
+                    "Bản đồ này chưa có điểm xuất phát (khoihanh) nào được lưu!\n\n"
+                    "Vui lòng:\n"
+                    "1. Định vị chuẩn cho robot (bằng '2D POSE ESTIMATE') hoặc di chuyển robot đến vạch xuất phát.\n"
+                    "2. Ấn nút '📸 LƯU ĐIỂM GỐC' để lưu lại vị trí này.\n"
+                    "Sau đó bạn có thể ấn nút này bất cứ lúc nào để khôi phục định vị tức thì."
+                )
+            return
+
+        x = float(start_wp["x"])
+        y = float(start_wp["y"])
+        yaw = float(start_wp.get("yaw", 0.0))
+        deg = math.degrees(yaw)
+
+        self.append_patrol_log(
+            f"[ESTIMATE][INFO] Đang khôi phục định vị về điểm xuất phát: X={x:.2f} m, Y={y:.2f} m, Yaw={yaw:.2f} rad ({deg:.0f}°)...",
+            "progress"
+        )
+        self.set_command_status(
+            "progress",
+            f"[INFO] Đang đặt lại vị trí robot về điểm gốc: X={x:.2f} m, Y={y:.2f} m, Yaw={deg:.0f}°..."
+        )
+        self._send_initial_pose(x, y, yaw, "restore_start_pose")
+
+    # -------------------------------------------------------------------------
     # Header Badges & Fullscreen
     # -------------------------------------------------------------------------
     def update_fullscreen_button(self, is_fullscreen: bool) -> None:
@@ -2756,6 +3126,7 @@ class NavigationPage(QWidget):
                 # Protect global locations.yaml & routes.yaml from being overwritten
                 self._clear_batch_waypoints()
                 self.status_label.setText(f"Đã nạp bản đồ: {stem} (Chưa có điểm, hãy chấm điểm mới)")
+            self._update_start_pose_state()
             return True
         return False
 
@@ -2771,6 +3142,7 @@ class NavigationPage(QWidget):
         self.patrol_map_widget.set_map(map_data)
 
     def set_pose(self, pose: dict[str, Any]) -> None:
+        self._current_robot_pose = pose
         self.map_widget.set_pose(pose)
         self.patrol_map_widget.set_pose(pose)
 
