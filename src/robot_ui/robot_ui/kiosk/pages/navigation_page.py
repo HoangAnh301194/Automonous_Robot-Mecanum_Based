@@ -1478,6 +1478,7 @@ class NavigationPage(QWidget):
         self.patrol_log_text: QTextEdit | None = None
         self._current_robot_pose: dict[str, Any] | None = None
         self._start_wp: dict[str, Any] | None = None
+        self._standby_wp: dict[str, Any] | None = None
 
         self._init_ui()
         default_map = Path("my_map/a2_amcl.yaml")
@@ -1864,7 +1865,7 @@ class NavigationPage(QWidget):
             }
         """)
         self.btn_capture_start_pose.setToolTip(
-            "Lưu tọa độ hiện tại của robot làm Điểm Xuất Phát (khoihanh) cho bản đồ này"
+            "Lưu vị trí cất máy hiện tại của robot làm Điểm Xuất Phát (khoihanh) cho bản đồ này"
         )
         self.btn_capture_start_pose.clicked.connect(self._capture_current_pose_as_start)
         chips_bar.addWidget(self.btn_capture_start_pose)
@@ -1888,10 +1889,59 @@ class NavigationPage(QWidget):
             }
         """)
         self.btn_relocalize_start_pose.setToolTip(
-            "Khôi phục định vị AMCL về điểm xuất phát đã lưu của bản đồ này"
+            "Phát /initialpose khôi phục tức thì định vị AMCL về điểm cất máy đã lưu (không lái xe)"
         )
         self.btn_relocalize_start_pose.clicked.connect(self._relocalize_to_start_pose)
         chips_bar.addWidget(self.btn_relocalize_start_pose)
+
+        # Nút Trạm Chờ (tram_cho) thông thoáng an toàn cho Nav2
+        self.btn_capture_standby_pose = QPushButton("📸 LƯU TRẠM CHỜ")
+        self.btn_capture_standby_pose.setObjectName("navToolBtn")
+        self.btn_capture_standby_pose.setCursor(Qt.PointingHandCursor)
+        self.btn_capture_standby_pose.setStyleSheet("""
+            QPushButton {
+                background: #312e81;
+                color: #a5b4fc;
+                border: 1px solid #4f46e5;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #4f46e5;
+                color: #ffffff;
+            }
+        """)
+        self.btn_capture_standby_pose.setToolTip(
+            "Lưu vị trí thông thoáng hiện tại của robot làm Trạm Chờ (tram_cho) cho bản đồ này"
+        )
+        self.btn_capture_standby_pose.clicked.connect(self._capture_current_pose_as_standby)
+        chips_bar.addWidget(self.btn_capture_standby_pose)
+
+        self.btn_navigate_standby_pose = QPushButton("🚏 VỀ TRẠM CHỜ")
+        self.btn_navigate_standby_pose.setObjectName("navToolBtn")
+        self.btn_navigate_standby_pose.setCursor(Qt.PointingHandCursor)
+        self.btn_navigate_standby_pose.setStyleSheet("""
+            QPushButton {
+                background: #065f46;
+                color: #6ee7b7;
+                border: 1px solid #059669;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 11px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background: #059669;
+                color: #ffffff;
+            }
+        """)
+        self.btn_navigate_standby_pose.setToolTip(
+            "Nav2 tự động lái robot về Trạm Chờ an toàn ngoài tường"
+        )
+        self.btn_navigate_standby_pose.clicked.connect(self._navigate_to_standby_pose)
+        chips_bar.addWidget(self.btn_navigate_standby_pose)
 
         layout.addLayout(chips_bar)
 
@@ -2059,15 +2109,25 @@ class NavigationPage(QWidget):
         self.btn_clear_wp.setObjectName("navToolBtn")
         self.btn_clear_wp.clicked.connect(self._clear_batch_waypoints)
 
-        self.btn_patrol_capture_start = QPushButton("📸 Lưu điểm gốc")
+        self.btn_patrol_capture_start = QPushButton("📸 Điểm gốc")
         self.btn_patrol_capture_start.setObjectName("navToolBtn")
-        self.btn_patrol_capture_start.setToolTip("Lưu vị trí hiện tại của robot làm điểm xuất phát (khoihanh)")
+        self.btn_patrol_capture_start.setToolTip("Lưu vị trí cất máy hiện tại của robot làm điểm xuất phát (khoihanh)")
         self.btn_patrol_capture_start.clicked.connect(self._capture_current_pose_as_start)
 
-        self.btn_patrol_relocalize = QPushButton("🎯 Về điểm gốc")
+        self.btn_patrol_relocalize = QPushButton("🎯 Định vị gốc")
         self.btn_patrol_relocalize.setObjectName("navToolBtn")
-        self.btn_patrol_relocalize.setToolTip("Khôi phục định vị AMCL về điểm xuất phát đã lưu")
+        self.btn_patrol_relocalize.setToolTip("Phát /initialpose khôi phục định vị AMCL về điểm xuất phát đã lưu (không lái xe)")
         self.btn_patrol_relocalize.clicked.connect(self._relocalize_to_start_pose)
+
+        self.btn_patrol_capture_standby = QPushButton("📸 Lưu trạm chờ")
+        self.btn_patrol_capture_standby.setObjectName("navToolBtn")
+        self.btn_patrol_capture_standby.setToolTip("Lưu vị trí thông thoáng hiện tại của robot làm Trạm Chờ (tram_cho)")
+        self.btn_patrol_capture_standby.clicked.connect(self._capture_current_pose_as_standby)
+
+        self.btn_patrol_navigate_standby = QPushButton("🚏 Về trạm chờ")
+        self.btn_patrol_navigate_standby.setObjectName("navToolBtn")
+        self.btn_patrol_navigate_standby.setToolTip("Nav2 tự động lái robot về Trạm Chờ thông thoáng ngoài tường")
+        self.btn_patrol_navigate_standby.clicked.connect(self._navigate_to_standby_pose)
 
         toolbar.addWidget(self.btn_pick_mode)
         toolbar.addWidget(self.btn_undo_wp)
@@ -2075,6 +2135,8 @@ class NavigationPage(QWidget):
         toolbar.addStretch(1)
         toolbar.addWidget(self.btn_patrol_capture_start)
         toolbar.addWidget(self.btn_patrol_relocalize)
+        toolbar.addWidget(self.btn_patrol_capture_standby)
+        toolbar.addWidget(self.btn_patrol_navigate_standby)
         left_box.addLayout(toolbar)
 
         self.patrol_map_widget = InteractiveNavMapWidget(self.icons.get("goal"))
@@ -2904,12 +2966,10 @@ class NavigationPage(QWidget):
                     "note": "Điểm xuất phát",
                 })
 
-            # Đảm bảo patrol_route có khoihanh
+            # Giữ nguyên patrol_route hiện tại, không ép buộc điểm cất máy sát tường vào lộ trình tự động
             patrol_route = routes.get("patrol_route", [])
             if not isinstance(patrol_route, list):
                 patrol_route = []
-            if "khoihanh" not in patrol_route:
-                patrol_route.insert(0, "khoihanh")
             routes["patrol_route"] = patrol_route
 
             map_name_str = self._current_map_path.name if self._current_map_path else "default_map"
@@ -3063,6 +3123,252 @@ class NavigationPage(QWidget):
             f"[INFO] Đang đặt lại vị trí robot về điểm gốc: X={x:.2f} m, Y={y:.2f} m, Yaw={deg:.0f}°..."
         )
         self._send_initial_pose(x, y, yaw, "restore_start_pose")
+
+    # -------------------------------------------------------------------------
+    # Standby Staging Point (tram_cho) Management
+    # -------------------------------------------------------------------------
+    def _get_saved_standby_pose(self) -> dict[str, Any] | None:
+        """Đọc waypoint 'tram_cho' từ bộ nhớ hoặc từ file <map_stem>_waypoints.yaml."""
+        if hasattr(self, "_standby_wp") and self._standby_wp:
+            return self._standby_wp
+
+        for wp in self._batch_waypoints:
+            if str(wp.get("name", "")).lower() == "tram_cho":
+                self._standby_wp = {
+                    "name": "tram_cho",
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                }
+                return self._standby_wp
+
+        wp_file = self._get_map_waypoints_path(self._current_map_path)
+        if wp_file and wp_file.is_file():
+            try:
+                with wp_file.open("r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                locs = data.get("locations", {})
+                if isinstance(locs, dict) and "tram_cho" in locs:
+                    tc = locs["tram_cho"]
+                    if isinstance(tc, dict) and "x" in tc and "y" in tc:
+                        self._standby_wp = {
+                            "name": "tram_cho",
+                            "x": float(tc["x"]),
+                            "y": float(tc["y"]),
+                            "yaw": float(tc.get("yaw", 0.0)),
+                            "source_file": str(wp_file),
+                        }
+                        return self._standby_wp
+            except Exception:
+                pass
+        return None
+
+    def _capture_current_pose_as_standby(self) -> None:
+        """Chụp tọa độ hiện tại của robot hoặc ứng viên 2D pose làm Trạm Chờ thông thoáng (tram_cho)."""
+        x: float | None = None
+        y: float | None = None
+        yaw: float = 0.0
+
+        if hasattr(self, "_robot_pose") and self._robot_pose is not None:
+            x, y, yaw = self._robot_pose
+        elif hasattr(self, "_goal") and self._goal is not None:
+            x, y, yaw = self._goal
+        elif (
+            hasattr(self, "map_widget")
+            and hasattr(self.map_widget, "_candidate_initial_pose")
+            and self.map_widget._candidate_initial_pose is not None
+        ):
+            x, y, yaw = self.map_widget._candidate_initial_pose
+
+        if x is None or y is None:
+            self.set_command_status(
+                "warn",
+                "[WARN] Chưa có tọa độ robot hoặc mục tiêu hợp lệ để lưu làm Trạm Chờ!"
+            )
+            QMessageBox.warning(
+                self,
+                "Chưa có tọa độ",
+                "Không tìm thấy tọa độ robot hoặc mục tiêu hợp lệ trên bản đồ!\n\n"
+                "Vui lòng định vị robot hoặc chấm 1 điểm thông thoáng trên bản đồ trước."
+            )
+            return
+
+        map_name = self._current_map_path.name if self._current_map_path else "default"
+        deg = math.degrees(yaw)
+        success = self._save_standby_pose_to_yaml(x, y, yaw)
+        if success:
+            self.append_patrol_log(
+                f"[WAYPOINT][INFO] Đã lưu Trạm Chờ 'tram_cho': X={x:.2f} m, Y={y:.2f} m, Yaw={deg:.0f}° cho {map_name}.",
+                "success"
+            )
+            self.set_command_status("success", f"Đã lưu Trạm Chờ: X={x:.2f}, Y={y:.2f} m (tram_cho)")
+            QMessageBox.information(
+                self,
+                "Lưu Trạm Chờ Thành Công",
+                f"Đã lưu vị trí robot làm TRẠM CHỜ (tram_cho) cho {map_name}:\n\n"
+                f"• X: {x:.3f} m\n"
+                f"• Y: {y:.3f} m\n"
+                f"• Hướng (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                f"Từ bây giờ, khi kết thúc ca làm việc hoặc cần nghỉ ngơi, chỉ cần ấn nút '🚏 VỀ TRẠM CHỜ' "
+                f"để Nav2 tự động lái robot về vị trí an toàn này!"
+            )
+
+    def _save_standby_pose_to_yaml(self, x: float, y: float, yaw: float) -> bool:
+        """Ghi Trạm Chờ 'tram_cho' vào file YAML của bản đồ hiện tại và đồng bộ hệ thống."""
+        target_wp_file = self._get_map_waypoints_path(self._current_map_path)
+        if target_wp_file is None:
+            target_wp_file = self._config_dir / "locations.yaml"
+
+        try:
+            target_wp_file.parent.mkdir(parents=True, exist_ok=True)
+            existing_data: dict[str, Any] = {}
+            if target_wp_file.is_file():
+                with target_wp_file.open("r", encoding="utf-8") as f:
+                    existing_data = yaml.safe_load(f) or {}
+
+            locations = existing_data.get("locations", {})
+            if not isinstance(locations, dict):
+                locations = {}
+            routes = existing_data.get("routes", {})
+            if not isinstance(routes, dict):
+                routes = {}
+            wp_list = existing_data.get("waypoints", [])
+            if not isinstance(wp_list, list):
+                wp_list = []
+
+            # Cập nhật locations["tram_cho"]
+            locations["tram_cho"] = {
+                "x": round(float(x), 3),
+                "y": round(float(y), 3),
+                "yaw": round(float(yaw), 3),
+                "note": "Trạm chờ an toàn",
+            }
+
+            # Cập nhật wp_list
+            found_in_list = False
+            for wp in wp_list:
+                if isinstance(wp, dict) and str(wp.get("name", "")).lower() == "tram_cho":
+                    wp["x"] = round(float(x), 3)
+                    wp["y"] = round(float(y), 3)
+                    wp["yaw"] = round(float(yaw), 3)
+                    wp["note"] = "Trạm chờ an toàn"
+                    found_in_list = True
+                    break
+            if not found_in_list:
+                wp_list.append({
+                    "name": "tram_cho",
+                    "x": round(float(x), 3),
+                    "y": round(float(y), 3),
+                    "yaw": round(float(yaw), 3),
+                    "note": "Trạm chờ an toàn",
+                })
+
+            map_name_str = self._current_map_path.name if self._current_map_path else "default_map"
+            payload = {
+                "map_name": map_name_str,
+                "locations": locations,
+                "routes": routes,
+                "waypoints": wp_list,
+            }
+
+            with target_wp_file.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
+
+            self._standby_wp = {
+                "name": "tram_cho",
+                "x": round(float(x), 3),
+                "y": round(float(y), 3),
+                "yaw": round(float(yaw), 3),
+                "note": "Trạm chờ an toàn",
+                "source_file": str(target_wp_file),
+            }
+
+            # Cập nhật _batch_waypoints trong giao diện
+            found_in_batch = False
+            for wp in self._batch_waypoints:
+                if str(wp.get("name", "")).lower() == "tram_cho":
+                    wp["x"] = round(float(x), 3)
+                    wp["y"] = round(float(y), 3)
+                    wp["yaw"] = round(float(yaw), 3)
+                    wp["note"] = "Trạm chờ an toàn"
+                    found_in_batch = True
+                    break
+            if not found_in_batch:
+                self._batch_waypoints.append({
+                    "name": "tram_cho",
+                    "x": round(float(x), 3),
+                    "y": round(float(y), 3),
+                    "yaw": round(float(yaw), 3),
+                    "note": "Trạm chờ an toàn",
+                })
+
+            recompute_cyclic_waypoint_yaws(self._batch_waypoints)
+            self._sync_views_from_waypoints()
+            self._sync_active_config_files()
+            self._refresh_quick_location_chips()
+            self.map_widget.set_batch_waypoints(self._batch_waypoints)
+            self.patrol_map_widget.set_batch_waypoints(self._batch_waypoints)
+            return True
+        except Exception as exc:
+            self.get_logger().error(f"[WAYPOINT][ERROR] Không thể lưu Trạm Chờ: {exc}")
+            return False
+
+    def _navigate_to_standby_pose(self, silent: bool = False) -> None:
+        """Nav2 tự động lập lộ trình và lái robot về Trạm Chờ an toàn (tram_cho)."""
+        standby_wp = self._get_saved_standby_pose()
+        if not standby_wp:
+            self.set_command_status(
+                "warn",
+                "[WARN] Bản đồ này chưa có Trạm Chờ đã lưu! Hãy chọn điểm hoặc lái robot đến vị trí an toàn và ấn '📸 LƯU TRẠM CHỜ'."
+            )
+            self.append_patrol_log(
+                "[NAV][WARN] Không tìm thấy điểm 'tram_cho' để điều hướng về trạm chờ.",
+                "warn"
+            )
+            if not silent:
+                QMessageBox.warning(
+                    self,
+                    "Chưa có Trạm Chờ",
+                    "Bản đồ này chưa có Trạm Chờ (tram_cho) nào được lưu!\n\n"
+                    "Vui lòng:\n"
+                    "1. Di chuyển robot (hoặc chọn 1 điểm thoáng cách tường ~1m trên bản đồ).\n"
+                    "2. Ấn nút '📸 LƯU TRẠM CHỜ' để lưu lại vị trí này.\n\n"
+                    "Sau đó bạn có thể ấn nút này bất cứ lúc nào để robot tự động lái về!"
+                )
+            return
+
+        if self._localization_state != "LOCALIZED":
+            self.set_command_status(
+                "error",
+                "[ERROR] Robot chưa hoàn tất định vị ban đầu (chưa đạt LOCALIZED). Vui lòng định vị trước."
+            )
+            if not silent:
+                QMessageBox.warning(
+                    self,
+                    "Chưa Định Vị Robot",
+                    "Robot chưa hoàn tất định vị ban đầu (chưa đạt trạng thái LOCALIZED tin cậy).\n"
+                    f"Trạng thái hiện tại: {self._localization_state}.\n"
+                    "Vui lòng bấm '🎯 VỀ ĐIỂM GỐC' hoặc '2D POSE ESTIMATE' trước khi bắt đầu điều hướng!",
+                )
+            return
+
+        x = float(standby_wp["x"])
+        y = float(standby_wp["y"])
+        yaw = float(standby_wp.get("yaw", 0.0))
+        deg = math.degrees(yaw)
+
+        self._goal = (x, y, yaw)
+        self.map_widget.set_goal(x, y, yaw)
+        self.set_navigation_active(True)
+        self.append_patrol_log(
+            f"[NAV][INFO] Robot bắt đầu tự động điều hướng về Trạm Chờ: X={x:.2f} m, Y={y:.2f} m, Yaw={deg:.0f}°...",
+            "progress"
+        )
+        self.set_command_status(
+            "progress",
+            f"[INFO] Đang điều hướng về Trạm Chờ: X={x:.2f}, Y={y:.2f} m..."
+        )
+        self.start_requested.emit(x, y, yaw)
 
     # -------------------------------------------------------------------------
     # Header Badges & Fullscreen

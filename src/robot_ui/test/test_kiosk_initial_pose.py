@@ -747,9 +747,54 @@ def test_ip31_buttons_presence_and_sync(qapp):
     assert hasattr(page, "btn_quick_relocalize")
     assert hasattr(page, "btn_patrol_capture_start")
     assert hasattr(page, "btn_patrol_relocalize")
+    assert hasattr(page, "btn_capture_standby_pose")
+    assert hasattr(page, "btn_navigate_standby_pose")
+    assert hasattr(page, "btn_patrol_capture_standby")
+    assert hasattr(page, "btn_patrol_navigate_standby")
 
     assert page.btn_capture_start_pose.text() == "📸 LƯU ĐIỂM GỐC"
     assert page.btn_relocalize_start_pose.text() == "🎯 VỀ ĐIỂM GỐC"
     assert page.btn_quick_relocalize.text() == "🎯 VỀ ĐIỂM GỐC"
+    assert page.btn_capture_standby_pose.text() == "📸 LƯU TRẠM CHỜ"
+    assert page.btn_navigate_standby_pose.text() == "🚏 VỀ TRẠM CHỜ"
     page.close()
+
+
+def test_ip32_standby_pose_capture_and_navigate(qapp, tmp_path):
+    """IP-32: Lưu Trạm Chờ thông thoáng và Nav2 tự động lái về trạm chờ an toàn."""
+    page = NavigationPage({})
+    page._current_map_path = tmp_path / "factory_map.yaml"
+    (tmp_path / "factory_map.yaml").write_text("image: map.png\nresolution: 0.05\n", encoding="utf-8")
+
+    # 1. Lưu trạm chờ
+    success = page._save_standby_pose_to_yaml(1.50, 2.80, 0.785)
+    assert success is True
+    assert page._standby_wp is not None
+    assert page._standby_wp["name"] == "tram_cho"
+    assert page._standby_wp["x"] == pytest.approx(1.50)
+    assert page._standby_wp["y"] == pytest.approx(2.80)
+
+    # 2. Đọc lại trạm chờ
+    loaded_standby = page._get_saved_standby_pose()
+    assert loaded_standby is not None
+    assert loaded_standby["name"] == "tram_cho"
+    assert loaded_standby["x"] == pytest.approx(1.50)
+
+    # 3. Điều hướng về trạm chờ khi chưa LOCALIZED -> Bị chặn
+    nav_emitted = []
+    page.start_requested.connect(lambda x, y, yaw: nav_emitted.append((x, y, yaw)))
+    page._localization_state = "NOT_INITIALIZED"
+    page._navigate_to_standby_pose(silent=True)
+    assert len(nav_emitted) == 0
+
+    # 4. Điều hướng về trạm chờ khi LOCALIZED -> Thành công phát lệnh lái xe
+    page._localization_state = "LOCALIZED"
+    page._navigate_to_standby_pose(silent=True)
+    assert len(nav_emitted) == 1
+    target = nav_emitted[0]
+    assert target[0] == pytest.approx(1.50)
+    assert target[1] == pytest.approx(2.80)
+    assert target[2] == pytest.approx(0.785)
+    page.close()
+
 
