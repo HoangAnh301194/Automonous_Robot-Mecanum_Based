@@ -1162,8 +1162,8 @@ class KioskRosNode(Node):
 
             cmd = (
                 self._get_ws_prefix()
-                + f"ros2 run nav2_map_server map_saver_cli -f {shlex.quote(amcl_stem)} && "
-                + f"ros2 run nav2_map_server map_saver_cli -f {shlex.quote(localization_stem)} && "
+                + f"ros2 run nav2_map_server map_saver_cli -f {shlex.quote(amcl_stem)} --ros-args -p save_map_timeout:=5.0 && "
+                + f"ros2 run nav2_map_server map_saver_cli -f {shlex.quote(localization_stem)} --ros-args -p save_map_timeout:=5.0 && "
                 + f"ros2 service call /slam_toolbox/serialize_map slam_toolbox/srv/SerializePoseGraph {serialize_req}"
             )
             self.get_logger().info(f"[KIOSK MAP SAVE] Chạy lệnh: {cmd}")
