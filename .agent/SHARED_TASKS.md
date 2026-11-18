@@ -33,6 +33,8 @@
 | **Battery Truth Single Source & Sync** | `609aed13-4b65-4add-8353-9e2a6eaaa444` | `ros_node.py`, `system_monitor_node.py` | `robot_status_changed`, `/hoverboard/battery_voltage`, `/robot_status` | HOÀN TẤT | Hoàn thành: Khắc phục triệt để hiện tượng giật pin (100% vs 77%): Ưu tiên dữ liệu pin thực tế từ phần cứng Hoverboard, chặn giá trị mặc định 100% từ backend đè lên; hỗ trợ topic hoverboard voltage trong system_monitor_node; đã build pass và push lên cả 2 nhánh simulator_interface và simulator_interface_lord. |
 | **Battery Curve Update (Yamato 36V 30Ah)** | `12d5a67b-809a-4168-badd-5ac75e5ad591` | `ros_node.py`, `system_monitor_node.py` | `voltage_to_percentage_36v`, `robot_status_changed`, `/robot_status` | HOÀN TẤT | Hoàn thành: Cập nhật đường cong xả chuẩn cho 3 bình ắc quy chì Yamato 12V 30Ah ghép nối tiếp (36V): max đầy 38.4V = 100%, ngắt an toàn 33.6V = 0%; đã py_compile, verify nội suy và colcon build thành công 0 lỗi. |
 
+| **Map Saver Timeout 5s Config** | `609aed13-4b65-4add-8353-9e2a6eaaa444` | `ros_node.py` | `save_map_timeout:=5.0`, `map_saver_cli` | HOÀN TẤT | Hoàn thành: Cấu hình tham số save_map_timeout:=5.0 cho lệnh map_saver_cli trong ros_node.py (cả AMCL và localization) giúp map_saver kiên nhẫn đợi nhận frame map từ SLAM, loại bỏ triệt để lỗi Waiting on external map; đã push lên cả 2 nhánh remote simulator_interface và simulator_interface_lord. |
+
 ---
 
 ## 2. Quy ước sử dụng dành cho Agent
