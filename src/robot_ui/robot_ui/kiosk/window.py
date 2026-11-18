@@ -654,6 +654,8 @@ class KioskWindow(QMainWindow):
         self.detection_debug_page.emergency_stop_requested.connect(self._on_emergency_stop)
         self.detection_debug_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
         self.system_config_page.ros2_screen.set_log_provider(self.ros_node.get_layer_log_snapshot)
+        if hasattr(self.system_config_page, "ros2_screen") and hasattr(self.system_config_page.ros2_screen, "camera_options_changed"):
+            self.system_config_page.ros2_screen.camera_options_changed.connect(self.ros_node.set_camera_options)
         self.system_config_page.stack.currentChanged.connect(lambda _: self._sync_console_active_state())
 
         signals.connection_changed.connect(self._on_connection)

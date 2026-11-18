@@ -59,6 +59,7 @@ install(
   PROGRAMS
     scripts/dummy_unpause.py
     scripts/audio_player_node.py
+    scripts/resilient_camera_node.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

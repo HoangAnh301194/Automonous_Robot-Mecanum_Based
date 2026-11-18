@@ -292,6 +292,25 @@ def resolve_video_from_serial(
     return match, report
 
 
+def find_fallback_uvc_video(
+    sys_video_root=Path("/sys/class/video4linux"),
+    dev_root=Path("/dev"),
+) -> str | None:
+    """Tìm cổng V4L2 index 0 của camera UVC khi OpenNI Depth bị lỗi phần cứng/sụt áp."""
+    try:
+        videos = _video_nodes(Path(sys_video_root), Path(dev_root))
+        if videos:
+            return str(videos[0][1])
+    except Exception:
+        pass
+    # Fallback kiểm tra trực tiếp các cổng video phổ biến
+    for idx in (0, 2, 4, 6):
+        cand = Path(dev_root) / f"video{idx}"
+        if cand.exists():
+            return str(cand)
+    return None
+
+
 def resolve_available_cameras(
     ai_serial,
     front_serial,
@@ -321,7 +340,8 @@ def resolve_available_cameras(
     except CameraIdentityError as exc:
         if not allow_missing:
             raise
-        return set(), None, ["OpenNI enumeration skipped: {}".format(exc)], list(configured)
+        fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root) if enable_ai else None
+        return set(), fallback_video, [f"OpenNI enumeration skipped: {exc}"], list(configured)
 
     available = {d.serial: d for d in devices}
     present_serials = [s for s in configured if s in available]
@@ -335,11 +355,24 @@ def resolve_available_cameras(
             )
         )
 
-    if not enable_ai or ai_serial not in available:
+    if not enable_ai:
         report = [
             "{} [OpenNI {}] (depth-only)".format(s, available[s].uri)
             for s in present_serials
         ]
+        return set(present_serials), None, report, missing_serials
+
+    # Nếu enable_ai=True nhưng ai_serial không online qua OpenNI (ví dụ sụt nguồn USB Depth):
+    # Tự động fallback sang cổng UVC RGB đang sống để AI không bị chết oan
+    if ai_serial not in available:
+        fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root)
+        report = [
+            "{} [OpenNI {}] (depth-only)".format(s, available[s].uri)
+            for s in present_serials
+        ]
+        if fallback_video is not None:
+            report.append(f"[FALLBACK] ai_serial {ai_serial} khong online Depth. Su dung camera RGB UVC tai {fallback_video}")
+            return set(present_serials), fallback_video, report, missing_serials
         return set(present_serials), None, report, missing_serials
 
     try:
@@ -354,27 +387,28 @@ def resolve_available_cameras(
     except CameraIdentityError as exc:
         # If front/rear lacks UVC RGB, still verify ai_serial unambiguously against its own hub.
         if len(present_serials) > 1:
-            ai_video, report = resolve_video_from_serial(
-                ai_serial=ai_serial,
-                required_serials=[ai_serial],
-                openni_devices=devices,
-                sys_usb_root=sys_usb_root,
-                sys_video_root=sys_video_root,
-                dev_root=dev_root,
-            )
-            by_bus = _usb_devices(Path(sys_usb_root))
-            ai_usb = by_bus.get((available[ai_serial].usb_bus, available[ai_serial].usb_device))
-            ai_hub = ai_usb.parent if ai_usb is not None else None
-            for s in present_serials:
-                if s == ai_serial:
-                    continue
-                other_usb = by_bus.get((available[s].usb_bus, available[s].usb_device))
-                if ai_hub is not None and other_usb is not None and other_usb.parent == ai_hub:
-                    raise exc
+            try:
+                ai_video, report = resolve_video_from_serial(
+                    ai_serial=ai_serial,
+                    required_serials=[ai_serial],
+                    openni_devices=devices,
+                    sys_usb_root=sys_usb_root,
+                    sys_video_root=sys_video_root,
+                    dev_root=dev_root,
+                )
+            except CameraIdentityError:
+                if allow_missing:
+                    fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root)
+                    return set(present_serials), fallback_video, [f"[FALLBACK] Dùng cổng UVC {fallback_video} sau lỗi: {exc}"], missing_serials
+                raise
         else:
+            if allow_missing:
+                fallback_video = find_fallback_uvc_video(sys_video_root=sys_video_root, dev_root=dev_root)
+                return set(present_serials), fallback_video, [f"[FALLBACK] Dùng cổng UVC {fallback_video} sau lỗi: {exc}"], missing_serials
             raise
 
     return set(present_serials), ai_video, report, missing_serials
+
 
 
 def _cli():

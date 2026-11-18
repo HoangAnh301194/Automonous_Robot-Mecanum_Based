@@ -2028,10 +2028,36 @@ class KioskRosNode(Node):
         elif launch_key == "layer3":
             return prefix + f"ros2 launch mo_hinh real_slam.launch.py use_sim_time:={sim_time_str} use_rviz:=false"
         elif launch_key == "layer4":
-            return prefix + f"ros2 launch robot_bringup ai_perception.launch.py use_sim_time:={sim_time_str}"
+            front_val = "true" if getattr(self, "_camera_enable_front", True) else "false"
+            rear_val = "true" if getattr(self, "_camera_enable_rear", True) else "false"
+            ai_val = "true" if getattr(self, "_camera_enable_ai", True) else "false"
+            return prefix + (
+                f"ros2 launch robot_bringup ai_perception.launch.py "
+                f"use_sim_time:={sim_time_str} "
+                f"enable_front:={front_val} "
+                f"enable_rear:={rear_val} "
+                f"enable_ai:={ai_val}"
+            )
         elif launch_key == "layer5":
             return prefix + "ros2 launch robot_bringup backend.launch.py"
         return ""
+
+    def set_camera_options(self, enable_front: bool = True, enable_rear: bool = True, enable_ai: bool = True) -> None:
+        """Cấu hình bật/tắt từng camera độc lập cho Layer 4."""
+        self._camera_enable_front = enable_front
+        self._camera_enable_rear = enable_rear
+        self._camera_enable_ai = enable_ai
+        self.get_logger().info(
+            f"[CAMERA] Cập nhật tùy chọn Layer 4: Front={enable_front}, Rear={enable_rear}, AI={enable_ai}"
+        )
+        self._record_layer_log("layer4", f"[CONFIG] Tùy chọn camera: Front={enable_front}, Rear={enable_rear}, AI={enable_ai}")
+
+    def get_camera_options(self) -> tuple[bool, bool, bool]:
+        """Trả về trạng thái bật/tắt của (Front, Rear, AI)."""
+        front = getattr(self, "_camera_enable_front", True)
+        rear = getattr(self, "_camera_enable_rear", True)
+        ai = getattr(self, "_camera_enable_ai", True)
+        return (front, rear, ai)
 
     def swap_serial_ports(self) -> tuple[str, str, str]:
         """Hoán đổi vị trí giữa cổng Hoverboard/ESP32 và cổng LiDAR."""

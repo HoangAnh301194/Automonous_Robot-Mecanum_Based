@@ -16,6 +16,7 @@ from typing import Any, Callable, Optional
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QTextCursor
 from PyQt5.QtWidgets import (
+    QCheckBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -47,6 +48,7 @@ class ROS2SystemDetailScreen(QWidget):
     log_filter_changed = pyqtSignal(str)
     swap_ports_requested = pyqtSignal()
     rescan_ports_requested = pyqtSignal()
+    camera_options_changed = pyqtSignal(bool, bool, bool)
 
     def __init__(
         self,
@@ -273,6 +275,59 @@ class ROS2SystemDetailScreen(QWidget):
 
         c_layout.addWidget(card_log)
         self._update_filter_button_styles()
+
+        # B. CẤU HÌNH CAMERA THỊ GIÁC (LAYER 4 ASTRA PRO)
+        card_cam, cam_layout = create_section_card("CẤU HÌNH CAMERA THỊ GIÁC (LAYER 4 ASTRA PRO)", "#A855F7")
+
+        lbl_cam_desc = QLabel("Bật/Tắt độc lập từng camera (khởi động tuần tự 2s chống sụt nguồn). Camera RGB hỗ trợ Auto-Reconnect khi cắm lại:")
+        lbl_cam_desc.setWordWrap(True)
+        lbl_cam_desc.setStyleSheet(f"color: {KioskTheme.COLOR_TEXT_MUTED}; font-size: 11px;")
+        cam_layout.addWidget(lbl_cam_desc)
+
+        cam_row = QHBoxLayout()
+        cam_row.setSpacing(18)
+
+        cb_style = f"""
+            QCheckBox {{
+                color: {KioskTheme.COLOR_TEXT_PRIMARY};
+                font-size: 12px;
+                font-weight: 600;
+                spacing: 8px;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 1px solid {KioskTheme.COLOR_CARD_BORDER};
+                border-radius: 4px;
+                background-color: {KioskTheme.COLOR_SURFACE_ALT};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {KioskTheme.COLOR_HEALTHY};
+                border-color: {KioskTheme.COLOR_HEALTHY};
+            }}
+        """
+
+        self.chk_cam_ai = QCheckBox("Camera AI (RGB Màu - Auto Reconnect)")
+        self.chk_cam_ai.setChecked(True)
+        self.chk_cam_ai.setStyleSheet(cb_style)
+        self.chk_cam_ai.stateChanged.connect(self._on_camera_options_changed)
+        cam_row.addWidget(self.chk_cam_ai)
+
+        self.chk_cam_front = QCheckBox("Camera Trước (Front Depth)")
+        self.chk_cam_front.setChecked(True)
+        self.chk_cam_front.setStyleSheet(cb_style)
+        self.chk_cam_front.stateChanged.connect(self._on_camera_options_changed)
+        cam_row.addWidget(self.chk_cam_front)
+
+        self.chk_cam_rear = QCheckBox("Camera Sau (Rear Depth)")
+        self.chk_cam_rear.setChecked(False)
+        self.chk_cam_rear.setStyleSheet(cb_style)
+        self.chk_cam_rear.stateChanged.connect(self._on_camera_options_changed)
+        cam_row.addWidget(self.chk_cam_rear)
+
+        cam_row.addStretch()
+        cam_layout.addLayout(cam_row)
+        c_layout.addWidget(card_cam)
 
         # C. THIẾT BỊ NGOẠI VI & CỔNG SERIAL
         card_ports, port_layout = create_section_card("THIẾT BỊ NGOẠI VI & ĐƯỜNG TRUYỀN SERIAL", "#38BDF8")
@@ -641,3 +696,10 @@ class ROS2SystemDetailScreen(QWidget):
         )
         if dialog.exec_():
             self.emergency_cleanup_requested.emit()
+
+    def _on_camera_options_changed(self) -> None:
+        self.camera_options_changed.emit(
+            self.chk_cam_front.isChecked(),
+            self.chk_cam_rear.isChecked(),
+            self.chk_cam_ai.isChecked(),
+        )

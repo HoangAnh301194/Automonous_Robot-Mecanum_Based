@@ -74,8 +74,8 @@ def generate_launch_description():
             raise RuntimeError(msg)
 
         node = Node(
-            package='usb_cam',
-            executable='usb_cam_node_exe',
+            package='mo_hinh',
+            executable='resilient_camera_node.py',
             name='usb_cam',
             namespace='ai_camera/color',
             output='screen',
@@ -90,10 +90,10 @@ def generate_launch_description():
                 'framerate': ParameterValue(
                     LaunchConfiguration('ai_color_fps'), value_type=float
                 ),
-                'io_method': 'mmap',
-                'pixel_format': 'mjpeg2rgb',
                 'camera_name': 'ai_camera',
                 'frame_id': 'ai_camera_color_optical_frame',
+                'reconnect_interval': 1.0,
+                'auto_detect_fallback': True,
             }],
         )
         return node, None
