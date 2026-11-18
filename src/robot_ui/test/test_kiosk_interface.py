@@ -603,10 +603,8 @@ def test_service_page_elements_and_selection(app):
     assert page.btn_wait.property("selected") is False
     assert page.btn_continue.property("selected") is True
 
-    # 4. Footer
-    footer = page.findChild(QLabel, "serviceFooter")
-    assert footer is not None
-    assert "Hoàn tất" in footer.text()
+    # 4. No explanatory caption below the two artwork buttons.
+    assert page.findChild(QLabel, "serviceFooter") is None
 
     # Programmatic selection
     page.select_mode_programmatically("wait")
@@ -637,6 +635,15 @@ def test_service_page_layout_dimensions(app):
     assert page.btn_wait.width() >= 44
     assert page.btn_continue.width() >= 44
     assert page.btn_wait.geometry().right() < page.btn_continue.geometry().left()
+    art = page.mascot_canvas._art_rect()
+    for mode, button in (("wait", page.btn_wait), ("continue", page.btn_continue)):
+        visual = page.mascot_canvas._button_rect(mode)
+        # Smaller than the previous 29%-wide, 26%-tall white JPG crop.
+        assert visual.width() <= art.width() * 0.25
+        assert visual.height() <= art.height() * 0.19
+        assert button.geometry().intersects(art)
+        assert abs(button.geometry().center().x() - visual.center().x()) <= 1
+        assert abs(button.geometry().center().y() - visual.center().y()) <= 1
 
     # Test 1280x720
     page.resize(1280, 720)
@@ -645,6 +652,11 @@ def test_service_page_layout_dimensions(app):
     assert page.height() == 720
     assert page.btn_wait.width() >= 44
     assert page.btn_continue.width() >= 44
+    art = page.mascot_canvas._art_rect()
+    for mode in ("wait", "continue"):
+        visual = page.mascot_canvas._button_rect(mode)
+        assert visual.width() <= art.width() * 0.25
+        assert visual.height() <= art.height() * 0.19
 
 
 

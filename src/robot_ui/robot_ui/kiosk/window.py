@@ -64,7 +64,9 @@ QLabel#homeTelemetryBadge {
     font-size: 11px;
     font-weight: 700;
 }
-QLabel#homeTelemetryBadge { background: rgba(255, 255, 255, 220); color: #253448; }
+QLabel#homeTelemetryBadge {
+    background: rgba(15, 22, 27, 185);
+}
 QFrame#bottomNavigation {
     background: transparent;
     border: none;
@@ -77,21 +79,27 @@ QPushButton#kioskNavButton {
     padding: 3px 10px;
 }
 QPushButton#kioskNavButton:checked {
-    color: #D97706;
+    color: #d97800;
     background: transparent;
-    border-bottom: 3px solid #D97706;
+    border-bottom: 3px solid #d97800;
 }
-
+QPushButton#kioskNavButton[dark="true"] {
+    color: white;
+}
+QPushButton#kioskNavButton[dark="true"]:checked {
+    color: #ffb32c;
+    border-bottom: 3px solid #ffb32c;
+}
 QPushButton#kioskNavButton:pressed {
     background: transparent;
 }
 QPushButton#navHomeButton, QPushButton#adminHomeButton, QPushButton#serviceHomeButton, QPushButton#navBackButton {
-    background: #eaf0f7;
-    border: 1px solid #cbd5e1;
+    background: #1e293b;
+    border: 1px solid rgba(255, 255, 255, 0.2);
     border-radius: 12px;
 }
 QPushButton#navHomeButton:hover, QPushButton#adminHomeButton:hover, QPushButton#serviceHomeButton:hover, QPushButton#navBackButton:hover {
-    background: #e7edf4;
+    background: #334155;
     border-color: #ffb32c;
 }
 QPushButton#navEmergencyButton, QPushButton#adminEmergencyButton, QPushButton#serviceEmergencyButton {
@@ -182,8 +190,8 @@ QPushButton#dangerButton {
     font-weight: 700;
 }
 QLineEdit#chatInput {
-    color: #203247;
-    background: #ffffff;
+    color: #f2f2f2;
+    background: #111111;
     border: 1px solid #383838;
     border-radius: 11px;
     padding: 0 15px;
@@ -229,28 +237,28 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
     background: transparent;
 }
 QWidget#navigationPage {
-    background: #f7f9fc;
+    background: #000000;
 }
 QFrame#navControlBar {
-    background: #ffffff;
-    border: 1px solid #d6e0e9;
+    background: #0d0d0d;
+    border: 1px solid #2d2d2d;
     border-radius: 13px;
 }
 QPushButton#navHomeButton {
-    background: #f4f7fb;
-    border: 1px solid #d2dde8;
+    background: #171717;
+    border: 1px solid #3a3a3a;
     border-radius: 9px;
 }
 QPushButton#navHomeButton:pressed {
-    background: #e8eef4;
+    background: #2b2b2b;
 }
 QLabel#navClock {
-    color: #253448;
+    color: #eeeeee;
     font-size: 10px;
     font-weight: 700;
 }
 QLabel#navPrompt {
-    color: #253448;
+    color: #eeeeee;
     font-size: 13px;
     font-weight: 700;
 }
@@ -261,7 +269,7 @@ QLabel#navPrompt[tone="error"] {
     color: #ff667d;
 }
 QLabel#navPrompt[tone="success"] {
-    color: #19754c;
+    color: #4ae1a1;
 }
 QPushButton#navStartButton, QPushButton#navStopButton {
     background: transparent;
@@ -269,20 +277,20 @@ QPushButton#navStartButton, QPushButton#navStopButton {
     padding: 0;
 }
 QWidget#chatPage, QWidget#chatMessageContainer, QWidget#chatMessageRow {
-    background: #f7f9fc;
+    background: #000000;
 }
 QFrame#chatHeader, QFrame#chatInputBar {
-    background: #ffffff;
-    border: 1px solid #d6e0e9;
+    background: #0d0d0d;
+    border: 1px solid #2d2d2d;
     border-radius: 13px;
 }
 QLabel#chatHeaderIcon {
-    background: #f4f7fb;
-    border: 1px solid #d2dde8;
+    background: #171717;
+    border: 1px solid #3a3a3a;
     border-radius: 9px;
 }
 QLabel#chatTitle {
-    color: #1d2938;
+    color: #f4f4f4;
     font-size: 15px;
     font-weight: 700;
 }
@@ -291,16 +299,16 @@ QLabel#chatSubtitle {
     font-size: 11px;
 }
 QPushButton#chatSpeakerButton {
-    background: #f4f7fb;
-    border: 1px solid #d2dde8;
+    background: #171717;
+    border: 1px solid #3a3a3a;
     border-radius: 11px;
 }
 QPushButton#chatSpeakerButton:pressed {
-    background: #e8eef4;
+    background: #2b2b2b;
 }
 QPushButton#chatStopSpeakingButton {
     color: #ff667d;
-    background: #fff0f2;
+    background: #241014;
     border: 1px solid #5a1d28;
     border-radius: 11px;
     padding: 6px 12px;
@@ -308,16 +316,16 @@ QPushButton#chatStopSpeakingButton {
     font-weight: 700;
 }
 QPushButton#chatStopSpeakingButton:pressed {
-    background: #ffe7eb;
+    background: #38151c;
 }
 QFrame#suggestionContainer {
     background: transparent;
     border: none;
 }
 QPushButton#suggestionChip {
-    color: #263747;
-    background: #f3f6fa;
-    border: 1px solid #d6e0e9;
+    color: #e2e8f0;
+    background: #141414;
+    border: 1px solid #2e2e2e;
     border-radius: 12px;
     padding: 9px 12px;
     font-size: 13px;
@@ -330,8 +338,8 @@ QPushButton#suggestionChip:pressed {
     border-color: #ffb32c;
 }
 QFrame#typingBubble {
-    background: #f3f6fa;
-    border: 1px solid #e1e8ef;
+    background: #181818;
+    border: 1px solid #282828;
     border-radius: 12px;
 }
 QLabel#typingText {
@@ -340,25 +348,25 @@ QLabel#typingText {
     font-style: italic;
 }
 QPushButton#chatMicButton {
-    background: #f3f6fa;
-    border: 2px solid #d2dde8;
+    background: #181818;
+    border: 2px solid #3a3a3a;
     border-radius: 50px;
 }
 QPushButton#chatMicButton:hover {
-    background: #e1e8ef;
+    background: #282828;
     border-color: #ffb32c;
 }
 QPushButton#chatMicButton:pressed {
-    background: #e8edf3;
+    background: #333333;
 }
 QPushButton#chatMicButton[listening="true"] {
-    background: #fff3e4;
+    background: #2b1c09;
     border: 3px solid #ffb32c;
     border-radius: 50px;
 }
 QPushButton#chatMicButton:disabled {
-    background: #f0f4f8;
-    border-color: #dae3ec;
+    background: #101010;
+    border-color: #222222;
     border-radius: 50px;
 }
 QPushButton#chatSendButton {
@@ -374,11 +382,11 @@ QPushButton#chatSendButton:pressed {
 }
 QPushButton#chatSendButton:disabled {
     color: #666666;
-    background: #f4eee2;
+    background: #28241b;
 }
 QLabel#llmStatus {
-    color: #19754c;
-    background: #eaf8f0;
+    color: #4ae1a1;
+    background: #111a14;
     border: 1px solid #1e3827;
     border-radius: 9px;
     padding: 5px 9px;
@@ -386,51 +394,51 @@ QLabel#llmStatus {
     font-weight: 700;
 }
 QLabel#llmStatus[state="busy"] {
-    color: #b32632;
-    background: #fff6e6;
+    color: #ffb32c;
+    background: #1d1810;
     border-color: #4b3b20;
 }
 QLabel#llmStatus[state="offline"] {
     color: #888888;
-    background: #edf2f7;
+    background: #161616;
     border-color: #2a2a2a;
 }
 QLabel#llmStatus[state="error"] {
     color: #ff667d;
-    background: #fff0f2;
+    background: #261115;
     border-color: #5a1d28;
 }
 QFrame#chatConversation {
-    background: #ffffff;
-    border: 1px solid #dce4ec;
+    background: #080808;
+    border: 1px solid #292929;
     border-radius: 14px;
 }
 QScrollArea#chatScroll, QScrollArea#chatScroll QWidget#qt_scrollarea_viewport {
-    background: #ffffff;
+    background: #080808;
     border: none;
 }
 QFrame#robotBubble {
-    background: #f3f6fa;
-    border: 1px solid #e1e8ef;
+    background: #181818;
+    border: 1px solid #282828;
     border-radius: 12px;
 }
 QFrame#userBubble {
-    background: #fff3e8;
+    background: #2a1d08;
     border: 1px solid #6b4606;
     border-radius: 12px;
 }
 QLabel#robotBubbleSender {
-    color: #b32632;
+    color: #ffb32c;
     font-size: 10px;
     font-weight: 700;
 }
 QLabel#userBubbleSender {
-    color: #9d3038;
+    color: #ffbd45;
     font-size: 10px;
     font-weight: 700;
 }
 QLabel#bubbleText {
-    color: #263747;
+    color: #ededed;
     font-size: 16px;
 }
 """
@@ -750,11 +758,7 @@ class KioskWindow(QMainWindow):
 
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
-        # Temporary light-theme preview; set KIOSK_MOCHI_STATIC=0 to restore MP4 emotions.
-        if os.getenv("KIOSK_MOCHI_STATIC", "1").strip().lower() in {"0", "false", "no"}:
-            self.idle_page.video.set_video(self.emotions.path("idle"))
-        else:
-            self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
+        self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)
@@ -823,7 +827,7 @@ class KioskWindow(QMainWindow):
         self._sync_console_active_state()
 
         self.bottom_navigation.setVisible(page_id == "home")
-        self.bottom_navigation.set_dark_background(False)
+        self.bottom_navigation.set_dark_background(True)
         self.bottom_navigation.set_active("home")
         if self.bottom_navigation.isVisible():
             self.bottom_navigation.raise_()
@@ -934,7 +938,7 @@ class KioskWindow(QMainWindow):
             print("[robot_ui] SERVICE: Kích hoạt PHỤC VỤ HOÀN TẤT & TIẾP TỤC", flush=True)
             self.ros_node.finish_serving()
             self.signals.command_status_changed.emit("success", "✅ Đã hoàn tất phục vụ. Cảm ơn quý khách!")
-            QTimer.singleShot(700, lambda: self.show_page("home") if self._active_page == "service" else None)
+            QTimer.singleShot(1500, lambda: self.show_page("home"))
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)

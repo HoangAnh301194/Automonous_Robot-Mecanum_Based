@@ -1,10 +1,10 @@
-"""PTIT Mochi light-theme Service page with native, accessible Qt touch controls."""
+"""White-backed PTIT Mochi Service page inside the dark-mode Kiosk."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from PyQt5.QtCore import Qt, QRect, QRectF, QSize, QEasingCurve, QVariantAnimation, pyqtSignal
-from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QIcon, QPainter, QPainterPath, QPixmap
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 
@@ -43,23 +43,24 @@ class ServiceMascotCanvas(QWidget):
         return QRect((self.width()-side)//2, (self.height()-side)//2, side, side)
 
     def resizeEvent(self, event) -> None:
-        rect = self._art_rect()
-        for button, x_fraction in ((self.wait_button, .184), (self.continue_button, .535)):
-            button.setGeometry(
-                rect.x() + round(rect.width()*x_fraction),
-                rect.y() + round(rect.height()*.360),
-                max(44, round(rect.width()*.29)),
-                max(44, round(rect.height()*.260)),
-            )
+        # Use the same tight bounds for clickable overlays and press animation.
+        for mode, button in (("wait", self.wait_button), ("continue", self.continue_button)):
+            button.setGeometry(self._button_rect(mode).toAlignedRect())
             button.raise_()
         super().resizeEvent(event)
 
     def _button_rect(self, mode: str) -> QRectF:
+        """Tight hit area around each button, excluding the JPG white margins."""
         art = self._art_rect()
-        x = .184 if mode == "wait" else .535
+        center_x = .329 if mode == "wait" else .680
+        center_y = .490
+        width = .245
+        height = .185
         return QRectF(
-            art.x() + art.width() * x, art.y() + art.height() * .360,
-            art.width() * .290, art.height() * .260,
+            art.x() + art.width() * (center_x - width / 2),
+            art.y() + art.height() * (center_y - height / 2),
+            art.width() * width,
+            art.height() * height,
         )
 
     def _on_zoom_value(self, value) -> None:
@@ -68,7 +69,8 @@ class ServiceMascotCanvas(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#ffffff"))
+        # The image is white-backed: match it exactly to remove dark margins.
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
         if self._image.isNull():
             return
         painter.setRenderHint(QPainter.SmoothPixmapTransform)
@@ -90,7 +92,14 @@ class ServiceMascotCanvas(QWidget):
                 target.center().y() - target.height() * scale / 2,
                 target.width() * scale, target.height() * scale,
             )
+            # Keep the zoomed artwork strictly inside its own button. The
+            # white background of the source JPEG must not cover the face.
+            clip = QPainterPath()
+            clip.addRoundedRect(target, target.height() * .17, target.height() * .17)
+            painter.save()
+            painter.setClipPath(clip)
             painter.drawPixmap(destination, self._image, source)
+            painter.restore()
 
     def set_selected(self, mode: str | None) -> None:
         if mode not in {"wait", "continue", None}:
@@ -160,8 +169,22 @@ class ServicePage(QWidget):
             btn.setAccessibleName(label)
             btn.setToolTip(label)
             if icon and icon.is_file():
-                btn.setIcon(QIcon(str(icon)))
-                btn.setIconSize(QSize(30, 30))
+                glyph = QPixmap(str(icon))
+                if not glyph.isNull():
+                    if obj in {"serviceHomeButton", "serviceBackButton"}:
+                        # Tint the alpha shape black, retaining transparent edges.
+                        black = QPixmap(glyph.size())
+                        black.fill(Qt.transparent)
+                        painter = QPainter(black)
+                        painter.drawPixmap(0, 0, glyph)
+                        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                        painter.fillRect(black.rect(), QColor("#000000"))
+                        painter.end()
+                        glyph = black
+                    btn.setIcon(QIcon(glyph))
+                    btn.setIconSize(QSize(30, 30))
+                else:
+                    btn.setText("‹" if label == "Quay lại" else ("!" if label == "Dừng khẩn cấp" else "⌂"))
             else:
                 btn.setText("‹" if label == "Quay lại" else ("!" if label == "Dừng khẩn cấp" else "⌂"))
             return btn
@@ -187,25 +210,29 @@ class ServicePage(QWidget):
         self.btn_wait.clicked.connect(lambda: self._select_mode("wait"))
         self.btn_continue.clicked.connect(lambda: self._select_mode("continue"))
         root.addWidget(self.mascot_canvas, 1)
-        footer = QLabel("Phục vụ: bắt đầu phục vụ nước    ·    Hoàn tất: kết thúc phục vụ")
-        footer.setObjectName("serviceFooter")
-        footer.setAlignment(Qt.AlignCenter)
-        root.addWidget(footer)
 
+        # Service is a deliberate light-mode exception to the dark Kiosk.
+        # All surrounding surfaces match the white-backed mascot image.
         self.setStyleSheet("""
-            QWidget#servicePage { background-color: #ffffff; }
-            QFrame#serviceHeader { background: #ffffff; border: 1px solid #dbe4ef; border-radius: 12px; }
-            QLabel#serviceHeaderTitle { color: #b32632; font-size: 19px; font-weight: 800; }
+            QWidget#servicePage { background-color: #FFFFFF; }
+            QFrame#serviceHeader {
+                background-color: #FFFFFF; border: 1px solid #e1e6ee;
+                border-radius: 12px;
+            }
+            QLabel#serviceHeaderTitle {
+                color: #b32632; font-size: 19px; font-weight: 800;
+            }
             QPushButton#serviceHomeButton, QPushButton#serviceBackButton {
-                background: #f2f5fa; border: 1px solid #dbe4ef; border-radius: 10px;
+                color: #000000; background: #f2f5fa;
+                border: 1px solid #dbe4ef; border-radius: 10px;
             }
             QPushButton#serviceHomeButton:hover, QPushButton#serviceBackButton:hover {
                 background: #e9eff7; border-color: #b32632;
             }
             QPushButton#serviceEmergencyButton {
-                background: #fff0f2; border: 1px solid #f4c9d0; border-radius: 10px;
+                background: #fff0f2; border: 1px solid #f4c9d0;
+                border-radius: 10px;
             }
-            QLabel#serviceFooter { color: #627185; font-size: 13px; }
         """)
 
     def _select_mode(self, mode: str, emit_signal: bool = True) -> None:

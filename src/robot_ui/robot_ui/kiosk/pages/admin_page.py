@@ -79,14 +79,14 @@ class AdminPinDialog(QDialog):
         cancel.clicked.connect(self.reject)
         root.addWidget(cancel)
         self.setStyleSheet("""
-            QDialog#adminPinDialog { background: #ffffff; color: #203247; }
-            QLabel { color: #263747; font-size: 14px; }
-            QLabel#adminPinTitle { color: #b32632; font-size: 20px; font-weight: 700; }
+            QDialog#adminPinDialog { background: #151d27; color: white; }
+            QLabel { color: #e3e7ed; font-size: 14px; }
+            QLabel#adminPinTitle { color: #f6c16a; font-size: 20px; font-weight: 700; }
             QLabel#adminPinError { color: #ff8585; }
-            QLineEdit { color: #203247; background: #f1f5f9; border-radius: 8px; font-size: 22px; }
-            QPushButton { color: #203247; background: #e9eef6; border: none;
+            QLineEdit { color: white; background: #293849; border-radius: 8px; font-size: 22px; }
+            QPushButton { color: white; background: #344454; border: none;
                           border-radius: 10px; font-size: 18px; font-weight: 700; }
-            QPushButton#adminPinConfirm { color: #ffffff; background: #b32632; font-size: 18px; }
+            QPushButton#adminPinConfirm { color: #161b23; background: #f6c16a; font-size: 18px; }
         """)
 
     def _check(self):
@@ -198,7 +198,7 @@ class AdminPage(QWidget):
             self.back_button.setIconSize(QSize(32, 32))
         else:
             self.back_button.setText("‹")
-            self.back_button.setStyleSheet("color: #b32632; font-size: 26px; font-weight: 700;")
+            self.back_button.setStyleSheet("color: #ffb32c; font-size: 26px; font-weight: 700;")
         self.back_button.clicked.connect(self.back_requested)
         self.back_button.clicked.connect(self.logout_requested)
         header.addWidget(self.back_button)
@@ -362,55 +362,55 @@ class AdminPage(QWidget):
         root.addStretch()
 
         self.setStyleSheet("""
-            QWidget#adminPage { background: #f7f9fc; }
-            QLabel { color: #263747; }
-            QLabel#adminTitle { color: #b32632; font-size: 26px; font-weight: 800; }
-            QLabel#adminSubtitle { color: #5c6e80; font-size: 13px; font-weight: 500; }
+            QWidget#adminPage { background: #000000; }
+            QLabel { color: #dce2e7; }
+            QLabel#adminTitle { color: #f6c16a; font-size: 26px; font-weight: 800; }
+            QLabel#adminSubtitle { color: #8896a6; font-size: 13px; font-weight: 500; }
             QWidget#adminHeaderBadge {
-                background: #ffffff;
-                border: 1px solid #dbe4ec;
+                background: #0f1318;
+                border: 1px solid #202732;
                 border-radius: 10px;
             }
-            QLabel#adminBadgeText { color: #263747; font-size: 14px; font-weight: 700; }
+            QLabel#adminBadgeText { color: #f0f4f8; font-size: 14px; font-weight: 700; }
             QLabel#adminStatusBanner {
-                background: #ffffff;
-                color: #536477;
-                border: 1px solid #d6e1eb;
+                background: #0d1217;
+                color: #a4b3c4;
+                border: 1px solid #1f2733;
                 border-radius: 9px;
                 padding: 6px 14px;
                 font-size: 13px;
                 font-weight: 600;
             }
             QPushButton#adminBackButton {
-                background: #ffffff;
-                border: 1px solid #dbe4ec;
+                background: #0f141a;
+                border: 1px solid #232e3d;
                 border-radius: 12px;
             }
             QPushButton#adminBackButton:hover {
-                background: #eaf0f7;
+                background: #17202c;
                 border-color: #3b4e64;
             }
             QPushButton#adminBackButton:pressed {
-                background: #e9eef6;
+                background: #1c2738;
                 border: 2px solid #f6c16a;
             }
             QPushButton#adminFullscreenButton {
-                background: #ffffff;
-                border: 1px solid #dbe4ec;
+                background: #0f141a;
+                border: 1px solid #232e3d;
                 border-radius: 12px;
-                color: #263747;
+                color: #e0e0e0;
                 font-size: 18px;
                 font-weight: 700;
             }
             QPushButton#adminFullscreenButton:hover {
-                background: #eaf0f7;
+                background: #17202c;
                 border-color: #3b4e64;
-                color: #b32632;
+                color: #f6c16a;
             }
             QPushButton#adminFullscreenButton:pressed {
-                background: #e9eef6;
+                background: #1c2738;
                 border: 2px solid #f6c16a;
-                color: #1d2938;
+                color: #ffffff;
             }
             QPushButton#adminDetectionButton,
             QPushButton#adminSlamButton,
@@ -418,8 +418,8 @@ class AdminPage(QWidget):
             QPushButton#adminStartNavButton,
             QPushButton#adminStopNavButton,
             QPushButton#adminSystemStatusButton {
-                background: #ffffff;
-                border: 1px solid #dbe4ec;
+                background: #0d1218;
+                border: 1px solid #1c2532;
                 border-radius: 18px;
             }
             QPushButton#adminDetectionButton:hover,
@@ -428,7 +428,7 @@ class AdminPage(QWidget):
             QPushButton#adminStartNavButton:hover,
             QPushButton#adminStopNavButton:hover,
             QPushButton#adminSystemStatusButton:hover {
-                background: #f3f6fa;
+                background: #141d27;
                 border-color: #3b4e64;
             }
             QPushButton#adminDetectionButton:pressed,
@@ -437,11 +437,11 @@ class AdminPage(QWidget):
             QPushButton#adminStartNavButton:pressed,
             QPushButton#adminStopNavButton:pressed,
             QPushButton#adminSystemStatusButton:pressed {
-                background: #e6edf6;
+                background: #192432;
                 border: 2px solid #f6c16a;
             }
             QLabel#launcherTitle {
-                color: #1d2938;
+                color: #ffffff;
                 font-size: 14px;
                 font-weight: 700;
             }

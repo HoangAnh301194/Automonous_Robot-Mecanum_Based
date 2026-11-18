@@ -1,6 +1,6 @@
-# Kiosk interface light theme — simulator_interface_lord
+# Kiosk interface v2 — simulator_interface
 
-Branch: `simulator_interface_lord` (derived from `simulator_interface`).
+Branch: `simulator_interface` (derived from `simulator`).
 Implementation: `robot_ui/kiosk/window.py`, `widgets.py`, `pages.py`.
 
 ## Screen map
@@ -9,7 +9,7 @@ Implementation: `robot_ui/kiosk/window.py`, `widgets.py`, `pages.py`.
 START
   |
   v
-IDLE (static PTIT Mochi image, full screen, no dock or telemetry)
+IDLE (Souta Robot face / MP4, full screen, no dock or telemetry)
   | tap anywhere
   v
 HOME (background.jpg, PTIT top-left + FEE1 top-right logos)
@@ -34,8 +34,8 @@ executable SLAM button.
 # Di chuyển vào thư mục workspace (trên Jetson hoặc máy local)
 cd <đường_dẫn_workspace>  # ví dụ: cd ~/ros2_ws hoặc cd /path/to/repo
 git fetch origin
-git switch simulator_interface_lord  # if absent: git switch --track origin/simulator_interface_lord
-git pull --ff-only origin simulator_interface_lord
+git switch simulator_interface  # if absent: git switch --track origin/simulator_interface
+git pull --ff-only origin simulator_interface
 
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select robot_ui
@@ -53,13 +53,6 @@ KIOSK_ADMIN_PIN=1 ros2 launch robot_ui kiosk.launch.py \
   windowed:=false hide_cursor:=true use_sim_time:=false
 ```
 
-Light-theme artwork: `souta_robot/mochi_idle_light.jpg` and
-`souta_robot/mochi_service_light.jpg`. Service has two real Qt touch
-controls aligned over the artwork: **Phục vụ** sends the existing
-`request_serve()` ("wait") command; **Hoàn tất** sends the existing
-`finish_serving()` ("continue") command. The kiosk does not decode idle
-MP4 frames while the static image is active.
-
 The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 `QT_QPA_PLATFORM=offscreen` is for tests, not physical touch operation.
 
@@ -68,7 +61,6 @@ The kiosk still requires a usable Qt display (X11/Wayland/XWayland).
 | Setting | Default | Purpose |
 |---|---|---|
 | `KIOSK_ADMIN_PIN` | `1` | **Prototype only.** PIN for opening Admin |
-| `KIOSK_MOCHI_STATIC` | `1` | Use the PTIT Mochi static idle image; set `0` to restore MP4 emotions |
 | `KIOSK_IDLE_TIMEOUT_SECONDS` | `120` | Inactivity on Home / Chat before returning to Idle |
 | `KIOSK_ADMIN_IDLE_SECONDS` | `90` | Inactivity on Admin / Navigation before locking to Idle |
 
@@ -89,7 +81,7 @@ use a strong PIN / secret storage and consider local OS access control.
 
 ## Manual smoke checks
 
-1. Launch Kiosk. It should show the static PTIT Mochi face on white, no Home/Map/Chat dock.
+1. Launch Kiosk. It should show only Souta Robot's face, no Home/Map/Chat dock.
 2. Tap anywhere. The Home screen should show the institution background,
    PTIT/FEE1 logos and Home + Chat + Settings in the bottom dock.
 3. Tap Chat. Confirm 9router conversation works; return via header button.
