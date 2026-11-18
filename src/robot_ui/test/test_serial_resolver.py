@@ -177,3 +177,50 @@ def test_detect_serial_ports_fast_pairing_without_probing():
         mock_is_esp32.assert_not_called()
         mock_probe_lidar.assert_not_called()
 
+
+def test_detect_serial_ports_inverted_alias_rebind():
+    """Kiểm tra khi bị cắm ngược cổng (/dev/hoverboard là RPLiDAR), hệ thống tự đảo và rebind udev."""
+    with patch("os.path.exists", return_value=True), patch(
+        "os.path.realpath", side_effect=lambda p: "/dev/ttyUSB0" if "hoverboard" in p else "/dev/ttyUSB1"
+    ), patch("robot_ui.kiosk.serial_resolver.probe_rplidar", return_value=True) as mock_probe, patch(
+        "robot_ui.kiosk.serial_resolver.rebind_udev_rules", return_value=True
+    ) as mock_rebind:
+        hb, lidar, method = detect_serial_ports()
+        mock_probe.assert_called_with("/dev/ttyUSB0")
+        mock_rebind.assert_called_once_with(lidar_port="/dev/ttyUSB0", hoverboard_port="/dev/ttyUSB1")
+        assert hb == "/dev/hoverboard"
+        assert lidar == "/dev/rplidar"
+        assert method == "udev_rebound"
+
+
+def test_detect_serial_ports_active_rescan_rebind():
+    """Kiểm tra active_rescan=True thăm dò byte và tự động gọi rebind_udev_rules."""
+    ports = ["/dev/ttyUSB0", "/dev/ttyUSB1"]
+    with patch("os.path.exists", side_effect=lambda p: p in ("/dev/hoverboard", "/dev/rplidar")), patch(
+        "robot_ui.kiosk.serial_resolver.list_serial_ports", return_value=ports
+    ), patch("os.path.realpath", side_effect=lambda p: p), patch(
+        "robot_ui.kiosk.serial_resolver.probe_rplidar", side_effect=lambda p: p == "/dev/ttyUSB1"
+    ), patch(
+        "robot_ui.kiosk.serial_resolver.is_esp32_port", side_effect=lambda p: p == "/dev/ttyUSB0"
+    ), patch(
+        "robot_ui.kiosk.serial_resolver.rebind_udev_rules", return_value=True
+    ) as mock_rebind:
+        hb, lidar, method = detect_serial_ports(active_rescan=True)
+        mock_rebind.assert_called_once_with("/dev/ttyUSB1", "/dev/ttyUSB0")
+        assert hb == "/dev/hoverboard"
+        assert lidar == "/dev/rplidar"
+        assert method == "udev_rebound"
+
+
+def test_rebind_udev_rules_helper_success():
+    """Kiểm tra hàm rebind_udev_rules khi helper script thành công."""
+    from robot_ui.kiosk.serial_resolver import rebind_udev_rules
+    with patch("os.path.exists", return_value=True), patch(
+        "os.access", return_value=True
+    ), patch("subprocess.run") as mock_run:
+        mock_run.return_value.returncode = 0
+        success = rebind_udev_rules("/dev/ttyUSB1", "/dev/ttyUSB0")
+        assert success is True
+        mock_run.assert_called()
+
+

@@ -2057,7 +2057,7 @@ class KioskRosNode(Node):
         """Quét và làm mới thông tin cổng Serial trên luồng nền (non-blocking)."""
         def _scan_worker():
             from robot_ui.kiosk.serial_resolver import detect_serial_ports
-            ports = detect_serial_ports(force_swap=self._force_swap_ports)
+            ports = detect_serial_ports(force_swap=self._force_swap_ports, active_rescan=True)
             self._cached_serial_ports = ports
             self.get_logger().info(f"[SERIAL] Đã quét cổng nền xong ({ports[2]}): ESP={ports[0]}, LiDAR={ports[1]}")
             if callback:
