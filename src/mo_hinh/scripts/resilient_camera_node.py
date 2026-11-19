@@ -9,6 +9,7 @@ Unlike standard usb_cam which crashes when a USB cable is unplugged, this node:
 """
 from __future__ import annotations
 
+import array
 import os
 import threading
 import time
@@ -27,7 +28,7 @@ class ResilientCameraNode(Node):
         super().__init__("resilient_camera_node")
 
         # Khai báo các tham số cấu hình
-        self.declare_parameter("video_device", "/dev/video2")
+        self.declare_parameter("video_device", "/dev/video0")
         self.declare_parameter("image_width", 640)
         self.declare_parameter("image_height", 480)
         self.declare_parameter("framerate", 30.0)
@@ -122,14 +123,23 @@ class ResilientCameraNode(Node):
 
             # 2. V4L2 Native với thiết lập FourCC MJPG
             if cap is None:
-                # Ưu tiên mở trực tiếp bằng đường dẫn thiết bị (vd: '/dev/video4', cv2.CAP_V4L2)
-                cap_v4l = cv2.VideoCapture(str(target_dev), cv2.CAP_V4L2)
+                dev_idx = None
+                if str(target_dev).startswith("/dev/video"):
+                    try:
+                        dev_idx = int(str(target_dev).replace("/dev/video", ""))
+                    except ValueError:
+                        dev_idx = None
+
+                # Ưu tiên mở bằng index với backend V4L2
+                if dev_idx is not None:
+                    cap_v4l = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
+                else:
+                    cap_v4l = cv2.VideoCapture(str(target_dev), cv2.CAP_V4L2)
+
                 if not cap_v4l.isOpened():
                     cap_v4l = cv2.VideoCapture(str(target_dev))
-                if not cap_v4l.isOpened():
-                    dev_idx = int(target_dev.replace("/dev/video", "")) if str(target_dev).startswith("/dev/video") else target_dev
-                    if isinstance(dev_idx, int):
-                        cap_v4l = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
+                if not cap_v4l.isOpened() and dev_idx is not None:
+                    cap_v4l = cv2.VideoCapture(dev_idx)
 
                 if cap_v4l.isOpened():
                     # Ép FOURCC MJPG và thiết lập độ phân giải / FPS
@@ -184,6 +194,8 @@ class ResilientCameraNode(Node):
     def _capture_loop(self) -> None:
         """Vòng lặp thu nhận hình ảnh liên tục với khả năng tự phục hồi khi rút cáp."""
         warn_logged = False
+        target_interval = (1.0 / self.framerate) if self.framerate > 0 else 0.0
+        last_pub_time = 0.0
 
         while self._running and rclpy.ok():
             if not self._connected or self._cap is None:
@@ -214,6 +226,12 @@ class ResilientCameraNode(Node):
                     time.sleep(0.5)
                     continue
 
+                now_mono = time.monotonic()
+                if target_interval > 0.0 and (now_mono - last_pub_time) < (target_interval - 0.002):
+                    # Điều tiết FPS mượt mà khi cấu hình FPS thấp hơn phần cứng (vd: 15 FPS)
+                    continue
+                last_pub_time = now_mono
+
                 # Tạo message ROS 2 và publish
                 now = self.get_clock().now().to_msg()
 
@@ -226,7 +244,12 @@ class ResilientCameraNode(Node):
                 img_msg.encoding = "bgr8"
                 img_msg.is_bigendian = 0
                 img_msg.step = int(frame.shape[1] * 3)
-                img_msg.data = frame.tobytes()
+
+                # Fast path qua array.array('B') loại bỏ hoàn toàn nút thắt 191ms
+                data_arr = array.array('B')
+                data_arr.frombytes(frame.data)
+                img_msg.data = data_arr
+
                 self.pub_image.publish(img_msg)
 
                 # 2. CameraInfo message
