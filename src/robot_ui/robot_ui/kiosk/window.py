@@ -989,7 +989,7 @@ class KioskWindow(QMainWindow):
             if hasattr(self, "idle_page"):
                 self.idle_page.trigger_event_branch(
                     title="Mời khách tương tác",
-                    duration_sec=5,
+                    duration_sec=7,
                     description="Đang chào mời khách tương tác trước mặt...",
                 )
             self.show_page("service")

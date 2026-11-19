@@ -70,12 +70,8 @@ class IsHandWavingDetected(Condition):
 
 
 class IsCustomerEncountered(Condition):
-    """Gặp người đứng chắn đường (cự ly < 1.8m, không vẫy) hoặc đang giữ đếm ngược 5s."""
+    """Gặp người đứng trước mặt (tuần tra: tức thì; không tuần tra: nhìn 3s vùng hẹp) hoặc đang đếm ngược 5s."""
     def tick(self, blackboard: Blackboard) -> NodeStatus:
-        # Chỉ kích hoạt khi đang trong chế độ tuần tra hoạt động
-        if not blackboard.get('HMI_start_patrol', False):
-            return NodeStatus.FAILURE
-
         if (
             blackboard.get('IS_SERVING', False)
             or blackboard.get('HAND_WAVE_ACTIVE', False)
@@ -464,6 +460,7 @@ class ActionCustomerEncounter(Action):
         super().__init__(name)
         self.node = node
         self.start_time = None
+        self.duration_sec = 7.0
 
     def tick(self, blackboard: Blackboard) -> NodeStatus:
         if self.status != NodeStatus.RUNNING:
@@ -472,7 +469,7 @@ class ActionCustomerEncounter(Action):
             if self.node and hasattr(self.node, 'stop_robot_motion'):
                 self.node.stop_robot_motion(cancel_nav2=True)
 
-            msg = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước..."
+            msg = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 7 giây mời nước..."
             if self.node:
                 self.node.get_logger().info(msg)
                 self.node.publish_log(msg)
@@ -492,8 +489,12 @@ class ActionCustomerEncounter(Action):
             self.status = NodeStatus.SUCCESS
             return NodeStatus.SUCCESS
 
-        if time.time() - self.start_time >= 5.0:
-            msg = "⏱ Hết 5s không yêu cầu nước. Chúc Thầy/Cô một ngày tốt lành và tiếp tục tuần tra!"
+        if time.time() - self.start_time >= self.duration_sec:
+            is_patrol = blackboard.get('HMI_start_patrol', False)
+            if is_patrol:
+                msg = "⏱ Hết 7s không yêu cầu nước. Chúc Thầy/Cô một ngày tốt lành và tiếp tục tuần tra!"
+            else:
+                msg = "⏱ Hết 7s không yêu cầu nước. Chúc Thầy/Cô một ngày tốt lành!"
             if self.node:
                 self.node.get_logger().info(msg)
                 self.node.publish_log(msg)

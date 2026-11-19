@@ -550,9 +550,9 @@ def test_audio_player_greeting_chuc_20_11_on_encounter_and_wave():
 
     player = DummyAudioPlayer()
 
-    # Test 1: Log encounter ("👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước...")
+    # Test 1: Log encounter ("👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 7 giây mời nước...")
     msg_encounter = String()
-    msg_encounter.data = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 5 giây mời nước..."
+    msg_encounter.data = "👤 GẶP NGƯỜI TRƯỚC MẶT! Dừng tĩnh 7 giây mời nước..."
     for _ in range(5):
         player.cb_mission_log(msg_encounter)
 
@@ -569,8 +569,79 @@ def test_audio_player_greeting_chuc_20_11_on_encounter_and_wave():
     assert player.played[0] == 'chuc_20_11'
 
 
-def test_no_encounter_or_waving_when_not_patrolling():
-    """Verify neither waving nor encounter triggers when HMI_start_patrol is False."""
+def test_action_customer_encounter_7s_and_instant_brake_serving():
+    """Verify encounter waits 7s (not 5s) and activating serving triggers immediate robot motion stop."""
+    from robot_mission_control.bt_nodes import ActionCustomerEncounter
+    from robot_mission_control.mission_controller_node import MissionControllerNode
+
+    class DummyController:
+        def __init__(self):
+            self.blackboard = Blackboard()
+            self.stop_called = 0
+            self.cancel_nav2_called = False
+            self.published_logs = []
+            self.popup_cmds = []
+
+        def stop_robot_motion(self, cancel_nav2=True):
+            self.stop_called += 1
+            self.cancel_nav2_called = cancel_nav2
+
+        def publish_zero_vel(self):
+            pass
+
+        def publish_log(self, text):
+            self.published_logs.append(text)
+
+        def publish_popup_cmd(self, cmd):
+            self.popup_cmds.append(cmd)
+
+        def get_logger(self):
+            import logging
+            return logging.getLogger("dummy")
+
+        def _activate_serving(self):
+            MissionControllerNode._activate_serving(self)
+
+    controller = DummyController()
+    action = ActionCustomerEncounter("TestEncounter", node=controller)
+
+    assert action.duration_sec == 7.0
+
+    bb = controller.blackboard
+    bb.set('HMI_start_patrol', True)
+    bb.set('ENCOUNTER_ACTIVE', False)
+    bb.set('SERVE_REQUESTED', False)
+
+    # 1. First tick -> Starts 7s encounter
+    status = action.tick(bb)
+    assert status == NodeStatus.RUNNING
+    assert bb.get('ENCOUNTER_ACTIVE') is True
+    assert controller.stop_called == 1
+    assert "SHOW_5S_INVITE" in controller.popup_cmds
+
+    # 2. At t = 5.0s, must STILL be RUNNING (no longer times out at 5s)
+    action.start_time = time.time() - 5.0
+    status = action.tick(bb)
+    assert status == NodeStatus.RUNNING
+    assert bb.get('ENCOUNTER_ACTIVE') is True
+
+    # 3. At t = 7.1s, finishes with SUCCESS
+    action.start_time = time.time() - 7.1
+    status = action.tick(bb)
+    assert status == NodeStatus.SUCCESS
+    assert bb.get('ENCOUNTER_ACTIVE') is False
+    assert "HIDE" in controller.popup_cmds
+
+    # 4. Activate serving calls stop_robot_motion immediately
+    controller.stop_called = 0
+    controller._activate_serving()
+    assert controller.stop_called == 1
+    assert controller.cancel_nav2_called is True
+    assert bb.get('IS_SERVING') is True
+
+
+def test_encounter_and_waving_rules_when_not_patrolling():
+    """Verify waving does not trigger when not patrolling, but encounter triggers if PERSON_IN_PATH is True (e.g. 3s dwell)."""
     cond_wave = IsHandWavingDetected("TestWave")
     cond_enc = IsCustomerEncountered("TestEnc")
     bb = Blackboard()
@@ -581,15 +652,102 @@ def test_no_encounter_or_waving_when_not_patrolling():
     bb.set('PERSON_IN_PATH', True)
     bb.set('IS_SERVING', False)
 
-    # Must return FAILURE to prevent interrupting operator during SLAM/Waypoint config
+    # Waving must return FAILURE when not patrolling to prevent auto-navigating
     assert cond_wave.tick(bb) == NodeStatus.FAILURE
+    # When HAND_WAVE_ACTIVE is True, encounter is suppressed
     assert cond_enc.tick(bb) == NodeStatus.FAILURE
 
-    # 2. Patrol IS active
-    bb.set('HMI_start_patrol', True)
-    assert cond_wave.tick(bb) == NodeStatus.SUCCESS
-
-    # Encounter requires HAND_WAVE_ACTIVE to be False (since waving takes precedence)
+    # 2. When not patrolling and no wave active, PERSON_IN_PATH triggers encounter
     bb.set('HAND_WAVE_ACTIVE', False)
     assert cond_enc.tick(bb) == NodeStatus.SUCCESS
+
+    # 3. Patrol IS active
+    bb.set('HMI_start_patrol', True)
+    bb.set('HAND_WAVE_ACTIVE', True)
+    assert cond_wave.tick(bb) == NodeStatus.SUCCESS
+
+
+def test_tracked_people_non_patrol_3s_dwell_vs_patrol_instant():
+    """Verify non-patrol requires 3s continuous dwell in narrow zone, while patrol triggers instantly in wider zone."""
+    import math
+    from types import SimpleNamespace
+    from robot_interfaces.msg import TrackedPersonArray, TrackedPerson
+    from robot_mission_control.mission_controller_node import MissionControllerNode
+
+    # Dummy node without full ROS spin
+    class DummyNode:
+        def __init__(self):
+            self.blackboard = Blackboard()
+            self._person_in_front_since = None
+            self._non_patrol_gaze_start = None
+            self._last_narrow_person_seen = 0.0
+            self._last_wave_seen_at = 0.0
+            self._wave_timeout_sec = 2.0
+
+        def cb_tracked_people(self, msg):
+            MissionControllerNode.cb_tracked_people(self, msg)
+
+    node = DummyNode()
+
+    def make_person_msg(x, y, is_waving=False):
+        p = TrackedPerson()
+        p.track_id = "1"
+        p.position_valid = True
+        p.position.x = float(x)
+        p.position.y = float(y)
+        p.is_waving = is_waving
+        p.wave_valid = is_waving
+        msg = TrackedPersonArray()
+        msg.people = [p]
+        return msg
+
+    # ==========================================================
+    # TEST CASE A: NOT PATROLLING (HMI_start_patrol = False)
+    # ==========================================================
+    node.blackboard.set('HMI_start_patrol', False)
+    node.blackboard.set('ENCOUNTER_ACTIVE', False)
+    node.blackboard.set('APPROACH_ACTIVE', False)
+    node.blackboard.set('HAND_WAVE_ACTIVE', False)
+
+    # 1. Person outside narrow lateral zone (|y| = 0.50m > 0.35m)
+    msg_wide = make_person_msg(x=0.8, y=0.50)
+    node.cb_tracked_people(msg_wide)
+    assert node.blackboard.get('PERSON_IN_PATH') is False
+    assert node._non_patrol_gaze_start is None
+
+    # 2. Person inside narrow zone (x=0.75m, y=0.15m) at t=0
+    msg_narrow = make_person_msg(x=0.75, y=0.15)
+    node.cb_tracked_people(msg_narrow)
+    # Instant trigger should NOT happen yet
+    assert node.blackboard.get('PERSON_IN_PATH') is False
+    assert node._non_patrol_gaze_start is not None
+
+    # Simulate 1.5 seconds elapsed (dwell < 3.0s)
+    node._non_patrol_gaze_start = time.monotonic() - 1.5
+    node.cb_tracked_people(msg_narrow)
+    assert node.blackboard.get('PERSON_IN_PATH') is False
+
+    # Simulate 3.2 seconds elapsed (dwell >= 3.0s) -> Must trigger PERSON_IN_PATH = True
+    node._non_patrol_gaze_start = time.monotonic() - 3.2
+    node.cb_tracked_people(msg_narrow)
+    assert node.blackboard.get('PERSON_IN_PATH') is True
+
+    # 3. Person steps away
+    empty_msg = TrackedPersonArray()
+    empty_msg.people = []
+    # If 0.5s passes with nobody
+    node._last_narrow_person_seen = time.monotonic() - 0.5
+    node.cb_tracked_people(empty_msg)
+    assert node.blackboard.get('PERSON_IN_PATH') is False
+    assert node._non_patrol_gaze_start is None
+
+    # ==========================================================
+    # TEST CASE B: PATROLLING (HMI_start_patrol = True)
+    # ==========================================================
+    node.blackboard.set('HMI_start_patrol', True)
+    # Person in wide blocking zone (|y| = 0.55m <= 0.65m) triggers immediately
+    msg_patrol_block = make_person_msg(x=0.9, y=0.55)
+    node.cb_tracked_people(msg_patrol_block)
+    assert node.blackboard.get('PERSON_IN_PATH') is True
+
 

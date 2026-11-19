@@ -54,6 +54,8 @@ class MissionControllerNode(Node):
         self.blackboard.set('WAVE_COOLDOWN_UNTIL', 0.0)
 
         self._person_in_front_since = None
+        self._non_patrol_gaze_start = None
+        self._last_narrow_person_seen = 0.0
         self._last_wave_seen_at = 0.0
         self._wave_timeout_sec = 2.0
 
@@ -158,6 +160,7 @@ class MissionControllerNode(Node):
                     self.get_logger().warn(f"Lỗi gọi cancel DirectGo: {exc}")
 
     def _activate_serving(self):
+        self.stop_robot_motion(cancel_nav2=True)
         self.blackboard.set('SERVE_REQUESTED', False)
         self.blackboard.set('ENCOUNTER_ACTIVE', False)
         self.blackboard.set('APPROACH_ACTIVE', False)
@@ -170,6 +173,7 @@ class MissionControllerNode(Node):
         has_waving = False
         waving_person = None
         has_blocking = False
+        has_narrow_person = False
         has_preview = self.blackboard.get('PERSON_PREVIEW_MAP_POSE', None) is not None
 
         is_approaching = self.blackboard.get('APPROACH_ACTIVE', False)
@@ -197,9 +201,12 @@ class MissionControllerNode(Node):
 
             if pos_valid:
                 dist = math.hypot(p.position.x, p.position.y)
-                # Vùng nhận diện người trước mặt: cự ly 0.35m - 1.20m, lệch ngang <= 0.65m
+                # Vùng nhận diện khi tuần tra: cự ly 0.35m - 1.20m, lệch ngang <= 0.65m
                 if 0.35 <= dist <= 1.20 and abs(p.position.y) <= 0.65:
                     has_blocking = True
+                # Vùng hẹp khi không tuần tra: cự ly 0.40m - 1.05m, lệch ngang <= 0.35m (nhìn trực diện)
+                if 0.40 <= dist <= 1.05 and abs(p.position.y) <= 0.35:
+                    has_narrow_person = True
 
         now_mono = time.monotonic()
         if is_approaching:
@@ -224,8 +231,33 @@ class MissionControllerNode(Node):
                 self.blackboard.set('WAVING_PERSON', None)
                 self.blackboard.set('TARGET_TRACK_ID', None)
 
-        # Thấy người trong phạm vi là kích hoạt PERSON_IN_PATH ngay lập tức (Instant Trigger)
-        self.blackboard.set('PERSON_IN_PATH', has_blocking)
+        # Xử lý PERSON_IN_PATH phân tách giữa chế độ Tuần tra và Không tuần tra:
+        is_patrolling = self.blackboard.get('HMI_start_patrol', False)
+        encounter_active = self.blackboard.get('ENCOUNTER_ACTIVE', False)
+
+        if is_patrolling:
+            # 1. Khi đang tuần tra: Kích hoạt tức thì (Instant Trigger) để tránh va chạm và mời nước
+            self._non_patrol_gaze_start = None
+            self.blackboard.set('PERSON_IN_PATH', has_blocking)
+        else:
+            # 2. Khi KHÔNG tuần tra: Áp dụng quy tắc nhìn 3 giây ở vùng hẹp mới chào
+            if encounter_active or time.time() < self.blackboard.get('ENCOUNTER_COOLDOWN_UNTIL', 0.0):
+                self._non_patrol_gaze_start = None
+                self.blackboard.set('PERSON_IN_PATH', False)
+            elif has_narrow_person:
+                if self._non_patrol_gaze_start is None:
+                    self._non_patrol_gaze_start = now_mono
+                self._last_narrow_person_seen = now_mono
+                dwell_time = now_mono - self._non_patrol_gaze_start
+                if dwell_time >= 3.0:
+                    self.blackboard.set('PERSON_IN_PATH', True)
+                else:
+                    self.blackboard.set('PERSON_IN_PATH', False)
+            else:
+                # Dung sai 0.4s nếu camera AI bị rớt frame tạm thời
+                if self._non_patrol_gaze_start is not None and (now_mono - self._last_narrow_person_seen) > 0.4:
+                    self._non_patrol_gaze_start = None
+                self.blackboard.set('PERSON_IN_PATH', False)
 
     def cb_person_preview_map(self, msg: PointStamped):
         """Lưu tọa độ map dự phòng của người được chọn."""

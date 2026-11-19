@@ -1011,6 +1011,19 @@ class KioskRosNode(Node):
     def request_serve(self) -> None:
         """Kích hoạt trạng thái phục vụ nước (khóa bánh đứng yên)."""
         self.get_logger().info("Kích hoạt chế độ phục vụ nước...")
+        # 1. Phát ngay vận tốc 0 vào /cmd_vel để robot phanh đứng yên lập tức
+        try:
+            self.cmd_vel_pub.publish(Twist())
+        except Exception:
+            pass
+        # 2. Hủy goal nội bộ Kiosk nếu đang có
+        if self._goal_handle is not None:
+            try:
+                self._goal_handle.cancel_goal_async()
+            except Exception:
+                pass
+            self._goal_handle = None
+        # 3. Gửi trigger phục vụ sang Backend Mission Controller
         self.serve_trigger_pub.publish(Bool(data=True))
         if self.trigger_serve_client.service_is_ready():
             self.trigger_serve_client.call_async(Trigger.Request())

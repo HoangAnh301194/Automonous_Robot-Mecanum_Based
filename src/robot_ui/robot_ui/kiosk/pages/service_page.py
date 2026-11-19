@@ -14,6 +14,7 @@ class ServiceMascotCanvas(QWidget):
     def __init__(self, image_file: Path | None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._image = QPixmap(str(image_file)) if image_file and image_file.is_file() else QPixmap()
+        self.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.setMinimumHeight(290)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.wait_button = self._make_button("Phục vụ", "wait")
@@ -49,13 +50,39 @@ class ServiceMascotCanvas(QWidget):
             button.raise_()
         super().resizeEvent(event)
 
-    def _button_rect(self, mode: str) -> QRectF:
-        """Tight hit area around each button, excluding the JPG white margins."""
+    def mousePressEvent(self, event) -> None:
+        pos = event.pos()
+        art = self._art_rect()
+        if art.contains(pos):
+            # Nhận diện chạm toàn vùng: nửa trái bức tranh là Phục vụ, nửa phải là Hoàn tất
+            if pos.x() < art.center().x():
+                self.wait_button.click()
+            else:
+                self.continue_button.click()
+        super().mousePressEvent(event)
+
+    def _art_crop_rect(self, mode: str) -> QRectF:
+        """Visual crop bounds matching the eye artwork for zoom animation."""
         art = self._art_rect()
         center_x = .329 if mode == "wait" else .680
         center_y = .490
         width = .245
         height = .185
+        return QRectF(
+            art.x() + art.width() * (center_x - width / 2),
+            art.y() + art.height() * (center_y - height / 2),
+            art.width() * width,
+            art.height() * height,
+        )
+
+    def _button_rect(self, mode: str) -> QRectF:
+        """Generous hit area around each button, ensuring effortless touch interaction."""
+        art = self._art_rect()
+        center_x = .329 if mode == "wait" else .680
+        center_y = .490
+        # Mở rộng vùng bấm lên 0.360 x 0.280 (tăng hơn 50% diện tích bấm)
+        width = .360
+        height = .280
         return QRectF(
             art.x() + art.width() * (center_x - width / 2),
             art.y() + art.height() * (center_y - height / 2),
@@ -78,7 +105,7 @@ class ServiceMascotCanvas(QWidget):
         # The buttons are part of the source JPG. Zoom the selected image crop,
         # not merely the transparent hitbox on top of it.
         if self._selected_mode and self._press_scale > 1.001:
-            target = self._button_rect(self._selected_mode)
+            target = self._art_crop_rect(self._selected_mode)
             art = self._art_rect()
             source = QRectF(
                 (target.x() - art.x()) / art.width() * self._image.width(),
