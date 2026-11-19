@@ -31,7 +31,7 @@ import rclpy
 from action_msgs.msg import GoalStatus
 from action_msgs.srv import CancelGoal
 from diagnostic_msgs.msg import KeyValue
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, Twist, PoseWithCovarianceStamped
 from nav2_msgs.action import NavigateToPose
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
@@ -213,13 +213,18 @@ SLAM_MAPPING_PARAMS_BASE = os.environ.get("SLAM_MAPPING_PARAMS", _pick_first_exi
 SLAM_LOCALIZATION_PARAMS_BASE = os.environ.get("SLAM_LOCALIZATION_PARAMS", _pick_first_existing([os.path.join(MO_HINH_CONFIG_DIR, "slam_localization.yaml"), os.path.join(CONFIG_DIR, "slam_localization.yaml")]))
 
 def recompute_cyclic_waypoint_yaws(waypoints):
-    """Set each patrol waypoint's yaw (rad) to face toward the next waypoint in the cycle."""
+    """Set each patrol waypoint's yaw (rad) to face toward the next waypoint in the cycle.
+    Preserves custom yaw for 'khoihanh' and 'tram_cho'.
+    """
     n = len(waypoints)
     if n < 2:
-        if n == 1:
+        if n == 1 and waypoints[0].get("name") not in ("khoihanh", "tram_cho"):
             waypoints[0]["yaw"] = 0.0
         return waypoints
     for i, wp in enumerate(waypoints):
+        name = str(wp.get("name", ""))
+        if name in ("khoihanh", "tram_cho") and "yaw" in wp and wp["yaw"] != 0.0:
+            continue
         nxt = waypoints[(i + 1) % n]
         dx = float(nxt.get("x", 0.0)) - float(wp.get("x", 0.0))
         dy = float(nxt.get("y", 0.0)) - float(wp.get("y", 0.0))
@@ -282,6 +287,7 @@ class RosInterface(Node):
         if HAS_ROBOT_STATUS_MSG:
             self.create_subscription(RobotStatus, "/robot_status", self._on_robot_status, 10)
         self.goal_pub = self.create_publisher(PoseStamped, "/goal_pose", 10)
+        self.initial_pose_pub = self.create_publisher(PoseWithCovarianceStamped, "/initialpose", 10)
         self.nav_to_pose_client = ActionClient(self, NavigateToPose, "navigate_to_pose")
         self.current_goal_handle = None
         self.cmd_vel_pub = self.create_publisher(Twist, "/cmd_vel", 10)
@@ -717,6 +723,26 @@ class RosInterface(Node):
                 self.log(f"Lỗi khi gửi goal Nav2: {e}")
 
         send_goal_future.add_done_callback(_on_goal_response)
+        return True
+
+    def send_initial_pose(self, x, y, yaw=0.0):
+        """Phát PoseWithCovarianceStamped lên /initialpose để định vị AMCL tức thì"""
+        msg = PoseWithCovarianceStamped()
+        msg.header.frame_id = "map"
+        msg.header.stamp = self.get_clock().now().to_msg()
+        msg.pose.pose.position.x = float(x)
+        msg.pose.pose.position.y = float(y)
+        msg.pose.pose.position.z = 0.0
+        msg.pose.pose.orientation.z = math.sin(float(yaw) / 2.0)
+        msg.pose.pose.orientation.w = math.cos(float(yaw) / 2.0)
+        cov = [0.0] * 36
+        cov[0] = 0.25   # x variance (0.5m std)
+        cov[7] = 0.25   # y variance (0.5m std)
+        cov[35] = 0.068 # yaw variance (~15 deg)
+        msg.pose.covariance = cov
+        self.initial_pose_pub.publish(msg)
+        self.log(f"🎯 [INITIAL POSE] Đã phát /initialpose: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} rad")
+        self.emit_nav_status("🎯 ĐÃ GỬI VỊ TRÍ GỐC", f"Đã phát /initialpose ({x:.2f}, {y:.2f}). AMCL đang cập nhật hạt định vị...", "#059669")
         return True
 
     def cancel_nav_goal(self):
@@ -1317,6 +1343,16 @@ class MainWindow(QWidget):
         map_layout.addWidget(self.edt_save_map_name, 5, 0, 1, 2); map_layout.addWidget(self.btn_save_map, 5, 2)
         map_layout.addWidget(self.btn_batch_mode, 6, 0); map_layout.addWidget(self.btn_batch_undo, 6, 1); map_layout.addWidget(self.btn_batch_clear, 6, 2)
         map_layout.addWidget(self.btn_batch_send, 7, 0, 1, 3); map_layout.addWidget(self.lbl_batch_info, 8, 0, 1, 3)
+        self.btn_tab1_relocalize = QPushButton("🎯 Về Điểm Gốc (AMCL)")
+        self.btn_tab1_relocalize.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 5px; border-radius: 4px;")
+        self.btn_tab1_relocalize.setToolTip("Phát /initialpose tức thì về 'khoihanh' để AMCL định vị lại")
+        self.btn_tab1_relocalize.clicked.connect(self.relocalize_to_start_pose)
+        self.btn_tab1_standby = QPushButton("🚏 Về Trạm Chờ (Nav2)")
+        self.btn_tab1_standby.setStyleSheet("background-color: #d97706; color: white; font-weight: bold; padding: 5px; border-radius: 4px;")
+        self.btn_tab1_standby.setToolTip("Điều hướng Nav2 tự động lái robot về Trạm Chờ ('tram_cho')")
+        self.btn_tab1_standby.clicked.connect(self.navigate_to_standby_pose)
+        map_layout.addWidget(self.btn_tab1_relocalize, 9, 0, 1, 2)
+        map_layout.addWidget(self.btn_tab1_standby, 9, 2)
         map_group.setLayout(map_layout)
         self.btn_start_platform = QPushButton("Start Layer 1 (Odom)"); self.btn_stop_platform = QPushButton("Stop Layer 1 (Odom)")
         self.btn_start_mode = QPushButton("Start Layer 2 (Mode)"); self.btn_stop_mode = QPushButton("Stop Layer 2 (Mode)")
@@ -1596,14 +1632,41 @@ class MainWindow(QWidget):
         toolbar_row2.addWidget(self.btn_patrol_load)
         toolbar_row2.addWidget(self.btn_patrol_save, stretch=1)
 
+        toolbar_row_docking = QHBoxLayout()
+        self.btn_capture_start_pose = QPushButton("📸 LƯU ĐIỂM GỐC")
+        self.btn_capture_start_pose.setStyleSheet("background-color: #0d9488; color: white; font-weight: bold; padding: 6px 6px; border-radius: 4px;")
+        self.btn_capture_start_pose.setToolTip("Chụp tọa độ robot hiện tại lưu thành 'khoihanh' (vạch xuất phát / sạc máy)")
+        self.btn_capture_start_pose.clicked.connect(self.capture_current_pose_as_start)
+
+        self.btn_relocalize_start_pose = QPushButton("🎯 VỀ ĐIỂM GỐC")
+        self.btn_relocalize_start_pose.setStyleSheet("background-color: #059669; color: white; font-weight: bold; padding: 6px 6px; border-radius: 4px;")
+        self.btn_relocalize_start_pose.setToolTip("Phát /initialpose khôi phục tức thì định vị AMCL về 'khoihanh'")
+        self.btn_relocalize_start_pose.clicked.connect(self.relocalize_to_start_pose)
+
+        self.btn_capture_standby_pose = QPushButton("📸 LƯU TRẠM CHỜ")
+        self.btn_capture_standby_pose.setStyleSheet("background-color: #d97706; color: white; font-weight: bold; padding: 6px 6px; border-radius: 4px;")
+        self.btn_capture_standby_pose.setToolTip("Chụp tọa độ robot hiện tại lưu thành 'tram_cho' (trạm chờ đón khách / đỗ xe giữa phòng)")
+        self.btn_capture_standby_pose.clicked.connect(self.capture_current_pose_as_standby)
+
+        self.btn_navigate_standby_pose = QPushButton("🚏 VỀ TRẠM CHỜ")
+        self.btn_navigate_standby_pose.setStyleSheet("background-color: #b45309; color: white; font-weight: bold; padding: 6px 6px; border-radius: 4px;")
+        self.btn_navigate_standby_pose.setToolTip("Gửi lệnh Nav2 lái robot tự hành về đỗ tại Trạm Chờ ('tram_cho')")
+        self.btn_navigate_standby_pose.clicked.connect(self.navigate_to_standby_pose)
+
+        toolbar_row_docking.addWidget(self.btn_capture_start_pose)
+        toolbar_row_docking.addWidget(self.btn_relocalize_start_pose)
+        toolbar_row_docking.addWidget(self.btn_capture_standby_pose)
+        toolbar_row_docking.addWidget(self.btn_navigate_standby_pose)
+
         self.lbl_patrol_hint = QLabel(
-            "Bật 'Chấm điểm trên Map: ON' rồi click lên bản đồ bên dưới để thêm lần lượt Trạm nước (khoihanh) → diem1 → diem2 → diem3..."
+            "💡 Chấm điểm trên Map: ON để thêm diem1 → diem2... | Điểm cất máy (khoihanh) & Trạm chờ (tram_cho) lưu độc lập qua các nút phía trên."
         )
         self.lbl_patrol_hint.setWordWrap(True)
         self.lbl_patrol_hint.setStyleSheet("color: #475569; font-size: 11px;")
 
         setup_layout.addLayout(toolbar_row1)
         setup_layout.addLayout(toolbar_row2)
+        setup_layout.addLayout(toolbar_row_docking)
         setup_layout.addWidget(self.lbl_patrol_hint)
         setup_group.setLayout(setup_layout)
         mission_left.addWidget(setup_group)
@@ -1977,9 +2040,22 @@ class MainWindow(QWidget):
             self.patrol_map_view.update_map(msg)
 
     def _on_new_pose_ui(self, x, y, yaw, source):
+        self.current_robot_x = x
+        self.current_robot_y = y
+        self.current_robot_yaw = yaw
         self.map_view.update_pose(x, y, yaw, source)
         if hasattr(self, "patrol_map_view"):
             self.patrol_map_view.update_pose(x, y, yaw, source)
+
+    def get_current_robot_pose(self):
+        """Trả về (x, y, yaw) tọa độ robot hiện tại từ TF hoặc Odometry."""
+        if hasattr(self, "current_robot_x") and self.current_robot_x is not None:
+            return float(self.current_robot_x), float(self.current_robot_y), float(self.current_robot_yaw)
+        if hasattr(self, "map_view") and getattr(self.map_view, "robot_x", None) is not None:
+            return float(self.map_view.robot_x), float(self.map_view.robot_y), float(self.map_view.robot_yaw or 0.0)
+        if hasattr(self, "patrol_map_view") and getattr(self.patrol_map_view, "robot_x", None) is not None:
+            return float(self.patrol_map_view.robot_x), float(self.patrol_map_view.robot_y), float(self.patrol_map_view.robot_yaw or 0.0)
+        return None
 
     def _on_new_scan_ui(self, msg, scan_points_world):
         self.map_view.update_scan(msg, scan_points_world)
@@ -2005,7 +2081,7 @@ class MainWindow(QWidget):
     def _add_patrol_waypoint_at(self, wx, wy):
         idx = len(self.batch_waypoints)
         name = self.waypoint_name_from_index(idx)
-        note = "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra {idx}"
+        note = f"Điểm tuần tra {idx + 1}"
         self.batch_waypoints.append({
             "name": name,
             "x": float(wx),
@@ -2030,9 +2106,7 @@ class MainWindow(QWidget):
         return False
 
     def waypoint_name_from_index(self, idx):
-        if idx == 0:
-            return "khoihanh"
-        return f"diem{idx}"
+        return f"diem{idx + 1}"
 
     def refresh_batch_waypoint_views(self):
         recompute_cyclic_waypoint_yaws(self.batch_waypoints)
@@ -2055,10 +2129,17 @@ class MainWindow(QWidget):
             self.table_waypoints.blockSignals(True)
             self.table_waypoints.setRowCount(len(self.batch_waypoints))
             for row, wp in enumerate(self.batch_waypoints):
-                self.table_waypoints.setItem(row, 0, QTableWidgetItem(str(wp.get("name", f"diem{row}"))))
+                name_str = str(wp.get("name", f"diem{row + 1}"))
+                self.table_waypoints.setItem(row, 0, QTableWidgetItem(name_str))
                 self.table_waypoints.setItem(row, 1, QTableWidgetItem(f"{float(wp.get('x', 0.0)):.3f}"))
                 self.table_waypoints.setItem(row, 2, QTableWidgetItem(f"{float(wp.get('y', 0.0)):.3f}"))
-                note = wp.get("note", "Trạm nước / Khởi hành" if wp.get("name") == "khoihanh" else f"Điểm tuần tra {row}")
+                if name_str == "khoihanh":
+                    default_note = "Điểm cất robot / Vạch xuất phát"
+                elif name_str == "tram_cho":
+                    default_note = "Trạm chờ đón khách"
+                else:
+                    default_note = f"Điểm tuần tra {row + 1}"
+                note = wp.get("note") or default_note
                 self.table_waypoints.setItem(row, 3, QTableWidgetItem(str(note)))
             self.table_waypoints.blockSignals(False)
         if hasattr(self, "lbl_fsm_route_seq"):
@@ -2118,14 +2199,21 @@ class MainWindow(QWidget):
 
         patrol_names = routes.get("patrol_route")
         if not isinstance(patrol_names, list) or not patrol_names:
-            patrol_names = list(locations.keys())
+            patrol_names = [k for k in locations.keys() if k not in ("khoihanh", "tram_cho")]
+            if not patrol_names:
+                patrol_names = list(locations.keys())
 
         loaded = []
         for idx, name in enumerate(patrol_names):
             coords = locations.get(name)
             if not isinstance(coords, dict):
                 continue
-            note = "Trạm nước / Khởi hành" if name == "khoihanh" else f"Điểm tuần tra ({name})"
+            if name == "khoihanh":
+                note = "Điểm cất robot / Vạch xuất phát"
+            elif name == "tram_cho":
+                note = "Trạm chờ đón khách"
+            else:
+                note = f"Điểm tuần tra ({name})"
             loaded.append({
                 "name": str(name),
                 "x": float(coords.get("x", 0.0)),
@@ -2196,12 +2284,15 @@ class MainWindow(QWidget):
             route_names = []
             for wp in self.batch_waypoints:
                 name = str(wp["name"])
-                route_names.append(name)
+                if name not in ("khoihanh", "tram_cho"):
+                    route_names.append(name)
                 locations[name] = {
                     "x": float(wp["x"]),
                     "y": float(wp["y"]),
                     "yaw": float(wp.get("yaw", 0.0)),
                 }
+            if not route_names:
+                route_names = [str(wp["name"]) for wp in self.batch_waypoints]
             routes["patrol_route"] = route_names
 
             with open(loc_file, "w", encoding="utf-8") as f:
@@ -2223,9 +2314,134 @@ class MainWindow(QWidget):
             QMessageBox.information(
                 self,
                 "Đã lưu lộ trình",
-                f"Đã lưu {len(self.batch_waypoints)} điểm vào:\n- {loc_file}\n- {route_file}\n\nLộ trình: {' ➔ '.join(route_names)}",
+                f"Đã lưu {len(self.batch_waypoints)} điểm vào:\n- {loc_file}\n- {route_file}\n\nLộ trình tuần tra: {' ➔ '.join(route_names)}",
             )
         return True
+
+    def _save_special_location(self, name: str, x: float, y: float, yaw: float):
+        """Lưu một tọa độ đặc biệt (khoihanh, tram_cho) vào locations.yaml"""
+        os.makedirs(CONFIG_DIR, exist_ok=True)
+        loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
+        locations = {}
+        if os.path.exists(loc_file):
+            try:
+                with open(loc_file, "r", encoding="utf-8") as f:
+                    locations = yaml.safe_load(f) or {}
+            except Exception as e:
+                self.append_log(f"[Config] Lỗi đọc locations.yaml: {e}")
+                locations = {}
+        locations[name] = {
+            "x": round(float(x), 3),
+            "y": round(float(y), 3),
+            "yaw": float(yaw),
+        }
+        try:
+            with open(loc_file, "w", encoding="utf-8") as f:
+                yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
+            return True
+        except Exception as e:
+            self.append_log(f"[Config] Lỗi ghi {name} vào locations.yaml: {e}")
+            return False
+
+    def _get_special_location(self, name: str):
+        """Đọc tọa độ đặc biệt (khoihanh, tram_cho) từ locations.yaml"""
+        loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
+        if os.path.exists(loc_file):
+            try:
+                with open(loc_file, "r", encoding="utf-8") as f:
+                    locations = yaml.safe_load(f) or {}
+                    if name in locations and isinstance(locations[name], dict):
+                        return locations[name]
+            except Exception:
+                pass
+        for wp in getattr(self, "batch_waypoints", []):
+            if wp.get("name") == name:
+                return {"x": float(wp.get("x", 0.0)), "y": float(wp.get("y", 0.0)), "yaw": float(wp.get("yaw", 0.0))}
+        return None
+
+    def capture_current_pose_as_start(self):
+        """Chụp tọa độ robot hiện tại lưu thành 'khoihanh' (vạch xuất phát / cất máy sát tường)"""
+        pose = self.get_current_robot_pose()
+        if pose is None:
+            QMessageBox.warning(self, "Chưa có vị trí", "Robot chưa có dữ liệu tọa độ từ TF (map->base_footprint) hoặc Odometry!\nHãy khởi động Layer 1 & 2 trước.")
+            return
+        x, y, yaw = pose
+        if self._save_special_location("khoihanh", x, y, yaw):
+            deg = math.degrees(yaw)
+            self.append_log(f"[Điểm Gốc] Đã chụp tọa độ robot làm 'khoihanh': x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} ({deg:.1f}°)")
+            QMessageBox.information(
+                self,
+                "Đã lưu Điểm Gốc",
+                f"Đã lưu 'khoihanh' (vạch xuất phát / cất máy sát tường):\n\n"
+                f"• X: {x:.3f} m\n• Y: {y:.3f} m\n• Góc quay (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                f"Khi cần định vị lại, bấm '🎯 VỀ ĐIỂM GỐC' để phát /initialpose.",
+            )
+
+    def relocalize_to_start_pose(self):
+        """Phát /initialpose khôi phục định vị AMCL tức thì về Điểm Gốc (khoihanh)"""
+        loc = self._get_special_location("khoihanh")
+        if loc is None:
+            QMessageBox.warning(
+                self,
+                "Chưa có Điểm Gốc",
+                "Chưa tìm thấy tọa độ 'khoihanh' trong locations.yaml!\n\n"
+                "Hãy đặt robot vào vạch xuất phát rồi bấm '📸 LƯU ĐIỂM GỐC' trước.",
+            )
+            return
+        x, y, yaw = float(loc.get("x", 0.0)), float(loc.get("y", 0.0)), float(loc.get("yaw", 0.0))
+        if self.ros_node is not None and hasattr(self.ros_node, "send_initial_pose"):
+            self.ros_node.send_initial_pose(x, y, yaw)
+            deg = math.degrees(yaw)
+            self.append_log(f"[Định Vị] Đã phát /initialpose về 'khoihanh': x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} ({deg:.1f}°)")
+            QMessageBox.information(
+                self,
+                "Phát /initialpose thành công",
+                f"Đã phát vị trí gốc 'khoihanh' tới AMCL:\n\n"
+                f"• X: {x:.3f} m\n• Y: {y:.3f} m\n• Yaw: {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                f"Robot đang đồng bộ đám mây hạt định vị.",
+            )
+        else:
+            QMessageBox.critical(self, "Lỗi ROS 2", "ROS 2 Interface chưa sẵn sàng để phát /initialpose.")
+
+    def capture_current_pose_as_standby(self):
+        """Chụp tọa độ robot hiện tại lưu thành 'tram_cho' (trạm chờ đón khách / đỗ xe giữa phòng)"""
+        pose = self.get_current_robot_pose()
+        if pose is None:
+            QMessageBox.warning(self, "Chưa có vị trí", "Robot chưa có dữ liệu tọa độ từ TF (map->base_footprint) hoặc Odometry!\nHãy khởi động Layer 1 & 2 trước.")
+            return
+        x, y, yaw = pose
+        if self._save_special_location("tram_cho", x, y, yaw):
+            deg = math.degrees(yaw)
+            self.append_log(f"[Trạm Chờ] Đã chụp tọa độ robot làm 'tram_cho': x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} ({deg:.1f}°)")
+            QMessageBox.information(
+                self,
+                "Đã lưu Trạm Chờ",
+                f"Đã lưu 'tram_cho' (trạm chờ đón khách / đỗ xe thông thoáng):\n\n"
+                f"• X: {x:.3f} m\n• Y: {y:.3f} m\n• Góc quay (Yaw): {yaw:.3f} rad ({deg:.1f}°)\n\n"
+                f"Khi cần đón khách hoặc hoàn thành tuần tra, bấm '🚏 VỀ TRẠM CHỜ' để Nav2 tự lái về đây.",
+            )
+
+    def navigate_to_standby_pose(self):
+        """Gửi mục tiêu Nav2 để robot tự hành lái về Trạm Chờ (tram_cho)"""
+        loc = self._get_special_location("tram_cho")
+        if loc is None:
+            QMessageBox.warning(
+                self,
+                "Chưa có Trạm Chờ",
+                "Chưa tìm thấy tọa độ 'tram_cho' trong locations.yaml!\n\n"
+                "Hãy lái robot đến vị trí chờ mong muốn rồi bấm '📸 LƯU TRẠM CHỜ' trước.",
+            )
+            return
+        x, y, yaw = float(loc.get("x", 0.0)), float(loc.get("y", 0.0)), float(loc.get("yaw", 0.0))
+        if self.ros_node is not None:
+            ok = self.ros_node.send_goal(x, y, yaw)
+            if ok:
+                deg = math.degrees(yaw)
+                self.append_log(f"[Điều Hướng] Đang gửi lệnh Nav2 lái robot về Trạm Chờ: x={x:.3f}, y={y:.3f}, yaw={yaw:.3f} ({deg:.1f}°)")
+            else:
+                QMessageBox.warning(self, "Cảnh báo Nav2", "Không thể gửi mục tiêu tới Nav2 server (hãy kiểm tra xem Nav2 đã Start chưa).")
+        else:
+            QMessageBox.critical(self, "Lỗi ROS 2", "ROS 2 Interface chưa sẵn sàng!")
 
     def _set_fsm_banner(self, title: str, detail: str, border_color: str, bg_color: str = "#ffffff"):
         if not hasattr(self, "fsm_banner_frame"):
