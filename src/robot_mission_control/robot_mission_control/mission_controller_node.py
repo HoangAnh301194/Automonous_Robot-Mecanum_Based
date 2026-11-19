@@ -197,8 +197,8 @@ class MissionControllerNode(Node):
 
             if pos_valid:
                 dist = math.hypot(p.position.x, p.position.y)
-                # Vùng nhận diện người trước mặt: cự ly 0.4m - 1.5m, lệch ngang <= 0.50m
-                if 0.40 <= dist <= 1.50 and abs(p.position.y) <= 0.50:
+                # Vùng nhận diện người trước mặt: cự ly 0.35m - 1.20m, lệch ngang <= 0.65m
+                if 0.35 <= dist <= 1.20 and abs(p.position.y) <= 0.65:
                     has_blocking = True
 
         now_mono = time.monotonic()
@@ -224,15 +224,8 @@ class MissionControllerNode(Node):
                 self.blackboard.set('WAVING_PERSON', None)
                 self.blackboard.set('TARGET_TRACK_ID', None)
 
-        now = time.time()
-        if has_blocking:
-            if self._person_in_front_since is None:
-                self._person_in_front_since = now
-            elif (now - self._person_in_front_since) >= 1.5:
-                self.blackboard.set('PERSON_IN_PATH', True)
-        else:
-            self._person_in_front_since = None
-            self.blackboard.set('PERSON_IN_PATH', False)
+        # Thấy người trong phạm vi là kích hoạt PERSON_IN_PATH ngay lập tức (Instant Trigger)
+        self.blackboard.set('PERSON_IN_PATH', has_blocking)
 
     def cb_person_preview_map(self, msg: PointStamped):
         """Lưu tọa độ map dự phòng của người được chọn."""
