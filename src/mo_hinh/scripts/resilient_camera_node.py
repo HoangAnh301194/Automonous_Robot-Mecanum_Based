@@ -194,7 +194,9 @@ class ResilientCameraNode(Node):
     def _capture_loop(self) -> None:
         """Vòng lặp thu nhận hình ảnh liên tục với khả năng tự phục hồi khi rút cáp."""
         warn_logged = False
-        target_interval = (1.0 / self.framerate) if self.framerate > 0 else 0.0
+        # Nếu framerate >= 28 thì không throttle phần mềm (để camera chạy tối đa 30 FPS)
+        # Nếu framerate < 28 (vd: 15 FPS) thì throttle theo ngưỡng 0.75 * interval để lấy chuẩn xác 1/2 số frame
+        throttle_threshold = ((1.0 / self.framerate) * 0.75) if (0.0 < self.framerate < 28.0) else 0.0
         last_pub_time = 0.0
 
         while self._running and rclpy.ok():
@@ -227,8 +229,8 @@ class ResilientCameraNode(Node):
                     continue
 
                 now_mono = time.monotonic()
-                if target_interval > 0.0 and (now_mono - last_pub_time) < (target_interval - 0.002):
-                    # Điều tiết FPS mượt mà khi cấu hình FPS thấp hơn phần cứng (vd: 15 FPS)
+                if throttle_threshold > 0.0 and (now_mono - last_pub_time) < throttle_threshold:
+                    # Bỏ qua frame xen kẽ khi cấu hình FPS thấp hơn phần cứng (ví dụ: 15 FPS)
                     continue
                 last_pub_time = now_mono
 
