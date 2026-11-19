@@ -37,13 +37,20 @@ class NavButton(QPushButton):
             color = QColor("#ffb32c" if dark_background else "#d97800")
         else:
             color = QColor("#ffffff" if dark_background else "#26343c")
-        # Preserve full-colour icons (Settings, Service, Emergency) instead of monochrome tinting.
-        if self.page_id in {"settings", "service", "emergency"} or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
+        # Preserve full-colour icons (Settings, Service, Emergency, Patrol) instead of monochrome tinting.
+        if self.page_id in {"settings", "service", "emergency", "patrol"} or self.icon_path.suffix.lower() in {".jpg", ".jpeg"}:
             self.setIcon(QIcon(str(self.icon_path)))
         else:
             self.setIcon(monochrome_icon(self.icon_path, color))
         self.style().unpolish(self)
         self.style().polish(self)
+
+    def update_icon(self, icon_path: Path, tooltip: str = "") -> None:
+        self.icon_path = icon_path
+        if tooltip:
+            self.setToolTip(tooltip)
+            self.setAccessibleName(tooltip)
+        self.refresh_appearance(self.property("dark") if self.property("dark") is not None else True, self.isChecked())
 
 
 class BottomNavigation(QFrame):
@@ -61,6 +68,7 @@ class BottomNavigation(QFrame):
             "home": "Trang chủ",
             "chat": "Trò chuyện",
             "service": "Dịch vụ",
+            "patrol": "Tuần tra",
             "emergency": "Dừng khẩn",
             "settings": "Quản trị",
             "navigation": "Dẫn đường",
@@ -71,6 +79,13 @@ class BottomNavigation(QFrame):
             layout.addWidget(button)
             self._buttons[page_id] = button
         self.set_active("home")
+
+    def update_patrol_state(self, is_patrolling: bool, start_icon: Path, stop_icon: Path) -> None:
+        if "patrol" in self._buttons:
+            btn = self._buttons["patrol"]
+            new_icon = stop_icon if is_patrolling else start_icon
+            tooltip = "Tạm dừng tuần tra" if is_patrolling else "Bắt đầu tuần tra"
+            btn.update_icon(new_icon, tooltip)
 
     def set_active(self, page_id: str) -> None:
         for name, button in self._buttons.items():

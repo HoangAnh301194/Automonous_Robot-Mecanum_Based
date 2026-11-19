@@ -109,6 +109,7 @@ class AdminPage(QWidget):
     back_requested = pyqtSignal()
     home_requested = pyqtSignal()
     emergency_stop_requested = pyqtSignal()
+    patrol_toggle_requested = pyqtSignal()
     detection_debug_requested = pyqtSignal()
     slam_requested = pyqtSignal()
     start_nav_requested = pyqtSignal()
@@ -142,6 +143,8 @@ class AdminPage(QWidget):
         self.back_icon = back_icon
         self.home_icon = home_icon
         self.emergency_icon = emergency_icon
+        self.start_nav_icon = start_nav_icon
+        self.stop_nav_icon = stop_nav_icon
 
         # Fallback status labels for backwards compatibility
         self.connection = QLabel("Kết nối ROS 2: Đang chờ")
@@ -186,6 +189,21 @@ class AdminPage(QWidget):
             self.emergency_button.setStyleSheet("font-size: 24px;")
         self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
         header.addWidget(self.emergency_button)
+
+        # 2b. Patrol toggle button in top-left
+        self.patrol_button = QPushButton()
+        self.patrol_button.setObjectName("adminPatrolButton")
+        self.patrol_button.setCursor(Qt.PointingHandCursor)
+        self.patrol_button.setFixedSize(46, 46)
+        self.patrol_button.setToolTip("Bắt đầu tuần tra")
+        if start_nav_icon and Path(start_nav_icon).is_file():
+            self.patrol_button.setIcon(QIcon(str(start_nav_icon)))
+            self.patrol_button.setIconSize(QSize(36, 36))
+        else:
+            self.patrol_button.setText("▶")
+            self.patrol_button.setStyleSheet("font-size: 20px; color: #10b981;")
+        self.patrol_button.clicked.connect(self.patrol_toggle_requested.emit)
+        header.addWidget(self.patrol_button)
 
         # 3. Back button in top-left
         self.back_button = QPushButton()
@@ -518,3 +536,16 @@ class AdminPage(QWidget):
         nav_state = status.get("status", "Chưa có dữ liệu")
         self.nav.setText(f"Điều hướng: {nav_state}")
         self.status_banner.setText(f"Điều hướng: {nav_state}")
+
+    def update_patrol_state(self, is_patrolling: bool) -> None:
+        icon_path = self.stop_nav_icon if is_patrolling else self.start_nav_icon
+        tooltip = "Tạm dừng tuần tra" if is_patrolling else "Bắt đầu tuần tra"
+        self.patrol_button.setToolTip(tooltip)
+        if icon_path and Path(icon_path).is_file():
+            self.patrol_button.setIcon(QIcon(str(icon_path)))
+            self.patrol_button.setText("")
+        else:
+            self.patrol_button.setText("⏸" if is_patrolling else "▶")
+            self.patrol_button.setStyleSheet(
+                "font-size: 20px; color: #f59e0b;" if is_patrolling else "font-size: 20px; color: #10b981;"
+            )

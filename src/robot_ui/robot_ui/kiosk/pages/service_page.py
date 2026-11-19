@@ -137,6 +137,7 @@ class ServicePage(QWidget):
     home_requested = pyqtSignal()
     back_requested = pyqtSignal()
     emergency_stop_requested = pyqtSignal()
+    patrol_toggle_requested = pyqtSignal()
     mode_selected = pyqtSignal(str)
 
     def __init__(
@@ -145,11 +146,14 @@ class ServicePage(QWidget):
         continue_icon: Path | None = None, service_icon: Path | None = None,
         home_icon: Path | None = None, emergency_icon: Path | None = None,
         parent: QWidget | None = None, mascot_image: Path | None = None,
+        start_icon: Path | None = None, stop_icon: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setObjectName("servicePage")
         self.setAttribute(Qt.WA_StyledBackground, True)
         self._selected_mode: str | None = None
+        self.start_icon = start_icon
+        self.stop_icon = stop_icon
 
         root = QVBoxLayout(self)
         root.setContentsMargins(20, 12, 20, 14)
@@ -202,6 +206,9 @@ class ServicePage(QWidget):
         self.emergency_button = action_button("serviceEmergencyButton", "Dừng khẩn cấp", emergency_icon)
         self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
         header_layout.addWidget(self.emergency_button)
+        self.patrol_button = action_button("servicePatrolButton", "Bắt đầu tuần tra", start_icon)
+        self.patrol_button.clicked.connect(self.patrol_toggle_requested.emit)
+        header_layout.addWidget(self.patrol_button)
         root.addWidget(header)
 
         self.mascot_canvas = ServiceMascotCanvas(mascot_image, self)
@@ -252,3 +259,20 @@ class ServicePage(QWidget):
     def reset_selection(self) -> None:
         self._selected_mode = None
         self.mascot_canvas.set_selected(None)
+
+    def update_patrol_state(self, is_patrolling: bool) -> None:
+        if not hasattr(self, "patrol_button"):
+            return
+        icon_path = self.stop_icon if is_patrolling else self.start_icon
+        tooltip = "Tạm dừng tuần tra" if is_patrolling else "Bắt đầu tuần tra"
+        self.patrol_button.setToolTip(tooltip)
+        self.patrol_button.setAccessibleName(tooltip)
+        if icon_path and Path(icon_path).is_file():
+            self.patrol_button.setIcon(QIcon(str(icon_path)))
+            self.patrol_button.setText("")
+        else:
+            self.patrol_button.setText("⏸" if is_patrolling else "▶")
+            self.patrol_button.setStyleSheet(
+                "color: #f59e0b; font-size: 16px; font-weight: 700;" if is_patrolling
+                else "color: #10b981; font-size: 16px; font-weight: 700;"
+            )

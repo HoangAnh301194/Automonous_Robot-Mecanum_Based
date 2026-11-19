@@ -1462,6 +1462,7 @@ class NavigationPage(QWidget):
     home_requested = pyqtSignal()
     back_requested = pyqtSignal()
     emergency_stop_requested = pyqtSignal()
+    patrol_toggle_requested = pyqtSignal()
     fullscreen_toggle_requested = pyqtSignal()
     start_requested = pyqtSignal(float, float, float)     # (x, y, yaw)
     cancel_requested = pyqtSignal()
@@ -1709,6 +1710,22 @@ class NavigationPage(QWidget):
             self.emergency_button.setStyleSheet("color: #ef4444; font-size: 11px; font-weight: 700;")
         self.emergency_button.clicked.connect(self.emergency_stop_requested.emit)
         bar_layout.addWidget(self.emergency_button)
+
+        # Patrol Toggle Button (Quick Patrol Control)
+        self.patrol_button = QPushButton()
+        self.patrol_button.setObjectName("navPatrolButton")
+        self.patrol_button.setCursor(Qt.PointingHandCursor)
+        self.patrol_button.setFixedSize(44, 44)
+        self.patrol_button.setToolTip("Bắt đầu tuần tra")
+        start_icon = self.icons.get("start")
+        if start_icon and Path(start_icon).is_file():
+            self.patrol_button.setIcon(QIcon(str(start_icon)))
+            self.patrol_button.setIconSize(QSize(34, 34))
+        else:
+            self.patrol_button.setText("▶")
+            self.patrol_button.setStyleSheet("color: #10b981; font-size: 16px; font-weight: 700;")
+        self.patrol_button.clicked.connect(self.patrol_toggle_requested.emit)
+        bar_layout.addWidget(self.patrol_button)
 
         # Back Button
         self.back_button = QPushButton()
@@ -3561,3 +3578,19 @@ class NavigationPage(QWidget):
     def _update_clock(self) -> None:
         now = datetime.now()
         self.time_label.setText(now.strftime("%H:%M\n%d/%m"))
+
+    def update_patrol_state(self, is_patrolling: bool) -> None:
+        if not hasattr(self, "patrol_button"):
+            return
+        icon_path = self.icons.get("stop") if is_patrolling else self.icons.get("start")
+        tooltip = "Tạm dừng tuần tra" if is_patrolling else "Bắt đầu tuần tra"
+        self.patrol_button.setToolTip(tooltip)
+        if icon_path and Path(icon_path).is_file():
+            self.patrol_button.setIcon(QIcon(str(icon_path)))
+            self.patrol_button.setText("")
+        else:
+            self.patrol_button.setText("⏸" if is_patrolling else "▶")
+            self.patrol_button.setStyleSheet(
+                "color: #f59e0b; font-size: 16px; font-weight: 700;" if is_patrolling
+                else "color: #10b981; font-size: 16px; font-weight: 700;"
+            )

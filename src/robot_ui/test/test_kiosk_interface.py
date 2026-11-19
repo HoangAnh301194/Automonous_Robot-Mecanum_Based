@@ -659,5 +659,76 @@ def test_service_page_layout_dimensions(app):
         assert visual.height() <= art.height() * 0.19
 
 
+def test_patrol_toggle_buttons_on_pages_and_bottom_nav(app):
+    """Verify patrol toggle buttons exist on AdminPage, NavigationPage, ServicePage, and BottomNavigation."""
+    from robot_ui.kiosk.widgets import BottomNavigation, NavigationPage
+    from robot_ui.kiosk.pages import ServicePage, AdminPage
+
+    missing = Path("/nonexistent-kiosk-test-asset")
+
+    # 1. AdminPage
+    admin = AdminPage(
+        nav_icon=missing, slam_icon=missing,
+        start_nav_icon=missing, stop_nav_icon=missing, emergency_icon=missing
+    )
+    assert hasattr(admin, "patrol_button")
+    seen_admin = []
+    admin.patrol_toggle_requested.connect(lambda: seen_admin.append(True))
+    admin.patrol_button.click()
+    assert seen_admin == [True]
+    admin.update_patrol_state(True)
+    assert admin.patrol_button.toolTip() == "Tạm dừng tuần tra"
+    admin.update_patrol_state(False)
+    assert admin.patrol_button.toolTip() == "Bắt đầu tuần tra"
+
+    # 2. NavigationPage
+    nav = NavigationPage({
+        "home": missing,
+        "emergency": missing,
+        "start": missing,
+        "stop": missing,
+    })
+    assert hasattr(nav, "patrol_button")
+    seen_nav = []
+    nav.patrol_toggle_requested.connect(lambda: seen_nav.append(True))
+    nav.patrol_button.click()
+    assert seen_nav == [True]
+    nav.update_patrol_state(True)
+    assert nav.patrol_button.toolTip() == "Tạm dừng tuần tra"
+    nav.update_patrol_state(False)
+    assert nav.patrol_button.toolTip() == "Bắt đầu tuần tra"
+
+    # 3. ServicePage
+    srv = ServicePage(
+        emergency_icon=missing, start_icon=missing, stop_icon=missing
+    )
+    assert hasattr(srv, "patrol_button")
+    seen_srv = []
+    srv.patrol_toggle_requested.connect(lambda: seen_srv.append(True))
+    srv.patrol_button.click()
+    assert seen_srv == [True]
+    srv.update_patrol_state(True)
+    assert srv.patrol_button.toolTip() == "Tạm dừng tuần tra"
+    srv.update_patrol_state(False)
+    assert srv.patrol_button.toolTip() == "Bắt đầu tuần tra"
+
+    # 4. BottomNavigation
+    bottom_nav = BottomNavigation({
+        "home": missing,
+        "patrol": missing,
+        "emergency": missing,
+    })
+    assert "patrol" in bottom_nav._buttons
+    seen_bottom = []
+    bottom_nav.page_requested.connect(lambda name: seen_bottom.append(name))
+    bottom_nav._buttons["patrol"].click()
+    assert seen_bottom == ["patrol"]
+    bottom_nav.update_patrol_state(True, missing, missing)
+    assert bottom_nav._buttons["patrol"].toolTip() == "Tạm dừng tuần tra"
+    bottom_nav.update_patrol_state(False, missing, missing)
+    assert bottom_nav._buttons["patrol"].toolTip() == "Bắt đầu tuần tra"
+
+
+
 
 
