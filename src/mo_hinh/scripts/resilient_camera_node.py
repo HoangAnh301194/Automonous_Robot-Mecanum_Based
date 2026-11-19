@@ -76,8 +76,10 @@ class ResilientCameraNode(Node):
             for idx in [2, 0, 4, 6, 8, 1, 3, 5]:
                 cand = f"/dev/video{idx}"
                 if os.path.exists(cand):
-                    # Thử mở kiểm tra nhanh
+                    # Thử mở kiểm tra nhanh bằng file path thay vì index
                     test_cap = cv2.VideoCapture(cand, cv2.CAP_V4L2)
+                    if not test_cap.isOpened():
+                        test_cap = cv2.VideoCapture(idx)
                     if test_cap.isOpened():
                         ret, _ = test_cap.read()
                         test_cap.release()
@@ -86,39 +88,72 @@ class ResilientCameraNode(Node):
         return self.video_device_param
 
     def _open_camera(self) -> bool:
-        """Thử mở kết nối tới thiết bị camera với cấu hình độ phân giải và FPS."""
+        """Thử mở kết nối tới thiết bị camera với cấu hình độ phân giải và FPS (ưu tiên GStreamer MJPG)."""
         target_dev = self._find_available_video_device()
         self._current_device = target_dev
 
         if not os.path.exists(target_dev) and not target_dev.isdigit():
             return False
 
+        cap = None
         try:
-            dev_idx = int(target_dev.replace("/dev/video", "")) if target_dev.startswith("/dev/video") else target_dev
-            cap = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
-            if not cap.isOpened():
-                cap.release()
-                return False
+            fps_int = int(round(self.framerate)) if self.framerate > 0 else 30
 
-            # Cấu hình định dạng và độ phân giải
-            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.image_width))
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.image_height))
-            cap.set(cv2.CAP_PROP_FPS, float(self.framerate))
+            # 1. Thử mở qua GStreamer v4l2src + jpegdec hardware/software pipeline (tối ưu nhất cho Jetson Orin)
+            gst_pipeline = (
+                f"v4l2src device={target_dev} ! "
+                f"image/jpeg, width={self.image_width}, height={self.image_height}, framerate={fps_int}/1 ! "
+                f"jpegdec ! video/x-raw, format=BGR ! appsink drop=1"
+            )
+            try:
+                cap_gst = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+                if cap_gst.isOpened():
+                    ret, frame = cap_gst.read()
+                    if ret and frame is not None:
+                        cap = cap_gst
+                        self.get_logger().info(
+                            f"[RESILIENT_CAM] Mở camera thành công qua GStreamer MJPG: {target_dev} "
+                            f"({self.image_width}x{self.image_height} @ {fps_int}fps)"
+                        )
+                    else:
+                        cap_gst.release()
+            except Exception as gst_err:
+                self.get_logger().debug(f"[RESILIENT_CAM] GStreamer pipeline không khả dụng: {gst_err}")
 
-            # Đọc thử 1 frame xác nhận
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                cap.release()
+            # 2. Fallback sang V4L2 Native với thiết lập FourCC MJPG
+            if cap is None:
+                dev_idx = int(target_dev.replace("/dev/video", "")) if target_dev.startswith("/dev/video") else target_dev
+                # Thử mở bằng index số nguyên trước, nếu không được thì mở bằng đường dẫn chuỗi
+                cap_v4l = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
+                if not cap_v4l.isOpened():
+                    cap_v4l = cv2.VideoCapture(target_dev)
+                if not cap_v4l.isOpened() and isinstance(dev_idx, int):
+                    cap_v4l = cv2.VideoCapture(dev_idx)
+
+                if cap_v4l.isOpened():
+                    # Ép FOURCC MJPG và thiết lập độ phân giải / FPS
+                    cap_v4l.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+                    cap_v4l.set(cv2.CAP_PROP_FRAME_WIDTH, float(self.image_width))
+                    cap_v4l.set(cv2.CAP_PROP_FRAME_HEIGHT, float(self.image_height))
+                    cap_v4l.set(cv2.CAP_PROP_FPS, float(self.framerate))
+
+                    # Đọc thử 1 frame xác nhận
+                    ret, frame = cap_v4l.read()
+                    if ret and frame is not None:
+                        cap = cap_v4l
+                    else:
+                        cap_v4l.release()
+
+            if cap is None or not cap.isOpened():
                 return False
 
             with self._lock:
                 self._cap = cap
                 self._connected = True
 
-            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) if cap.get(cv2.CAP_PROP_FRAME_WIDTH) > 0 else self.image_width
+            actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) if cap.get(cv2.CAP_PROP_FRAME_HEIGHT) > 0 else self.image_height
+            actual_fps = cap.get(cv2.CAP_PROP_FPS) if cap.get(cv2.CAP_PROP_FPS) > 0 else self.framerate
 
             self.get_logger().info(
                 f"[RESILIENT_CAM] Đã KẾT NỐI camera thành công tại {target_dev} "
@@ -127,6 +162,11 @@ class ResilientCameraNode(Node):
             return True
         except Exception as exc:
             self.get_logger().debug(f"[RESILIENT_CAM] Lỗi khi mở {target_dev}: {exc}")
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
             return False
 
     def _close_camera(self) -> None:
