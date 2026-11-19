@@ -89,13 +89,23 @@ def _find_config_dir() -> Path:
 
 
 def recompute_cyclic_waypoint_yaws(waypoints: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Set each patrol waypoint's yaw (rad) to face toward the next waypoint in the cycle."""
+    """Set each patrol waypoint's yaw (rad) to face toward the next waypoint in the cycle.
+    
+    Fixed anchor/docking waypoints such as 'khoihanh' and 'tram_cho' have custom orientation angles
+    saved by the operator and must NEVER be overwritten by the path tangent.
+    """
     n = len(waypoints)
     if n < 2:
         if n == 1:
-            waypoints[0]["yaw"] = 0.0
+            name_lower = str(waypoints[0].get("name", "")).strip().lower()
+            if name_lower not in ("khoihanh", "tram_cho") and "yaw" not in waypoints[0]:
+                waypoints[0]["yaw"] = 0.0
         return waypoints
     for i, wp in enumerate(waypoints):
+        name_lower = str(wp.get("name", "")).strip().lower()
+        if name_lower in ("khoihanh", "tram_cho") or wp.get("lock_yaw", False):
+            # Bảo toàn nguyên vẹn góc quay ban đầu của điểm gốc và trạm chờ đã lưu
+            continue
         nxt = waypoints[(i + 1) % n]
         dx = float(nxt.get("x", 0.0)) - float(wp.get("x", 0.0))
         dy = float(nxt.get("y", 0.0)) - float(wp.get("y", 0.0))

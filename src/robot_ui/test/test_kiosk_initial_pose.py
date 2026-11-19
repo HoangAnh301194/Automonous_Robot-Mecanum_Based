@@ -806,3 +806,42 @@ def test_ip32_standby_pose_capture_and_navigate(qapp, tmp_path):
     page.close()
 
 
+def test_ip33_preserve_custom_start_pose_and_standby_yaw_across_reloads(qapp, tmp_path):
+    """IP-33: Bảo tồn 100% góc yaw tùy chỉnh của 'khoihanh' và 'tram_cho' khi nạp lại cấu hình hoặc thêm điểm."""
+    page = NavigationPage({})
+    page._config_dir = tmp_path
+    map_yaml = tmp_path / "custom_test_map.yaml"
+    map_yaml.write_text("image: map.png\nresolution: 0.05\n", encoding="utf-8")
+    page._current_map_path = map_yaml
+
+    # 1. Lưu điểm xuất phát khoihanh với góc tùy chỉnh (ví dụ: quay đầu ra ngoài 2.75 rad ~ 157.5°)
+    page._save_start_pose_to_yaml(-3.819, -2.893, 2.75)
+    # Lưu trạm chờ với góc tùy chỉnh (-1.85 rad)
+    page._save_standby_pose_to_yaml(2.0, 5.0, -1.85)
+
+    # Thêm các điểm tuần tra khác
+    page._on_waypoint_picked_on_map(10.0, 0.0, 0.0)
+    page._on_waypoint_picked_on_map(10.0, 10.0, 0.0)
+
+    # Điểm khoihanh và tram_cho trong _batch_waypoints phải giữ nguyên góc yaw đã lưu, KHÔNG bị ghi đè
+    for wp in page._batch_waypoints:
+        if wp["name"] == "khoihanh":
+            assert wp["yaw"] == pytest.approx(2.75)
+        elif wp["name"] == "tram_cho":
+            assert wp["yaw"] == pytest.approx(-1.85)
+
+    # 2. Giả lập khởi động lại Kiosk: nạp lại file cấu hình từ đĩa
+    wp_file = page._get_map_waypoints_path(map_yaml)
+    assert wp_file.is_file()
+    page._load_patrol_from_file(wp_file, silent=True)
+
+    # Sau khi load lại, góc quay của khoihanh và tram_cho vẫn phải được bảo toàn chính xác
+    reloaded_start = page._get_saved_start_pose(force_reload=True)
+    assert reloaded_start["yaw"] == pytest.approx(2.75)
+
+    reloaded_standby = page._get_saved_standby_pose()
+    assert reloaded_standby["yaw"] == pytest.approx(-1.85)
+
+    page.close()
+
+

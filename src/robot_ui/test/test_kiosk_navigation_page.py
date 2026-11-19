@@ -111,6 +111,20 @@ class TestKioskNavigationPage(unittest.TestCase):
         # p2 -> p0 (closing loop): dx=-2, dy=-2 => yaw = -3pi/4 = -2.3562
         self.assertAlmostEqual(waypoints[2]["yaw"], -2.3562, places=3)
 
+        # Test bảo toàn tuyệt đối góc yaw của điểm gốc 'khoihanh' và trạm chờ 'tram_cho'
+        mixed_waypoints = [
+            {"name": "khoihanh", "x": 0.0, "y": 0.0, "yaw": 2.45},
+            {"name": "diem1", "x": 10.0, "y": 0.0, "yaw": 0.0},
+            {"name": "tram_cho", "x": 10.0, "y": 10.0, "yaw": -1.23},
+        ]
+        recompute_cyclic_waypoint_yaws(mixed_waypoints)
+        # khoihanh phải giữ nguyên 2.45, không bị ép thành 0.0 (hướng sang diem1)
+        self.assertEqual(mixed_waypoints[0]["yaw"], 2.45)
+        # diem1 tính theo hướng sang tram_cho (dx=0, dy=10 => pi/2 = 1.5708)
+        self.assertAlmostEqual(mixed_waypoints[1]["yaw"], 1.5708, places=3)
+        # tram_cho phải giữ nguyên -1.23, không bị ép theo hướng đóng vòng
+        self.assertEqual(mixed_waypoints[2]["yaw"], -1.23)
+
     def test_map_zoom_and_pan(self):
         """Test zoom and reset controls on map widget."""
         map_w = self.page.map_widget
