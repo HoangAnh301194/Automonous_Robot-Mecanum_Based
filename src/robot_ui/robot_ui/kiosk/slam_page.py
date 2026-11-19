@@ -1115,7 +1115,12 @@ class SlamMapPage(QWidget):
             self.map_list_widget.addItem(item)
 
         if valid_yamls:
-            self.map_list_widget.setCurrentRow(0)
+            target_idx = 0
+            for idx, y in enumerate(valid_yamls):
+                if y.name == "khoaa1_final_amcl.yaml":
+                    target_idx = idx
+                    break
+            self.map_list_widget.setCurrentRow(target_idx)
             self._on_map_selection_changed()
         else:
             self.map_preview_widget.clear_preview()

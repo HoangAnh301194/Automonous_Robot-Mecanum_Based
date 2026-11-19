@@ -658,8 +658,9 @@ class HomePage(QWidget):
         top_row.addWidget(self.battery_label)
         layout.addLayout(top_row)
 
-        # Thanh tiến trình lộ trình tuần tra và rẽ nhánh sự kiện trực quan
+        # Thanh tiến trình lộ trình tuần tra và rẽ nhánh sự kiện trực quan (ẩn khỏi màn hình biểu cảm)
         self.mission_timeline = MissionTimelineWidget(self)
+        self.mission_timeline.hide()
         layout.addWidget(self.mission_timeline)
 
         layout.addStretch(1)

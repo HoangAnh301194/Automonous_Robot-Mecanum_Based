@@ -479,8 +479,13 @@ class KioskWindow(QMainWindow):
         self.setCentralWidget(central)
         self.stack = QStackedWidget(central)
         self.idle_page = HomePage()
-        # Idle must show only the animated Souta Robot face, without telemetry/menu.
+        self._start_nav_icon = icon_path("startNavigation.png")
+        self._stop_nav_icon = icon_path("stopNavigation.png")
+        self._is_patrolling = False
+        self._is_emergency = False
+        # Idle must show only the animated Souta Robot face, without telemetry/menu/timeline overlay.
         self.idle_page.battery_label.hide()
+        self.idle_page.mission_timeline.hide()
         self.idle_page.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.idle_page.video.setAttribute(Qt.WA_AcceptTouchEvents, True)
         self.home_page = WelcomePage(
@@ -548,6 +553,8 @@ class KioskWindow(QMainWindow):
             continue_icon=icon_path("service_continue.png"),
             service_icon=icon_path("service.png"),
             mascot_image=icon_path("mochi_service_light.jpg"),
+            start_icon=self._start_nav_icon,
+            stop_icon=self._stop_nav_icon,
         )
         slam_icons = {
             "home": icon_path("homeIcon.png"),
@@ -594,6 +601,7 @@ class KioskWindow(QMainWindow):
                 "home": icon_path("homeIcon.png"),
                 "chat": icon_path("chatIcon.png"),
                 "service": icon_path("service.png"),
+                "patrol": self._start_nav_icon,
                 "emergency": icon_path("emergency_stop.png"),
                 "settings": icon_path("setting_icon.png"),
             },
@@ -613,6 +621,8 @@ class KioskWindow(QMainWindow):
         self.admin_page.home_requested.connect(self.return_to_home)
         self.admin_page.back_requested.connect(self.go_back)
         self.admin_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.admin_page.patrol_toggle_requested.connect(self._on_toggle_patrol)
+        self.service_page.patrol_toggle_requested.connect(self._on_toggle_patrol)
         self.admin_page.logout_requested.connect(self.go_back)
         self.admin_page.navigation_requested.connect(lambda: self.show_page("navigation"))
         self.admin_page.start_nav_requested.connect(self._on_admin_start_nav)
@@ -624,10 +634,13 @@ class KioskWindow(QMainWindow):
         self.navigation_page.home_requested.connect(self.return_to_home)
         self.navigation_page.back_requested.connect(self.go_back)
         self.navigation_page.emergency_stop_requested.connect(self._on_emergency_stop)
+        self.navigation_page.patrol_toggle_requested.connect(self._on_toggle_patrol)
         self.navigation_page.start_requested.connect(self.ros_node.navigate_to_pose)
         self.navigation_page.cancel_requested.connect(self.ros_node.cancel_navigation)
         self.navigation_page.start_patrol_requested.connect(self.ros_node.start_patrol)
+        self.navigation_page.start_patrol_requested.connect(lambda: self._set_patrol_state(True))
         self.navigation_page.pause_patrol_requested.connect(self.ros_node.pause_patrol)
+        self.navigation_page.pause_patrol_requested.connect(lambda: self._set_patrol_state(False))
         self.navigation_page.reload_route_requested.connect(self.ros_node.reload_route)
         self.navigation_page.initial_pose_requested.connect(self._on_initial_pose_requested)
         self.navigation_page.fullscreen_toggle_requested.connect(self.toggle_fullscreen)
@@ -768,6 +781,11 @@ class KioskWindow(QMainWindow):
             initial_wps = getattr(self.navigation_page, "_batch_waypoints", [])
             if initial_wps:
                 self.idle_page.set_patrol_route(initial_wps)
+            curr_map = getattr(self.navigation_page, "_current_map_path", None)
+            if curr_map and Path(curr_map).is_file():
+                self.ros_node.apply_localization_map(str(curr_map), "amcl")
+                map_name = Path(curr_map).name
+                self.admin_page.status_banner.setText(f"Đã chọn bản đồ: {map_name} (AMCL)")
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)
@@ -915,6 +933,9 @@ class KioskWindow(QMainWindow):
             self.show_page("home")
         elif target == "service":
             self._on_service_requested()
+        elif target == "patrol":
+            self._on_toggle_patrol()
+            self.bottom_navigation.set_active("home")
         elif target == "emergency":
             self._on_emergency_stop()
 
@@ -987,6 +1008,8 @@ class KioskWindow(QMainWindow):
 
     def _on_emergency_stop(self) -> None:
         LOG.warn("🚨 [UI Emergency] Kích hoạt DỪNG KHẨN CẤP từ giao diện người dùng!")
+        self._is_emergency = True
+        self._set_patrol_state(False)
         # 1. Ngắt ngay toàn bộ âm thanh / giọng nói / LLM
         if hasattr(self, "chat_page"):
             self.chat_page.stop_speaking()
@@ -1002,6 +1025,36 @@ class KioskWindow(QMainWindow):
         if hasattr(self, "admin_page") and hasattr(self.admin_page, "status_banner"):
             self.admin_page.status_banner.setText("🚨 DỪNG KHẨN CẤP: Đã ngắt toàn bộ di chuyển và nhiệm vụ!")
         self.bottom_navigation.set_active("home" if self._active_page == "home" else self._active_page)
+
+    def _set_patrol_state(self, is_patrolling: bool) -> None:
+        self._is_patrolling = is_patrolling
+        self._update_patrol_buttons_ui(is_patrolling)
+
+    def _on_toggle_patrol(self) -> None:
+        """Chuyển đổi trạng thái tuần tra (Start / Pause). Nếu đang kẹt Emergency thì tự giải phóng trước."""
+        if not self._is_patrolling:
+            LOG.info("[UI Patrol] Bắt đầu / Tiếp tục tuần tra từ nút điều khiển nhanh.")
+            if getattr(self, "_is_emergency", False):
+                self.ros_node.reset_emergency_stop()
+                self._is_emergency = False
+            self.ros_node.start_patrol()
+            self._set_patrol_state(True)
+        else:
+            LOG.info("[UI Patrol] Tạm dừng tuần tra từ nút điều khiển nhanh.")
+            self.ros_node.pause_patrol()
+            self._set_patrol_state(False)
+
+    def _update_patrol_buttons_ui(self, is_patrolling: bool) -> None:
+        if hasattr(self, "bottom_navigation"):
+            self.bottom_navigation.update_patrol_state(
+                is_patrolling, self._start_nav_icon, self._stop_nav_icon
+            )
+        if hasattr(self, "admin_page") and hasattr(self.admin_page, "update_patrol_state"):
+            self.admin_page.update_patrol_state(is_patrolling)
+        if hasattr(self, "navigation_page") and hasattr(self.navigation_page, "update_patrol_state"):
+            self.navigation_page.update_patrol_state(is_patrolling)
+        if hasattr(self, "service_page") and hasattr(self.service_page, "update_patrol_state"):
+            self.service_page.update_patrol_state(is_patrolling)
 
     def _on_admin_start_nav(self) -> None:
         self.show_page("navigation")
