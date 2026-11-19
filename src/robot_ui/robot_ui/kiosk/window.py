@@ -466,9 +466,9 @@ class KioskWindow(QMainWindow):
             self._admin_idle_timeout_seconds = 90
         self._robot_status_received_at: float | None = None
         try:
-            self._idle_timeout_seconds = max(30, int(os.getenv("KIOSK_IDLE_TIMEOUT_SECONDS", "120")))
+            self._idle_timeout_seconds = max(5, int(os.getenv("KIOSK_IDLE_TIMEOUT_SECONDS", "10")))
         except ValueError:
-            self._idle_timeout_seconds = 120
+            self._idle_timeout_seconds = 10
         self._last_activity_at = time.monotonic()
 
         self.setWindowTitle("Souta Robot")
