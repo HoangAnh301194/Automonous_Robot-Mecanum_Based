@@ -45,8 +45,6 @@ class AudioPlayerNode(Node):
             'tam_biet_5s': 'tam_biet_5s.mp3',
             'cam_on_phuc_vu': 'cam_on_phuc_vu.mp3',
             'chuc_20_11': 'chuc_20_11.mp3',
-            'chao_thay_co': 'chao_thay_co.mp3',
-            'chao_20_11': 'chao_20_11.mp3',
         }
 
         # Tìm công cụ phát âm thanh (ưu tiên mpv, sau đó ffplay, sau đó aplay)
@@ -124,8 +122,8 @@ class AudioPlayerNode(Node):
 
         filepath = os.path.join(self.audio_dir, filename)
         if not os.path.isfile(filepath):
-            # Tìm trong các thư mục con (greetings, nav2, events) nếu có
-            for sub in ['greetings', 'nav2', 'events']:
+            # Tìm trong các thư mục con (nav2, events) nếu có
+            for sub in ['nav2', 'events']:
                 sub_path = os.path.join(self.audio_dir, sub, filename)
                 if os.path.isfile(sub_path):
                     filepath = sub_path
@@ -148,7 +146,7 @@ class AudioPlayerNode(Node):
                 if os.path.isfile(f_path):
                     filepath = f_path
                     break
-                for sub in ['greetings', 'nav2', 'events']:
+                for sub in ['nav2', 'events']:
                     f_sub = os.path.join(f_dir, sub, filename)
                     if os.path.isfile(f_sub):
                         filepath = f_sub
@@ -278,11 +276,11 @@ class AudioPlayerNode(Node):
         """Topic /mission/status_log từ Behavior Tree tuần tra & phục vụ."""
         text = msg.data
         if "GẶP NGƯỜI TRƯỚC MẶT" in text:
-            # Có người đứng phía trước trong lúc tuần tra: phát chao_thay_co
-            self.play_sound('chao_thay_co', force=True, priority=False)
+            # Có người đứng phía trước trong lúc tuần tra: phát chuc_20_11
+            self.play_sound('chuc_20_11', force=True, priority=False)
         elif "ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY" in text:
-            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> phát chao_thay_co
-            self.play_sound('chao_thay_co', force=True, priority=False)
+            # Vừa đến nơi đỗ trước mặt Thầy/Cô vẫy tay -> phát chuc_20_11
+            self.play_sound('chuc_20_11', force=True, priority=False)
         elif "PHÁT HIỆN NGƯỜI VẪY TAY" in text:
             self.play_sound('den_nguoi_vay_tay', force=False, priority=False)
         elif "Hết 5s không yêu cầu nước" in text:

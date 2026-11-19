@@ -522,15 +522,19 @@ def test_customer_encounter_range_and_lateral_threshold():
     assert node.check_person(0.30, 0.10) is False
 
 
-def test_audio_player_greeting_chao_thay_co_on_encounter_and_wave():
-    """Verify AudioPlayerNode plays chao_thay_co on encounter and wave arrival."""
+def test_audio_player_greeting_chuc_20_11_on_encounter_and_wave():
+    """Verify AudioPlayerNode plays chuc_20_11 on encounter and wave arrival."""
     import importlib.util
+    import os
     from std_msgs.msg import String
 
-    spec = importlib.util.spec_from_file_location(
-        "audio_player_node",
-        "/home/a/ros2_ws/src/mo_hinh/scripts/audio_player_node.py"
-    )
+    script_path = "/home/a/ros2_ws/src/mo_hinh/scripts/audio_player_node.py"
+    if not os.path.exists(script_path):
+        script_path = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "mo_hinh", "scripts", "audio_player_node.py")
+        )
+
+    spec = importlib.util.spec_from_file_location("audio_player_node", script_path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
@@ -554,7 +558,7 @@ def test_audio_player_greeting_chao_thay_co_on_encounter_and_wave():
 
     assert len(player.played) == 5
     for s in player.played:
-        assert s == 'chao_thay_co'
+        assert s == 'chuc_20_11'
 
     # Test 2: Log arrival at waving person
     player.played.clear()
@@ -562,7 +566,7 @@ def test_audio_player_greeting_chao_thay_co_on_encounter_and_wave():
     msg_wave.data = "🎯 ĐÃ ĐẾN TRƯỚC MẶT NGƯỜI VẪY TAY! Chuyển sang CHẾ ĐỘ PHỤC VỤ."
     player.cb_mission_log(msg_wave)
     assert len(player.played) == 1
-    assert player.played[0] == 'chao_thay_co'
+    assert player.played[0] == 'chuc_20_11'
 
 
 def test_no_encounter_or_waving_when_not_patrolling():
