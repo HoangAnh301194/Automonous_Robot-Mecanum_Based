@@ -1469,6 +1469,7 @@ class NavigationPage(QWidget):
     pause_patrol_requested = pyqtSignal()
     reload_route_requested = pyqtSignal()
     initial_pose_requested = pyqtSignal(dict)  # {"x": float, "y": float, "yaw": float, "source": str, "map_name": str}
+    patrol_route_updated = pyqtSignal(list)
 
     def __init__(self, icons: dict[str, Path | None], parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2443,6 +2444,8 @@ class NavigationPage(QWidget):
             self.lbl_route_summary.setText(f"Lộ trình ({len(names)} điểm): {cycle}")
         else:
             self.lbl_route_summary.setText("Lộ trình: Chưa có điểm nào")
+
+        self.patrol_route_updated.emit(list(self._batch_waypoints))
 
         self._refresh_quick_location_chips()
 

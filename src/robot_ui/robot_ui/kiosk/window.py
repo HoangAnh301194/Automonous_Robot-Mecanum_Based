@@ -679,8 +679,11 @@ class KioskWindow(QMainWindow):
         signals.path_changed.connect(self.navigation_page.set_path)
         signals.locations_changed.connect(self.navigation_page.set_locations)
         signals.command_status_changed.connect(self.navigation_page.set_command_status)
-        signals.navigation_active_changed.connect(self.navigation_page.set_navigation_active)
         signals.nav_feedback_changed.connect(self.navigation_page.set_nav_feedback)
+        signals.nav_feedback_changed.connect(self.idle_page.set_nav_feedback)
+        signals.patrol_route_changed.connect(self.idle_page.set_patrol_route)
+        if hasattr(self.navigation_page, "patrol_route_updated"):
+            self.navigation_page.patrol_route_updated.connect(self.idle_page.set_patrol_route)
         signals.localization_status_changed.connect(self.navigation_page.set_localization_status)
         signals.initial_pose_confirmed.connect(self.navigation_page.on_initial_pose_confirmed)
         signals.scan_points_changed.connect(self.navigation_page.set_scan_points)
@@ -761,6 +764,10 @@ class KioskWindow(QMainWindow):
         self.idle_page.video.set_display_scale(self.emotions.display_scale)
         self.idle_page.video.set_vertical_offset(self.emotions.vertical_offset_px)
         self.idle_page.video.set_static_image(icon_path("mochi_idle_light.jpg"))
+        if hasattr(self, "navigation_page"):
+            initial_wps = getattr(self.navigation_page, "_batch_waypoints", [])
+            if initial_wps:
+                self.idle_page.set_patrol_route(initial_wps)
         self.show_page("idle")
         # Application-level event filter captures touches/keys in child widgets.
         QApplication.instance().installEventFilter(self)
@@ -955,13 +962,23 @@ class KioskWindow(QMainWindow):
                 self.service_page.select_mode_programmatically("wait", emit_signal=False)
             self.show_page("service")
         elif cmd == "SHOW_5S_INVITE":
-            # Chỉ mở giao diện chào mời 5 giây, không tự động kích hoạt chế độ phục vụ
-            self.show_page("service")
+            # Kích hoạt rẽ nhánh sự kiện mời khách 5s ngay trên màn hình chính:
+            # làm xám điểm đích hiện tại và đếm ngược lùi
+            if hasattr(self, "idle_page"):
+                self.idle_page.trigger_event_branch(
+                    title="Mời khách tương tác",
+                    duration_sec=5,
+                    description="Đang chào mời khách tương tác trước mặt...",
+                )
+            if self._active_page not in {"idle", "home"}:
+                self.show_page("idle")
         elif cmd == "HIDE":
+            if hasattr(self, "idle_page"):
+                self.idle_page.clear_event_branch()
             if hasattr(self, "service_page"):
                 self.service_page.reset_selection()
             if self._active_page == "service":
-                self.show_page("home")
+                self.show_page("idle")
 
     def return_to_home(self) -> None:
         """Quay thẳng về màn hình chính (home / WelcomePage), dọn sạch lịch sử điều hướng."""
@@ -1072,6 +1089,8 @@ class KioskWindow(QMainWindow):
         self._navigation_status = status
         self.navigation_page.set_navigation_status(status)
         self.admin_page.set_navigation_status(status)
+        if hasattr(self, "idle_page"):
+            self.idle_page.set_navigation_status(status)
         self._update_emotion()
 
     def _on_chat_submitted(self, message: str) -> None:
