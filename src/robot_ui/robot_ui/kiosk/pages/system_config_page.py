@@ -626,7 +626,7 @@ class SystemConfigPage(QWidget):
         if hasattr(self, "lbl_ai_yolo_status") and self.lbl_ai_yolo_status is not None:
             self.lbl_ai_yolo_status.setText(f"Nhận diện: {self.curr_sensors.people_count} người")
 
-    def update_battery_water(self, data: dict[str, Any]) -> None:
+    def update_battery_water(self, data: dict[str, Any], force: bool = False) -> None:
         """Called when robot_status or battery voltage arrives."""
         self.curr_power = PowerWaterSnapshot.from_dict(data)
         self.diagnostics_screen.cache_telemetry(power=self.curr_power)

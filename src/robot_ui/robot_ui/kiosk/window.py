@@ -951,9 +951,9 @@ class KioskWindow(QMainWindow):
 
     def _on_service_popup_cmd(self, cmd: str) -> None:
         LOG.info("[UI Service] Nhận lệnh service popup: '%s'", cmd)
-        admin_pages = {"admin", "slam", "navigation", "system_config", "detection_debug"}
-        if getattr(self, "_active_page", "") in admin_pages or getattr(self, "_is_admin", False) is True:
-            LOG.info("[UI Service] Bỏ qua popup vì đang ở trang cấu hình/quản trị: %s", self._active_page)
+        # Chỉ bảo vệ trang lập bản đồ SLAM thủ công tránh bị popup can thiệp
+        if getattr(self, "_active_page", "") == "slam":
+            LOG.info("[UI Service] Bỏ qua popup vì đang ở trang cấu hình SLAM: %s", self._active_page)
             return
 
         if cmd == "SHOW_SERVING":
@@ -962,16 +962,16 @@ class KioskWindow(QMainWindow):
                 self.service_page.select_mode_programmatically("wait", emit_signal=False)
             self.show_page("service")
         elif cmd == "SHOW_5S_INVITE":
-            # Kích hoạt rẽ nhánh sự kiện mời khách 5s ngay trên màn hình chính:
-            # làm xám điểm đích hiện tại và đếm ngược lùi
+            # Khi gặp người: Nhảy thẳng sang trang service page để người dùng chọn phục vụ
+            if hasattr(self, "service_page"):
+                self.service_page.reset_selection()
             if hasattr(self, "idle_page"):
                 self.idle_page.trigger_event_branch(
                     title="Mời khách tương tác",
                     duration_sec=5,
                     description="Đang chào mời khách tương tác trước mặt...",
                 )
-            if self._active_page not in {"idle", "home"}:
-                self.show_page("idle")
+            self.show_page("service")
         elif cmd == "HIDE":
             if hasattr(self, "idle_page"):
                 self.idle_page.clear_event_branch()
