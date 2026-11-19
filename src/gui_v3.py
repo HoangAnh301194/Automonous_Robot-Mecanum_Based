@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+from pathlib import Path
 
 import yaml
 try:
@@ -2192,25 +2193,103 @@ class MainWindow(QWidget):
         if hasattr(self, "main_tabs"):
             self.main_tabs.setCurrentIndex(1)
 
+    def _resolve_map_waypoints_file(self, map_path: str = None) -> str:
+        """Tìm đường dẫn file waypoints YAML tương ứng với bản đồ đang chọn."""
+        target_map = map_path or getattr(self, "selected_map_file", "")
+        if not target_map:
+            return os.path.join(CONFIG_DIR, "locations.yaml")
+
+        p = Path(target_map)
+        stem = p.stem
+
+        # Ưu tiên 1: Cùng thư mục với file map: <map_dir>/<map_stem>_waypoints.yaml
+        direct = p.parent / f"{stem}_waypoints.yaml"
+        if direct.is_file():
+            return str(direct)
+
+        # Nếu map có hậu tố _amcl hoặc _localization (ví dụ khoaa1_final_amcl.yaml)
+        if stem.endswith("_amcl"):
+            base_cand = p.parent / f"{stem[:-5]}_waypoints.yaml"
+            if base_cand.is_file():
+                return str(base_cand)
+        elif stem.endswith("_localization"):
+            base_cand = p.parent / f"{stem[:-13]}_waypoints.yaml"
+            if base_cand.is_file():
+                return str(base_cand)
+
+        # Ưu tiên 2: config/waypoints/<map_stem>_waypoints.yaml
+        cfg_cand = Path(CONFIG_DIR) / "waypoints" / f"{stem}_waypoints.yaml"
+        if cfg_cand.is_file():
+            return str(cfg_cand)
+
+        # Nếu chưa file nào tồn tại, trả về direct để khi lưu sẽ tạo file này cạnh map
+        return str(direct)
+
+    def _sync_active_config_files(self, locations: dict = None, routes: dict = None):
+        """Đồng bộ locations và routes sang config/locations.yaml & config/routes.yaml cho các ROS node."""
+        try:
+            os.makedirs(CONFIG_DIR, exist_ok=True)
+            loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
+            route_file = os.path.join(CONFIG_DIR, "routes.yaml")
+
+            if locations is not None:
+                with open(loc_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
+
+            if routes is not None:
+                with open(route_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(routes, f, allow_unicode=True, sort_keys=False)
+        except Exception as e:
+            self.append_log(f"[Config] Lỗi đồng bộ active config files: {e}")
+
     def load_patrol_config_from_yaml(self, silent=False):
+        resolver = getattr(self, "_resolve_map_waypoints_file", None)
+        wp_file = resolver() if resolver else None
         loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
         route_file = os.path.join(CONFIG_DIR, "routes.yaml")
         locations = {}
         routes = {}
+        source_name = ""
+
         try:
-            if os.path.exists(loc_file):
+            if wp_file and os.path.isfile(wp_file):
+                with open(wp_file, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                locations = data.get("locations", {})
+                routes = data.get("routes", {})
+                if not locations and "waypoints" in data and isinstance(data["waypoints"], list):
+                    locations = {}
+                    r_names = []
+                    for wp in data["waypoints"]:
+                        if isinstance(wp, dict) and "name" in wp:
+                            wn = str(wp["name"])
+                            locations[wn] = {
+                                "x": float(wp.get("x", 0.0)),
+                                "y": float(wp.get("y", 0.0)),
+                                "yaw": float(wp.get("yaw", 0.0)),
+                                "note": str(wp.get("note", "")),
+                            }
+                            r_names.append(wn)
+                    routes = {"patrol_route": r_names}
+                source_name = os.path.basename(wp_file)
+            elif os.path.exists(loc_file):
                 with open(loc_file, "r", encoding="utf-8") as f:
                     locations = yaml.safe_load(f) or {}
-            if os.path.exists(route_file):
-                with open(route_file, "r", encoding="utf-8") as f:
-                    routes = yaml.safe_load(f) or {}
+                if os.path.exists(route_file):
+                    with open(route_file, "r", encoding="utf-8") as f:
+                        routes = yaml.safe_load(f) or {}
+                source_name = "locations.yaml & routes.yaml"
+            else:
+                if not silent:
+                    QMessageBox.warning(self, "Chưa có file cấu hình", "Không tìm thấy file cấu hình điểm tuần tra nào.")
+                return False
         except Exception as exc:
             if not silent:
                 QMessageBox.warning(self, "Lỗi đọc Config", f"Không thể đọc file config YAML:\n{exc}")
             self.append_log(f"[Config] Lỗi đọc YAML: {exc}")
             return False
 
-        patrol_names = routes.get("patrol_route")
+        patrol_names = routes.get("patrol_route") if isinstance(routes, dict) else []
         if not isinstance(patrol_names, list) or not patrol_names:
             patrol_names = [k for k in locations.keys() if k not in ("khoihanh", "tram_cho")]
             if not patrol_names:
@@ -2222,25 +2301,34 @@ class MainWindow(QWidget):
             if not isinstance(coords, dict):
                 continue
             if name == "khoihanh":
-                note = "Điểm cất robot / Vạch xuất phát"
+                default_note = "Điểm cất robot / Vạch xuất phát"
             elif name == "tram_cho":
-                note = "Trạm chờ đón khách"
+                default_note = "Trạm chờ đón khách"
             else:
-                note = f"Điểm tuần tra ({name})"
+                default_note = f"Điểm tuần tra ({name})"
+            note = coords.get("note") or default_note
             loaded.append({
                 "name": str(name),
                 "x": float(coords.get("x", 0.0)),
                 "y": float(coords.get("y", 0.0)),
                 "yaw": float(coords.get("yaw", 0.0)),
-                "note": note,
+                "note": str(note),
                 "frame_id": "map",
             })
 
         self.batch_waypoints = loaded
         self.refresh_batch_waypoint_views()
-        self.append_log(f"[Config] Đã nạp {len(loaded)} điểm tuần tra từ {CONFIG_DIR}.")
+
+        # Đồng bộ nhanh sang config/locations.yaml & config/routes.yaml để các ROS node (mission_controller) đọc
+        self._sync_active_config_files(locations=locations, routes=routes)
+
+        self.append_log(f"[Config] Đã nạp {len(loaded)} điểm tuần tra từ {source_name}.")
         if not silent:
-            QMessageBox.information(self, "Nạp cấu hình thành công", f"Đã nạp {len(loaded)} điểm tuần tra từ locations.yaml & routes.yaml.")
+            QMessageBox.information(
+                self,
+                "Nạp cấu hình thành công",
+                f"Đã nạp {len(loaded)} điểm tuần tra từ:\n{source_name}",
+            )
         return True
 
     def _sync_waypoints_from_table(self):
@@ -2280,21 +2368,33 @@ class MainWindow(QWidget):
                 QMessageBox.warning(self, "Chưa có điểm nào", "Hãy chấm ít nhất 1 điểm trên bản đồ trước khi lưu lộ trình.")
             return False
 
+        resolver = getattr(self, "_resolve_map_waypoints_file", None)
+        target_wp_file = resolver() if resolver else os.path.join(CONFIG_DIR, "locations.yaml")
+        os.makedirs(os.path.dirname(os.path.abspath(target_wp_file)), exist_ok=True)
         os.makedirs(CONFIG_DIR, exist_ok=True)
         loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
         route_file = os.path.join(CONFIG_DIR, "routes.yaml")
 
         try:
             locations = {}
-            if os.path.exists(loc_file):
-                with open(loc_file, "r", encoding="utf-8") as f:
-                    locations = yaml.safe_load(f) or {}
-            routes = {}
-            if os.path.exists(route_file):
-                with open(route_file, "r", encoding="utf-8") as f:
-                    routes = yaml.safe_load(f) or {}
+            # Bảo toàn các điểm đặc biệt (khoihanh, tram_cho) nếu đã lưu trước đó trong target_wp_file hoặc loc_file
+            if os.path.exists(target_wp_file):
+                try:
+                    with open(target_wp_file, "r", encoding="utf-8") as f:
+                        old_doc = yaml.safe_load(f) or {}
+                        if isinstance(old_doc.get("locations"), dict):
+                            locations = old_doc["locations"]
+                except Exception:
+                    locations = {}
+            elif os.path.exists(loc_file):
+                try:
+                    with open(loc_file, "r", encoding="utf-8") as f:
+                        locations = yaml.safe_load(f) or {}
+                except Exception:
+                    locations = {}
 
             route_names = []
+            wp_list = []
             for wp in self.batch_waypoints:
                 name = str(wp["name"])
                 if name not in ("khoihanh", "tram_cho"):
@@ -2303,11 +2403,32 @@ class MainWindow(QWidget):
                     "x": float(wp["x"]),
                     "y": float(wp["y"]),
                     "yaw": float(wp.get("yaw", 0.0)),
+                    "note": str(wp.get("note", "")),
                 }
+                wp_list.append({
+                    "name": name,
+                    "x": float(wp["x"]),
+                    "y": float(wp["y"]),
+                    "yaw": float(wp.get("yaw", 0.0)),
+                    "note": str(wp.get("note", "")),
+                })
             if not route_names:
                 route_names = [str(wp["name"]) for wp in self.batch_waypoints]
-            routes["patrol_route"] = route_names
+            routes = {"patrol_route": route_names}
 
+            map_name_str = os.path.basename(self.selected_map_file) if getattr(self, "selected_map_file", "") else "default_map"
+            payload = {
+                "map_name": map_name_str,
+                "locations": locations,
+                "routes": routes,
+                "waypoints": wp_list,
+            }
+
+            # 1. Ghi file waypoints riêng của map
+            with open(target_wp_file, "w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, allow_unicode=True, sort_keys=False)
+
+            # 2. Ghi ra config/locations.yaml & routes.yaml dùng chung
             with open(loc_file, "w", encoding="utf-8") as f:
                 yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
             with open(route_file, "w", encoding="utf-8") as f:
@@ -2322,17 +2443,17 @@ class MainWindow(QWidget):
             self.ros_node.sync_patrol_config(self.batch_waypoints, route_name="patrol_route")
 
         self.refresh_batch_waypoint_views()
-        self.append_log(f"[Config] Đã lưu {len(self.batch_waypoints)} điểm vào locations.yaml & routes.yaml.")
+        self.append_log(f"[Config] Đã lưu {len(self.batch_waypoints)} điểm vào {os.path.basename(target_wp_file)} & {CONFIG_DIR}.")
         if show_dialog:
             QMessageBox.information(
                 self,
                 "Đã lưu lộ trình",
-                f"Đã lưu {len(self.batch_waypoints)} điểm vào:\n- {loc_file}\n- {route_file}\n\nLộ trình tuần tra: {' ➔ '.join(route_names)}",
+                f"Đã lưu {len(self.batch_waypoints)} điểm vào:\n- {target_wp_file}\n- {loc_file}\n- {route_file}\n\nLộ trình tuần tra: {' ➔ '.join(route_names)}",
             )
         return True
 
     def _save_special_location(self, name: str, x: float, y: float, yaw: float):
-        """Lưu một tọa độ đặc biệt (khoihanh, tram_cho) vào locations.yaml"""
+        """Lưu tọa độ đặc biệt (khoihanh, tram_cho) vào cả file map-specific và locations.yaml"""
         os.makedirs(CONFIG_DIR, exist_ok=True)
         loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
         locations = {}
@@ -2343,21 +2464,81 @@ class MainWindow(QWidget):
             except Exception as e:
                 self.append_log(f"[Config] Lỗi đọc locations.yaml: {e}")
                 locations = {}
-        locations[name] = {
+
+        note_str = "Điểm cất robot / Vạch xuất phát" if name == "khoihanh" else "Trạm chờ đón khách"
+        loc_data = {
             "x": round(float(x), 3),
             "y": round(float(y), 3),
             "yaw": float(yaw),
+            "note": note_str,
         }
+        locations[name] = loc_data
+
+        saved_ok = False
         try:
             with open(loc_file, "w", encoding="utf-8") as f:
                 yaml.safe_dump(locations, f, allow_unicode=True, sort_keys=False)
-            return True
+            saved_ok = True
         except Exception as e:
             self.append_log(f"[Config] Lỗi ghi {name} vào locations.yaml: {e}")
-            return False
+
+        # Đồng bộ tiếp vào file map-specific waypoints nếu đang mở map
+        resolver = getattr(self, "_resolve_map_waypoints_file", None)
+        target_wp_file = resolver() if resolver else None
+        if target_wp_file and os.path.basename(target_wp_file) != "locations.yaml":
+            try:
+                map_doc = {}
+                if os.path.exists(target_wp_file):
+                    with open(target_wp_file, "r", encoding="utf-8") as f:
+                        map_doc = yaml.safe_load(f) or {}
+                if "locations" not in map_doc or not isinstance(map_doc["locations"], dict):
+                    map_doc["locations"] = {}
+                map_doc["locations"][name] = loc_data
+
+                if "waypoints" in map_doc and isinstance(map_doc["waypoints"], list):
+                    found = False
+                    for wp in map_doc["waypoints"]:
+                        if wp.get("name") == name:
+                            wp["x"] = loc_data["x"]
+                            wp["y"] = loc_data["y"]
+                            wp["yaw"] = loc_data["yaw"]
+                            wp["note"] = note_str
+                            found = True
+                            break
+                    if not found:
+                        map_doc["waypoints"].insert(0, {
+                            "name": name,
+                            "x": loc_data["x"],
+                            "y": loc_data["y"],
+                            "yaw": loc_data["yaw"],
+                            "note": note_str,
+                        })
+
+                with open(target_wp_file, "w", encoding="utf-8") as f:
+                    yaml.safe_dump(map_doc, f, allow_unicode=True, sort_keys=False)
+                self.append_log(f"[Config] Đã cập nhật '{name}' vào file map: {os.path.basename(target_wp_file)}")
+            except Exception as e:
+                self.append_log(f"[Config] Lỗi cập nhật {name} vào {target_wp_file}: {e}")
+
+        return saved_ok
 
     def _get_special_location(self, name: str):
-        """Đọc tọa độ đặc biệt (khoihanh, tram_cho) từ locations.yaml"""
+        """Đọc tọa độ đặc biệt (khoihanh, tram_cho): Ưu tiên file theo map -> locations.yaml -> batch_waypoints"""
+        resolver = getattr(self, "_resolve_map_waypoints_file", None)
+        target_wp_file = resolver() if resolver else None
+        if target_wp_file and os.path.isfile(target_wp_file) and os.path.basename(target_wp_file) != "locations.yaml":
+            try:
+                with open(target_wp_file, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f) or {}
+                    locs = data.get("locations", {})
+                    if isinstance(locs, dict) and name in locs and isinstance(locs[name], dict):
+                        return locs[name]
+                    for wp in data.get("waypoints", []):
+                        if isinstance(wp, dict) and wp.get("name") == name:
+                            return {"x": float(wp.get("x", 0.0)), "y": float(wp.get("y", 0.0)), "yaw": float(wp.get("yaw", 0.0))}
+            except Exception:
+                pass
+
         loc_file = os.path.join(CONFIG_DIR, "locations.yaml")
         if os.path.exists(loc_file):
             try:
@@ -2582,7 +2763,11 @@ class MainWindow(QWidget):
         if folder: self.map_dir = folder; self.refresh_map_list()
     def choose_map_file(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Chọn file map YAML", self.map_dir if os.path.exists(self.map_dir) else os.path.expanduser("~"), "YAML files (*.yaml *.yml)")
-        if file_path: self.selected_map_file = file_path; self.lbl_selected_map.setText(f"Map đang dùng: {file_path}"); self.append_log(f"Đã chọn map thủ công: {file_path}")
+        if file_path:
+            self.selected_map_file = file_path
+            self.lbl_selected_map.setText(f"Map đang dùng: {file_path}")
+            self.append_log(f"Đã chọn map thủ công: {file_path}")
+            self.load_patrol_config_from_yaml(silent=True)
     def refresh_map_list(self):
         os.makedirs(self.map_dir, exist_ok=True); self.lbl_map_folder.setText(f"Map folder: {self.map_dir}")
         files = sorted(glob.glob(os.path.join(self.map_dir, "*.yaml"))) + sorted(glob.glob(os.path.join(self.map_dir, "*.yml")))
@@ -2595,12 +2780,16 @@ class MainWindow(QWidget):
             self.cmb_map_files.setCurrentIndex(pick_index)
             self.selected_map_file = self.cmb_map_files.currentData()
             self.lbl_selected_map.setText(f"Map đang dùng: {self.selected_map_file}")
+            self.load_patrol_config_from_yaml(silent=True)
         else:
             self.selected_map_file = ""; self.lbl_selected_map.setText("Map đang dùng: chưa có file YAML trong folder")
         self.append_log(f"Refresh map list: tìm thấy {len(files)} file.")
     def on_selected_map_changed(self):
         fpath = self.cmb_map_files.currentData()
-        if fpath: self.selected_map_file = fpath; self.lbl_selected_map.setText(f"Map đang dùng: {fpath}")
+        if fpath:
+            self.selected_map_file = fpath
+            self.lbl_selected_map.setText(f"Map đang dùng: {fpath}")
+            self.load_patrol_config_from_yaml(silent=True)
 
     def ros_prefix(self):
         return f"source '{ROS_SETUP}' && source '{WS_SETUP}' && "
