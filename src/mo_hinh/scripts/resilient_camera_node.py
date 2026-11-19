@@ -120,15 +120,16 @@ class ResilientCameraNode(Node):
             except Exception as gst_err:
                 self.get_logger().debug(f"[RESILIENT_CAM] GStreamer pipeline không khả dụng: {gst_err}")
 
-            # 2. Fallback sang V4L2 Native với thiết lập FourCC MJPG
+            # 2. V4L2 Native với thiết lập FourCC MJPG
             if cap is None:
-                dev_idx = int(target_dev.replace("/dev/video", "")) if target_dev.startswith("/dev/video") else target_dev
-                # Thử mở bằng index số nguyên trước, nếu không được thì mở bằng đường dẫn chuỗi
-                cap_v4l = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
+                # Ưu tiên mở trực tiếp bằng đường dẫn thiết bị (vd: '/dev/video4', cv2.CAP_V4L2)
+                cap_v4l = cv2.VideoCapture(str(target_dev), cv2.CAP_V4L2)
                 if not cap_v4l.isOpened():
-                    cap_v4l = cv2.VideoCapture(target_dev)
-                if not cap_v4l.isOpened() and isinstance(dev_idx, int):
-                    cap_v4l = cv2.VideoCapture(dev_idx)
+                    cap_v4l = cv2.VideoCapture(str(target_dev))
+                if not cap_v4l.isOpened():
+                    dev_idx = int(target_dev.replace("/dev/video", "")) if str(target_dev).startswith("/dev/video") else target_dev
+                    if isinstance(dev_idx, int):
+                        cap_v4l = cv2.VideoCapture(dev_idx, cv2.CAP_V4L2)
 
                 if cap_v4l.isOpened():
                     # Ép FOURCC MJPG và thiết lập độ phân giải / FPS
