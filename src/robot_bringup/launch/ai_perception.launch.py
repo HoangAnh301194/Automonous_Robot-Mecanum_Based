@@ -145,7 +145,7 @@ def generate_launch_description():
         DeclareLaunchArgument('ai_video_device', default_value='auto'),
         DeclareLaunchArgument('ai_color_width', default_value='640'),
         DeclareLaunchArgument('ai_color_height', default_value='480'),
-        DeclareLaunchArgument('ai_color_fps', default_value='30'),
+        DeclareLaunchArgument('ai_color_fps', default_value='15'),
         DeclareLaunchArgument('front_obstacle_config', default_value=default_front_cfg),
         DeclareLaunchArgument('rear_obstacle_config', default_value=default_rear_cfg),
         DeclareLaunchArgument('obstacle_debug', default_value='false'),

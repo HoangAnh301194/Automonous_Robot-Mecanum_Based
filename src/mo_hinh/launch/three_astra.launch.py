@@ -253,8 +253,8 @@ def generate_launch_description():
             description='AI RGB height (default: 480, or 720 for HD).',
         ),
         DeclareLaunchArgument(
-            'ai_color_fps', default_value='30',
-            description='AI RGB MJPEG FPS (default: 30).',
+            'ai_color_fps', default_value='15',
+            description='AI RGB MJPEG FPS (default: 15).',
         ),
         DeclareLaunchArgument(
             'ai_serial', default_value='17122611013',

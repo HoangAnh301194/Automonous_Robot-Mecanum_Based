@@ -31,7 +31,7 @@ class ResilientCameraNode(Node):
         self.declare_parameter("video_device", "/dev/video0")
         self.declare_parameter("image_width", 640)
         self.declare_parameter("image_height", 480)
-        self.declare_parameter("framerate", 30.0)
+        self.declare_parameter("framerate", 15.0)
         self.declare_parameter("camera_name", "ai_camera")
         self.declare_parameter("frame_id", "ai_camera_color_optical_frame")
         self.declare_parameter("reconnect_interval", 1.0)
