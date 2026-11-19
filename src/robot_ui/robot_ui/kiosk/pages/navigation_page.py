@@ -1493,8 +1493,15 @@ class NavigationPage(QWidget):
         self._standby_wp: dict[str, Any] | None = None
 
         self._init_ui()
-        default_map = Path("my_map/a2_amcl.yaml")
-        if default_map.is_file():
+        candidate_maps = [
+            Path("my_map/my_map/khoaa1_final_amcl.yaml"),
+            Path("my_map/khoaa1_final_amcl.yaml"),
+            Path.home() / "ros2_ws/my_map/my_map/khoaa1_final_amcl.yaml",
+            Path.home() / "ros2_ws/my_map/khoaa1_final_amcl.yaml",
+            Path("my_map/a2_amcl.yaml"),
+        ]
+        default_map = next((p for p in candidate_maps if p.is_file()), None)
+        if default_map:
             self.load_map_yaml(default_map)
         else:
             self._load_patrol_from_yaml(silent=True)
