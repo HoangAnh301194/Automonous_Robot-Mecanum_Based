@@ -319,6 +319,7 @@ class RosInterface(Node):
         self.cli_trigger_serve = self.create_client(Trigger, "/mission/trigger_serve")
         self.cli_trigger_finish = self.create_client(Trigger, "/mission/trigger_finish")
         self.cli_reload_route = self.create_client(Trigger, "/mission/reload_route")
+        self.cli_reset_emergency = self.create_client(Trigger, "/mission/reset_emergency")
         if HAS_CONFIG_SRVS:
             self.cli_save_location = self.create_client(SaveLocation, "/config/save_location")
             self.cli_save_route = self.create_client(SaveRoute, "/config/save_route")
@@ -1362,9 +1363,13 @@ class MainWindow(QWidget):
         self.btn_start_ai = QPushButton("Start AI (Cam + YOLO)"); self.btn_stop_ai = QPushButton("Stop AI")
         self.btn_start_backend = QPushButton("Start Backend (Mission)"); self.btn_stop_backend = QPushButton("Stop Backend")
         self.btn_start_kiosk = QPushButton("Start Kiosk UI"); self.btn_stop_kiosk = QPushButton("Stop Kiosk UI")
-        self.btn_cancel_nav2 = QPushButton("⛔ DỪNG KHẨN CẤP / HỦY GOAL")
+        self.btn_cancel_nav2 = QPushButton("⛔ DỪNG KHẨN CẤP")
         self.btn_cancel_nav2.setStyleSheet("background-color: #dc2626; color: white; font-weight: bold; padding: 7px; border-radius: 4px;")
         self.btn_cancel_nav2.setToolTip("Hủy mục tiêu Nav2 lập tức và phanh robot đứng im tại chỗ (không tắt Nav2)")
+        self.btn_reset_emergency = QPushButton("🟢 GIẢI PHÓNG KHẨN CẤP")
+        self.btn_reset_emergency.setStyleSheet("background-color: #15803d; color: white; font-weight: bold; padding: 7px; border-radius: 4px;")
+        self.btn_reset_emergency.setToolTip("Gọi /mission/reset_emergency mở khóa dừng khẩn cấp và làm mới trạng thái")
+        self.btn_reset_emergency.clicked.connect(self.on_reset_emergency)
         self.btn_start_all = QPushButton("Start All"); self.btn_stop_all = QPushButton("Stop All")
         self.edt_kill_node = QLineEdit("rviz2"); self.btn_kill_node = QPushButton("Kill Node")
         self.btn_cleanup_all = QPushButton("Dọn sạch ROS2")
@@ -1401,7 +1406,8 @@ class MainWindow(QWidget):
         control_layout.addWidget(self.btn_start_ai, 5, 0); control_layout.addWidget(self.btn_stop_ai, 5, 1)
         control_layout.addWidget(self.btn_start_backend, 6, 0); control_layout.addWidget(self.btn_stop_backend, 6, 1)
         control_layout.addWidget(self.btn_start_kiosk, 7, 0); control_layout.addWidget(self.btn_stop_kiosk, 7, 1)
-        control_layout.addWidget(self.btn_cancel_nav2, 8, 0, 1, 2)
+        control_layout.addWidget(self.btn_cancel_nav2, 8, 0)
+        control_layout.addWidget(self.btn_reset_emergency, 8, 1)
         control_layout.addWidget(self.btn_start_all, 9, 0); control_layout.addWidget(self.btn_stop_all, 9, 1)
         control_layout.addWidget(QLabel("Node/pattern to kill:"), 10, 0); control_layout.addWidget(self.edt_kill_node, 10, 1)
         control_layout.addWidget(self.btn_kill_node, 11, 0); control_layout.addWidget(self.btn_cleanup_all, 11, 1)
@@ -1703,8 +1709,15 @@ class MainWindow(QWidget):
             "background-color: #d97706; color: white; font-size: 14px; font-weight: bold; padding: 12px; border-radius: 6px;"
         )
         self.btn_fsm_pause_patrol.clicked.connect(self.on_fsm_pause_patrol)
+        self.btn_fsm_reset_emergency = QPushButton("🟢 GIẢI PHÓNG KHẨN CẤP")
+        self.btn_fsm_reset_emergency.setStyleSheet(
+            "background-color: #15803d; color: white; font-size: 14px; font-weight: bold; padding: 12px; border-radius: 6px;"
+        )
+        self.btn_fsm_reset_emergency.setToolTip("Gọi /mission/reset_emergency mở khóa dừng khẩn cấp và làm mới trạng thái FSM")
+        self.btn_fsm_reset_emergency.clicked.connect(self.on_reset_emergency)
         ctrl_mission_layout.addWidget(self.btn_fsm_start_patrol)
         ctrl_mission_layout.addWidget(self.btn_fsm_pause_patrol)
+        ctrl_mission_layout.addWidget(self.btn_fsm_reset_emergency)
         ctrl_mission_group.setLayout(ctrl_mission_layout)
         mission_right.addWidget(ctrl_mission_group)
 
@@ -2508,6 +2521,23 @@ class MainWindow(QWidget):
             QMessageBox.warning(self, "ROS chưa sẵn sàng", "ROS node chưa khởi động.")
             return
         self.ros_node.call_mission_trigger(self.ros_node.cli_pause_patrol, "Tạm dừng Tuần Tra (/mission/pause_patrol)")
+
+    def on_reset_emergency(self):
+        """Mở khóa dừng khẩn cấp (/mission/reset_emergency) và làm mới trạng thái hệ thống"""
+        ok = False
+        if self.ros_node is not None and hasattr(self.ros_node, "cli_reset_emergency"):
+            ok = self.ros_node.call_mission_trigger(self.ros_node.cli_reset_emergency, "Giải phóng Khẩn Cấp (/mission/reset_emergency)")
+        self._set_fsm_banner("🟢 ĐÃ GIẢI PHÓNG KHẨN CẤP", "Hệ thống an toàn đã được mở khóa. Robot sẵn sàng nhận lệnh mới.", "#16a34a", "#ffffff")
+        self.append_log("[Emergency] Đã giải phóng dừng khẩn cấp và làm mới trạng thái FSM.")
+        if not ok:
+            try:
+                subprocess.Popen(
+                    ["ros2", "service", "call", "/mission/reset_emergency", "std_srvs/srv/Trigger", "{}"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
 
     def on_fsm_mock_human_toggled(self, checked):
         if self.ros_node is None:

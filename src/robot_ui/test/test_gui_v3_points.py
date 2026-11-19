@@ -118,5 +118,12 @@ def test_mainwindow_has_start_and_standby_buttons(qapp):
     assert hasattr(win, "btn_navigate_standby_pose")
     assert hasattr(win, "btn_tab1_relocalize")
     assert hasattr(win, "btn_tab1_standby")
+    assert hasattr(win, "btn_reset_emergency")
+    assert hasattr(win, "btn_fsm_reset_emergency")
+
+    # Test on_reset_emergency method execution
+    win.on_reset_emergency()
+    assert "GIẢI PHÓNG" in win.lbl_fsm_state.text()
     win.close()
+
 
